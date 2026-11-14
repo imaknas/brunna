@@ -390,10 +390,9 @@ def cmd_models():
     import completion
     import llm
     pins = (hubconf.get("llm") or {}).get("points") or {}
-    providers = completion.settings() is not None
     for name, spec in llm.points()["points"].items():
         group = spec.get("model_group") or "standard"
-        if providers and spec.get("shape") == "completion":
+        if completion.routed(name) and spec.get("shape") == "completion":
             try:
                 t = completion.resolve(name, spec)
                 where, model = f"llm.providers.{t['provider']}", t["model"]
@@ -409,6 +408,22 @@ def cmd_models():
         for full, point, tier in tiered:
             spec = {**(llm.points()["points"].get(point) or {}), "model_group": tier}
             print(f"{full:24} {llm.model_for(point, spec) or _('(tool default)'):16} {_('tier {tier}', tier=tier)} ({point})")
+    calls, stale = llm.project_calls()
+    if calls or stale:
+        print(_("\nProjects' model calls (registry models:; the owner pins one to a provider in llm.points.<project>/<point>):"))
+        for key, tier, t, why in calls:
+            if t is None:
+                where, model = f"⚠️ {why}", "?"
+            elif t.get("group") is None:   # completion.runtime_target: the runtime's own completion interface
+                where, model = _("runtime {name}, tier {tier}", name=t["provider"], tier=tier), t["model"]
+            else:
+                where = f"llm.providers.{t['provider']} ({t['location']}, " + (
+                    "llm.points)" if (pins.get(key) or {}).get("provider") else f"llm.use.{tier})")
+                model = t["model"]
+            print(f"{key:24} {model or _('(tool default)'):16} {where}")
+        for key in stale:
+            print(_("{key:24} ⚠️ llm.points pins a call {project} does not declare (registry models: / agents:)",
+                    key=key, project=key.split("/", 1)[0]))
     print(_("\nTo change one: schedulectl set-model <point|state|index|consolidate> <model|default>"))
 
 

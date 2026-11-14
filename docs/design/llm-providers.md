@@ -138,6 +138,10 @@ vendors):
 - **No `llm.providers` = handed to `runtime.default`**: models follow the runtime adapter's group table
   (`runtime_<name>.MODELS`), and `llm.points.<point>.model` can be written alone to override it. Across the whole
   platform, models are chosen only in `llm.model_for` (landed 10-29, `models.env` removed).
+- **`llm.providers` without `use`** (11-15) = the providers serve only the points pinned to them
+  (`llm.points.<point>.provider`); every other point stays on `runtime.default` exactly as with no `llm.providers`
+  (`completion.routed`). Adding a provider for one point never moves the others. With `use`, every completion point goes
+  by its group as before (a group `use` leaves out is refused, as before).
 - `schedulectl set-model` rewrites `points` in `hub.json`.
 
 ### 3. API keys
@@ -302,6 +306,89 @@ What the numbers do **not** show yet:
 3. **todo-format: switch with state, or after a few clean shadow runs** (passes check-state-todo, no marker problems).
 4. Confirm the default for an unset part (completion when this machine can't run the agent version). The other choice is that
    the librarian stays off for API-key-only users until state's comparison is clean.
+
+## Projects' calls on a provider (11-15)
+
+The owner's decision (11-15): a project's declared model call (`models: {<point>: {tier}}`, called with `brunna
+complete <point>`; `llm.py project`) can be served by a local model, so a project gets an independent reviewer from a
+non-Claude model family without any network access of its own: the platform makes the call.
+
+### Who names the provider: the owner, by pinning the call
+
+`llm.points["<project>/<point>"] = {"provider": "<one of llm.providers>", "model"?: "<name>"}` in the owner's
+`brunna.json`. The project's registry entry is unchanged: it names only a tier.
+
+Why not a `provider:` in the project's `models:` declaration:
+
+- `models:` is the project's own (it changes it through manifest.update, with no approval). A provider named there would
+  let a project route its content, and the platform's money, to any provider the owner configured for other reasons.
+  The privacy routing that would bound that (`material`, `location`) is paused until the evaluators can measure it, and
+  `metered_models` covers only cost. A pin in the owner's config needs no new security field.
+- The 10-31 decision for projects' calls was "tier only, never model names"; this keeps it.
+- The pin already existed: `<project>/<point>` is the name the call runs under (usage rows, failures), and
+  `completion.resolve` reads `llm.points` by it. What was missing: the config check refused any key that isn't a
+  declared judgment point, and configuring a provider moved every point (next section).
+
+The cost: a project can't pick a model itself; it asks the owner (`brunna send --to owner`), who adds one line.
+
+### Adding a provider moves nothing else
+
+Before 11-15, `llm.providers` existing at all sent every completion point to `completion.resolve`, and the config
+check required `use`. So configuring Ollama for one call would have moved, or refused, the platform's own points.
+Now (`completion.routed`): a point goes to the providers when it is pinned to one, or when `use` is set; otherwise it
+goes to `runtime.default`'s completion interface with the model `llm.model_for` computes, the same target as with no
+`llm` block. `tests/test_project_local_model.py` compares every completion point's target (and other projects'
+calls) with no `llm` block against `providers: {local}` with no `use`, and with one call pinned. `use` is optional in
+the config check; doctor's "model groups" line shows only when `use` is set.
+
+### What the config check, doctor and `schedulectl models` say
+
+- Config check: `<project>/<name>` keys are checked for form only (`<project>/<lowercase-name>`), the provider must be
+  one of `llm.providers`, and `runtime:` is refused on them (a project's call runs where its judgment point runs). It
+  doesn't check the project declares the call: a project's own manifest.update must never break the owner's config
+  check.
+- `schedulectl models` lists every project's declared call with the provider and model it goes to (or the runtime and
+  tier), and pins naming a call the project no longer declares.
+- `brunna doctor`: one line per call served by a provider, a red line for a call with nowhere to go, a warning for a
+  stale pin.
+
+### Ollama specifics
+
+- **Context.** A model named in the provider's `models` with `{name, context}` keeps that context when a pin names it.
+  Otherwise the provider asks Ollama (`/api/show`, `model_info.<family>.context_length`, optional `model_context` of the
+  completion interface) and `completion.run`'s length check uses it: a prompt that doesn't fit is refused before
+  sending, never truncated by Ollama.
+- **num_ctx** is always sent, sized to the request: the prompt's estimate plus `max_tokens` (8192 for projects' calls),
+  rounded up to a power of two, at least 8192, never above the context. Ollama's default is a few thousand tokens
+  (silent truncation), and the model's whole context (262144 for the qwen3.6 and gemma4 builds) would make it reserve
+  memory for a window the call never uses. Powers of two keep the number of distinct sizes, and so model reloads, small.
+- **Thinking.** `think: false` for a model `/api/show` lists as thinking (and when that can't be read); none for one that
+  isn't. `<think>…</think>` left in the answer is stripped for text answers too; an empty answer is an error.
+- **Structured output.** `format: <schema>` first; the MLX backend answers 501, and the schema goes into the prompt
+  (unchanged). minischema validates either way.
+- **Time.** A project's call has the platform's 600 s (cap-runner's deadline and each request's timeout). A large local
+  model on a long prompt can need more; a per-point time limit is in direction.md's backlog.
+- **Failures** are said with Ollama's reason (not reachable, model not pulled, empty answer) and published as
+  `job.failed`; nothing else is tried.
+- **Usage**: one row per call in `llm-usage.jsonl` with the project, `billing: local` (the provider's
+  `location: local`, which needs a `base_url` on this machine or a private network), shown on the status page's
+  "model calls by project" with no cost.
+
+### The owner's setup
+
+```jsonc
+"llm": {
+  "providers": {
+    "local": {"impl": "ollama", "base_url": "http://127.0.0.1:11434", "location": "local",
+              "models": {"strong": {"name": "<model>", "context": 65536}}}
+  },
+  "points": {"<project>/<point>": {"provider": "local", "model": "<model>"}}
+}
+```
+
+No `use`: every other point stays where it is. `models` lists the model so `brunna llm health` checks it is pulled,
+and so the context written there caps the window (leave `context` out to take the model's own). `brunna config check`,
+then `schedulectl models` shows the call on `llm.providers.local`.
 
 ## Out of scope (later)
 

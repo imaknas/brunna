@@ -74,5 +74,8 @@
  "Running {name} here (no service manager); its output also goes to {log}": "在這裡直接跑 {name}(沒有服務管理器);輸出也寫進 {log}",
  "{name} finished (exit {code}); today's schedule won't run it again": "{name} 跑完了(exit {code});今天的排程不會再跑它",
  "\nAgent jobs with a tier (registry tier:; the point's pin above still wins):": "\n選了強度的 agent job(registry tier:;上面判斷點的指定仍然優先):",
- "tier {tier}": "強度 {tier}"
+ "tier {tier}": "強度 {tier}",
+ "\nProjects' model calls (registry models:; the owner pins one to a provider in llm.points.<project>/<point>):": "\n專案的模型呼叫(登記表 models:;擁有者在 llm.points.<專案>/<點> 把某一個指定給 provider):",
+ "runtime {name}, tier {tier}": "執行環境 {name},強度 {tier}",
+ "{key:24} ⚠️ llm.points pins a call {project} does not declare (registry models: / agents:)": "{key:24} ⚠️ llm.points 指定了 {project} 沒宣告的呼叫(登記表 models: / agents:)"
 }

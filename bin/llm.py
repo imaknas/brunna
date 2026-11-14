@@ -132,12 +132,14 @@ def auth_env(spec: dict, rt) -> tuple[dict | None, str]:
 
 
 def completion_target(point: str, spec: dict, model: str | None = None) -> dict:
-    """Where a shape: completion judgment point goes. hub.json has llm.providers → completion.resolve picks the provider and
-    model (model is not used); otherwise → runtime.default's completion interface, with the model model_for computes.
-    Raises completion.Refused when it has nowhere to go (no provider, and a runtime with no completion interface)."""
+    """Where a shape: completion judgment point (or a project's declared call, <project>/<point>) goes. Served by
+    llm.providers (completion.routed: pinned to a provider, or llm.use set) → completion.resolve picks the provider and
+    model (model is not used); otherwise → runtime.default's completion interface, with the model model_for computes,
+    exactly as without llm.providers. Raises completion.Refused when it has nowhere to go (no provider, and a runtime
+    with no completion interface)."""
     import completion
     import runtime_ports
-    if completion.settings():
+    if completion.routed(point):
         return completion.resolve(point, spec)
     name = point_runtime(point, spec) or runtime_ports.default_name()
     if "completion" not in runtime_ports.capabilities(name):
@@ -145,6 +147,31 @@ def completion_target(point: str, spec: dict, model: str | None = None) -> dict:
                                    "(set up an LLM provider)", name=name))
     return completion.runtime_target(name, model if model is not None else model_for(point, spec, runtime=name),
                                      auth_mode(spec))
+
+
+def project_calls() -> tuple[list[tuple[str, str, dict | None, str | None]], list[str]]:
+    """For doctor and schedulectl models: every project's declared model call as (<project>/<point>, tier, the target
+    it goes to or None, why it has nowhere to go or None), and the owner's pins (llm.points.<project>/<name>) naming a
+    call the project no longer declares (in models: or agents:)."""
+    import completion
+    projects = hubconf.projects()
+    calls = []
+    for proj, doc in sorted(projects.items()):
+        for point, decl in sorted(((doc or {}).get("models") or {}).items()):
+            key = f"{proj}/{point}"
+            spec = {"shape": "completion", "model_group": (decl or {}).get("tier") or "standard"}
+            try:
+                calls.append((key, spec["model_group"], completion_target(key, spec), None))
+            except completion.Refused as e:
+                calls.append((key, spec["model_group"], None, str(e)))
+    pins = (hubconf.get("llm") or {}).get("points") or {}
+    stale = []
+    for key in sorted(k for k in pins if isinstance(k, str) and "/" in k):
+        proj, _sep, name = key.partition("/")
+        doc = projects.get(proj) or {}
+        if name not in (doc.get("models") or {}) and name not in (doc.get("agents") or {}):
+            stale.append(key)
+    return calls, stale
 
 
 def run_completion(a, spec: dict, prompt: str, model: str | None) -> int:
@@ -182,9 +209,10 @@ def project_call(project: str, point: str, request: pathlib.Path) -> int:
     {"prompt", "schema"?} written by cap-runner in platform state (never read from the project's folder). Checked
     before anything is sent: the point is declared in the project's registry entry (models: {point: {tier}}); the
     provider it resolves to is metered (completion.metered) only if the owner set metered_models: true. Not available
-    → refused with the reason, no other provider or model is tried. Usage rows carry the project."""
+    → refused with the reason, no other provider or model is tried. Usage rows carry the project.
+    The project names only a tier; the owner may pin the call to one of llm.providers (llm.points.<project>/<point>:
+    {provider, model?}), e.g. a local model as an independent reviewer. Nothing a project writes picks a provider."""
     import completion
-    import runtime_ports
     name = f"{project}/{point}"
     spec = {"shape": "completion", "model_group": "standard"}
     doc = hubconf.projects().get(project)
@@ -201,14 +229,7 @@ def project_call(project: str, point: str, request: pathlib.Path) -> int:
     except (OSError, ValueError, KeyError, TypeError) as e:
         return fail(name, spec, _("cannot read the request: {err}", err=e))
     try:
-        if completion.settings():
-            target = completion.resolve(name, spec)
-        else:
-            rt = runtime_ports.default_name()
-            if "completion" not in runtime_ports.capabilities(rt):
-                return fail(name, spec, _("runtime {name} has no completion interface, and {settings} has no llm "
-                                          "section (set up an LLM provider)", name=rt))
-            target = completion.runtime_target(rt, model_for(name, spec), auth_mode(spec))
+        target = completion_target(name, spec)   # the owner's pin llm.points.<project>/<point> may name a provider
         if completion.metered(target) and doc.get("metered_models") is not True:
             return fail(name, spec, _("{provider}/{model} is pay-per-use and the owner has not allowed metered models for "
                                       "{project} (registry metered_models); not sent", provider=target["provider"],

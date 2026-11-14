@@ -245,8 +245,8 @@ class ConfigErrors(unittest.TestCase):
                         point="consolidate"),
                      zh("use is set but providers is not (to pin only some judgment points' models, write only points)")):
             self.assertTrue(any(want in e for e in errs), (want, errs))
-        self.assertIn(zh("with providers, use is required (which provider serves fast / standard / strong)"),
-                      completion.config_errors({"providers": self.OK["providers"]}))
+        # providers without use serve only the points pinned to them (11-15: a local model for one project's call)
+        self.assertEqual(completion.config_errors({"providers": self.OK["providers"]}), [])
 
 
 class FakeServer:
@@ -340,17 +340,24 @@ class Providers(unittest.TestCase):
 
     def test_ollama_native_api_context_and_schema_fallback(self):
         import provider_ollama
+        provider_ollama._show.cache_clear()
+        self.addCleanup(provider_ollama._show.cache_clear)
         def h(m, p, b):
+            if p == "/api/show":
+                return 200, {"capabilities": ["completion", "thinking"], "model_info": {"x.context_length": 40960}}
             if "format" in b:
                 return 501, {"error": "structured output is unavailable"}
             return 200, {"message": {"content": '{"answer":"o"}'}, "done_reason": "stop", "prompt_eval_count": 7,
                          "eval_count": 8}
         s = self.serve(h)
+        self.assertEqual(provider_ollama.model_context({"base_url": s.url}, "m"), 40960)
         r = provider_ollama.complete(REQ, {"base_url": s.url, "_context": 32768})
         self.assertEqual((r.ok, r.input_tokens), (True, 7))
-        first, second = s.requests[0][3], s.requests[1][3]
-        self.assertEqual(s.requests[0][1], "/api/chat")
-        self.assertEqual(first["options"]["num_ctx"], 32768)
+        first, second = [b for _m, p, _h, b in s.requests if p == "/api/chat"]
+        # the window is sized to the request (at least 8192), never the whole context
+        self.assertEqual(first["options"]["num_ctx"], 8192)
+        self.assertEqual(provider_ollama.num_ctx("x" * 90_000, 8192, 32768), 32768)
+        self.assertEqual(provider_ollama.num_ctx("x" * 30_000, 8192, None), 32768)
         self.assertFalse(first["think"])
         self.assertNotIn("format", second)
         self.assertIn("JSON schema", second["messages"][-1]["content"])

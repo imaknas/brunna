@@ -325,10 +325,12 @@ def llm_modules() -> list[str]:
 
 
 def judgment_points_can_run() -> bool:
-    """an LLM provider in hub.json, or a runtime with a completion interface (doctor checks the same)"""
+    """LLM providers in hub.json serving the groups (llm.use), or a runtime with a completion interface (doctor checks the
+    same); providers without use serve only the points pinned to them"""
     import completion
     import runtime_ports
-    return bool(completion.settings()) or "completion" in runtime_ports.capabilities(runtime_ports.default_name())
+    return bool((completion.settings() or {}).get("use")) \
+        or "completion" in runtime_ports.capabilities(runtime_ports.default_name())
 
 
 def llm_modules_warning(names: list[str]) -> str | None:
@@ -1685,20 +1687,38 @@ def cmd_doctor(argv: list[str]) -> int:
             add("ok" if ok else "bad", _("LLM provider {name}: available", name=name) if ok else
                 _("LLM provider {name}: {reason}", name=name, reason=why),
                 "" if ok else _("see {settings} llm.providers; set the key with brunna llm set-key <provider>"))
-        s = completion.settings()
+    s = completion.settings()
+    if s and s.get("use"):
         add("ok", _("model groups of the judgment points: {groups}",
                     groups=_(", ").join(f"{g}→{s['use'].get(g, _('(not set)'))}" for g in completion.GROUPS)))
     else:
         rt = runtime_ports.default_name()
         if "completion" in runtime_ports.capabilities(rt):
-            add("ok", _("judgment points go to the runtime {runtime} (no llm.providers; schedulectl models shows each point's "
-                       "model)", runtime=rt))
+            add("ok", _("judgment points go to the runtime {runtime} (llm.providers serve only the points pinned to them; "
+                        "schedulectl models shows each point's model)", runtime=rt) if s else
+                _("judgment points go to the runtime {runtime} (no llm.providers; schedulectl models shows each point's "
+                  "model)", runtime=rt))
         else:
             add("bad", _("brunna's decisions (nightly notes, weekly report) have nowhere to run: no AI agent and no "
                          "model provider is set up") if rt == "none" else
                 _("judgment points have nowhere to run: the runtime {runtime} has no completion interface and {settings} "
                   "has no llm.providers", runtime=rt),
                 _("brunna llm setup (pick one: an API key or a local Ollama)"))
+    try:
+        import llm
+        calls, stale = llm.project_calls()
+    except Exception as e:   # what can't be told is said, never skipped
+        calls, stale = [], []
+        add("warn", _("cannot tell where projects' model calls go: {error}", error=e), "schedulectl models")
+    for key, _tier, t, why in calls:
+        if t is None:
+            add("bad", _("project model call {key}: {reason}", key=key, reason=why), "schedulectl models")
+        elif t.get("group") is not None:   # served by a provider (the runtime's own are in the line above)
+            add("ok", _("project model call {key} → {provider} ({location}) {model}", key=key, provider=t["provider"],
+                        location=t["location"], model=t["model"]))
+    for key in stale:
+        add("warn", _("llm.points.{key} pins a call {project} does not declare (registry models: / agents:)", key=key,
+                      project=key.split("/", 1)[0]), _("remove the pin, or have the project declare it"))
 
     uid = os.getuid()
     scheduled = False   # whether a service manager runs this hub's scheduler (said again at the heartbeat below)

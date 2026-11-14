@@ -1,3 +1,5 @@
 {
- "models not on this machine: {models} (ollama pull <name>)": "本機沒有模型:{models}(ollama pull <名稱>)"
+ "models not on this machine: {models} (ollama pull <name>)": "本機沒有模型:{models}(ollama pull <名稱>)",
+ "Ollama at {base} could not be reached: {error}": "連不到 {base} 的 Ollama:{error}",
+ "the model gave an empty answer": "模型回了空的答案"
 }

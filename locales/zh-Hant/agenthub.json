@@ -306,5 +306,11 @@
  "brunna's shared client (route a): {why}; a grant uses dynamic registration or your own app": "brunna 的共用 client(路線 a):{why};授權改用動態註冊或你自己的 app",
  "platform credential {project}/{name}: declared, not granted, and no job lists it": "平台憑證 {project}/{name}:已宣告、未授權,也沒有 job 列出它",
  "brunna's published client document doesn't match this install's: {why}": "brunna 發布的 client 文件和這個安裝的不一致:{why}",
- "tell brunna's maintainers; until it matches, grants use dynamic registration or your own app": "請告訴 brunna 的維護者;一致之前,授權改用動態註冊或你自己的 app"
+ "tell brunna's maintainers; until it matches, grants use dynamic registration or your own app": "請告訴 brunna 的維護者;一致之前,授權改用動態註冊或你自己的 app",
+ "judgment points go to the runtime {runtime} (llm.providers serve only the points pinned to them; schedulectl models shows each point's model)": "判斷點交給執行環境 {runtime}(llm.providers 只接指定給它的點;schedulectl models 看每個點的模型)",
+ "cannot tell where projects' model calls go: {error}": "看不出專案的模型呼叫交給誰:{error}",
+ "project model call {key}: {reason}": "專案模型呼叫 {key}:{reason}",
+ "project model call {key} → {provider} ({location}) {model}": "專案模型呼叫 {key} → {provider}({location}){model}",
+ "llm.points.{key} pins a call {project} does not declare (registry models: / agents:)": "llm.points.{key} 指定了 {project} 沒宣告的呼叫(登記表 models: / agents:)",
+ "remove the pin, or have the project declare it": "拿掉這個指定,或請該專案宣告它"
 }

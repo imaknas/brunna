@@ -39,7 +39,7 @@ def unsupported(point: str) -> str | None:
     pin = ((hubconf.get("llm") or {}).get("points") or {}).get(point) or {}
     name = pin.get("runtime") or spec.get("runtime") or runtime_ports.default_name()
     if spec.get("shape") == "completion":
-        if completion.settings():
+        if completion.routed(point):
             try:
                 impl = completion.resolve(point, spec).get("impl")
             except Exception:   # nowhere to go is the call's own failure, said when it runs

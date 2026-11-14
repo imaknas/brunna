@@ -420,7 +420,8 @@ budgets later, if a project spends a lot).
 - `llm.py project` resolves the actual target (after `llm.points` pins) and refuses before sending if it is metered and
   the project has no `metered_models`. Metered = `completion.metered`: a cloud provider reached with an API key; a
   runtime's own login (subscription / headless token) and local providers are not. Usage rows get `project`; the point
-  is named `<project>/<point>` (pins in `llm.points` use that name).
+  is named `<project>/<point>` (pins in `llm.points` use that name; since 11-15 the owner can pin one to a provider, e.g.
+  a local model, `llm-providers.md` "Projects' calls on a provider").
 - Services' profile now also reads `policy.read` (the registry index): without it `agenthub send`/`complete` inside a
   sandboxed service couldn't tell which project it was in.
 - Not guarded: a project that brings its own API key and calls a provider directly. That is the project's own credential

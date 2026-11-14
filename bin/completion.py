@@ -15,8 +15,15 @@ as before, and this module takes no part):
     "use": {"fast": "<provider>", "standard": "<provider>", "strong": "<provider>"},   point's model_group → provider
     "points": {"<judgment point>": {"provider": "<name>", "model": "<name>"}},           override for one point
                                        (or {"runtime": "<registered runtime>"}: an agent-shaped point on that runtime)
+              "<project>/<point>": {"provider": "<name>", "model"?: "<name>"}            a project's declared model
+                                       call (registry models:), pinned by the owner; the project names only a tier
     "budget": {"daily_usd": 2.0}
   }
+
+Which points the providers serve (routed): a point pinned to a provider (llm.points.<point>.provider), and, when `use`
+is set, every completion point by its group. Without `use`, every point not pinned stays exactly where it is without
+llm.providers: on runtime.default's completion interface. So a provider added for a few points only (a local model
+serving one project's reviewer) moves nothing else.
 
 The handling is the same for every provider (an implementation only "sends it and brings back the raw text"):
   1. before sending, mask strings that look like credentials (one masking point for the whole platform)
@@ -109,9 +116,19 @@ def read_key(conf: dict) -> str | None:
                     var=_("variable name")))
 
 
+def routed(point: str) -> bool:
+    """Whether llm.providers serves this completion point (resolve) rather than runtime.default's completion interface:
+    the point is pinned to a provider, or llm.use is set. Providers without use serve only the points pinned to them."""
+    s = settings()
+    if not s:
+        return False
+    pin = (s.get("points") or {}).get(point)
+    return bool((isinstance(pin, dict) and pin.get("provider")) or s.get("use"))
+
+
 def resolve(point: str, spec: dict) -> dict:
     """Which provider and model this judgment point goes to: llm.points' choice > models[model_group] of the provider
-    llm.use[model_group] names."""
+    llm.use[model_group] names. A pinned model the provider lists in its models keeps that entry's context and price."""
     s = settings()
     if not s:
         raise Refused(_("{settings} has no llm section"))
@@ -124,9 +141,12 @@ def resolve(point: str, spec: dict) -> dict:
     conf = providers.get(name)
     if not isinstance(conf, dict):
         raise Refused(_("llm.providers has no {name}", name=name))
-    entry = pin.get("model") or (conf.get("models") or {}).get(group)
+    models = conf.get("models") or {}
+    entry = pin.get("model") or models.get(group)
     if not entry:
         raise Refused(_("llm.providers.{name}.models has no {group}", name=name, group=group))
+    if isinstance(entry, str):   # a pinned name the provider lists keeps what is written there
+        entry = next((m for m in models.values() if isinstance(m, dict) and m.get("name") == entry), entry)
     m = entry if isinstance(entry, dict) else {"name": entry}
     return {"provider": name, "impl": conf.get("impl"), "conf": conf, "group": group, "model": m.get("name"),
             "context": m.get("context"), "price": m.get("price"), "location": conf.get("location", "cloud")}
@@ -266,14 +286,19 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
                         "one", budget=budget))
     prompt = redact(prompt)
     max_tokens = int(spec.get("max_tokens") or 8192)
-    if target["context"] and estimate_tokens(prompt) + max_tokens > int(target["context"]):
-        raise Refused(_("prompt too long: about {tokens} tokens plus {max_tokens} of output exceed "
-                        "{provider}/{model}'s {context}-token context", tokens=estimate_tokens(prompt), max_tokens=max_tokens,
-                        provider=target["provider"], model=target["model"], context=target["context"]))
     try:
         impl = runtime_ports.load_completion(target["impl"])
     except runtime_ports.Unsupported as e:   # e.g. the command runtime, which has no completion interface: a refusal, said
         raise Refused(str(e)) from None
+    context = target["context"]
+    if not context and callable(getattr(impl, "model_context", None)):
+        # the settings don't say: a provider that can ask the model (a local Ollama's /api/show) does, so the check
+        # below still holds and the provider sizes its window from it
+        context = conf["_context"] = impl.model_context(conf, target["model"])
+    if context and estimate_tokens(prompt) + max_tokens > int(context):
+        raise Refused(_("prompt too long: about {tokens} tokens plus {max_tokens} of output exceed "
+                        "{provider}/{model}'s {context}-token context", tokens=estimate_tokens(prompt), max_tokens=max_tokens,
+                        provider=target["provider"], model=target["model"], context=context))
     req = runtime_ports.CompletionRequest(point=point, prompt=prompt, model=target["model"], schema=schema,
                                           max_tokens=max_tokens, timeout_s=int(spec.get("timeout_s") or 600))
     cost_total, last_errs = 0.0, None
@@ -346,6 +371,9 @@ PRIVATE = re.compile(r"^(?:localhost|127\.\d+\.\d+\.\d+|\[?::1\]?|10\.\d+\.\d+\.
                      r"|172\.(?:1[6-9]|2\d|3[01])\.\d+\.\d+|100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d+\.\d+|[\w.-]+\.ts\.net)$")
 
 
+PROJECT_CALL = re.compile(r"^[^/\s]+/[a-z0-9][a-z0-9-]{0,47}$")   # <project>/<registry.MODEL_POINT>
+
+
 def _strings(o, path=""):
     if isinstance(o, dict):
         for k, v in o.items():
@@ -370,8 +398,7 @@ def config_errors(llm: dict) -> list[str]:
         return errs + [_("providers must be an object")]
     if not providers and llm.get("use"):
         errs.append(_("use is set but providers is not (to pin only some judgment points' models, write only points)"))
-    if providers and not llm.get("use"):
-        errs.append(_("with providers, use is required (which provider serves fast / standard / strong)"))
+    # providers without use: only the points pinned to one move (routed); the rest stay on runtime.default
     for name, p in providers.items():
         if not isinstance(p, dict):
             errs.append(_("providers.{name} must be an object", name=name))
@@ -421,9 +448,19 @@ def config_errors(llm: dict) -> list[str]:
         known, declared = None, {}
     import runtime_ports
     for pt, pin in (llm.get("points") or {}).items():
-        if known is not None and pt not in known:
+        # <project>/<name>: a project's declared call (registry models: or agents:). Only its form is checked here: a
+        # project's own manifest.update must never break the owner's config check; doctor and schedulectl models say
+        # when the project no longer declares it
+        project_call = isinstance(pt, str) and "/" in pt
+        if project_call and not PROJECT_CALL.match(pt):
+            errs.append(_("points.{point}: a project's call is pinned as <project>/<name>, the name as its registry "
+                          "models: or agents: declares it", point=pt))
+        elif not project_call and known is not None and pt not in known:
             errs.append(_("points.{point}: not a declared judgment point", point=pt))
-        if not isinstance(pin, dict):
+        if project_call and isinstance(pin, dict) and pin.get("runtime") is not None:
+            errs.append(_("points.{point}.runtime: a project's call runs where its judgment point runs; pin a provider "
+                          "or a model", point=pt))
+        elif not isinstance(pin, dict):
             errs.append(_("points.{point} must be an object ({{model}} or {{provider, model?}})", point=pt))
         elif pin.get("provider") is not None and pin["provider"] not in providers:
             errs.append(_("points.{point}.provider must name one of the providers", point=pt))

@@ -18,7 +18,6 @@
  "{where} looks like a key value: the value goes in the secrets directory ({{\"secret\": file name}}) or an environment variable ({{\"env\": name}})": "{where} 看起來是 key 的值——值放 secrets 目錄({{\"secret\": 檔名}})或環境變數({{\"env\": 名稱}})",
  "providers must be an object": "providers 要是物件",
  "use is set but providers is not (to pin only some judgment points' models, write only points)": "寫了 use 但沒有 providers(只想指定個別判斷點的模型:只寫 points)",
- "with providers, use is required (which provider serves fast / standard / strong)": "有 providers 就要寫 use(fast / standard / strong 各交給哪一家)",
  "providers.{name} must be an object": "providers.{name} 要是物件",
  "providers.{name}: runtime {impl} has no completion interface": "providers.{name}:執行環境 {impl} 沒有 completion 介面",
  "providers.{name}.impl `{impl}` is not known (have: {have})": "providers.{name}.impl `{impl}` 不認得(有:{have})",
@@ -38,5 +37,7 @@
  "points.{point}.runtime must name a registered runtime (have: {have})": "points.{point}.runtime 要是登記過的 runtime(有:{have})",
  "points.{point}.runtime: a completion point goes to llm.providers, not to a runtime": "points.{point}.runtime:completion 判斷點走 llm.providers,不走 runtime",
  "points.{point}.runtime: {runtime} runs only in the platform's throwaway worktree, and {point} does not run in one (those that do: {points})": "points.{point}.runtime:{runtime} 只在平台的拋棄式 worktree 裡跑,{point} 不是在那裡跑的(是的有:{points})",
- "points.{point}.runtime: {point} is resumed or streamed with the default runtime's own arguments, so it cannot run on another one": "points.{point}.runtime:{point} 是用預設 runtime 自己的參數接續或串流的,不能換到別的 runtime 跑"
+ "points.{point}.runtime: {point} is resumed or streamed with the default runtime's own arguments, so it cannot run on another one": "points.{point}.runtime:{point} 是用預設 runtime 自己的參數接續或串流的,不能換到別的 runtime 跑",
+ "points.{point}: a project's call is pinned as <project>/<name>, the name as its registry models: or agents: declares it": "points.{point}:專案的呼叫寫成 <專案>/<名稱>,名稱照它登記表 models: 或 agents: 宣告的",
+ "points.{point}.runtime: a project's call runs where its judgment point runs; pin a provider or a model": "points.{point}.runtime:專案的呼叫跟著它的判斷點跑;要指定就指定 provider 或模型"
 }

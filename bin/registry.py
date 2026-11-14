@@ -41,7 +41,9 @@ schema v1 (contracts/project.v1.md has the full description):
                                   sandbox is created, carried over on upgrade; other projects add it only with the
                                   owner's consent
   models: {<point>: {tier}}       model calls this project makes through the platform (brunna complete; tier fast |
-                                  standard | strong, {settings} decides the model). Undeclared points are refused
+                                  standard | strong, {settings} decides the model; the owner may pin one to a
+                                  provider, e.g. a local model, in llm.points.<project>/<point>). Undeclared points
+                                  are refused
   metered_models: true            the owner allows metered (pay-per-use) providers for those calls; without it a call
                                   that would go to one is refused (llm.py project)
   agents: {<name>: {tier, allow, timeout?}}

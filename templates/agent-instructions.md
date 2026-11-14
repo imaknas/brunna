@@ -183,7 +183,9 @@ model for the tier), then call `brunna complete <name> [--schema <file.json>] < 
 (`structured_output` when a schema is given), exit 1 means refused or failed with the reason in `llm_error`. It works
 from sessions, services and jobs, sandboxed or not. When it fails, fail visibly: don't switch to another model or
 provider. A provider billed per use is only used if {{owner}} allowed it for this project (`metered_models`, which
-only {{owner}} sets); calls show per project on the platform's status page.
+only {{owner}} sets); calls show per project on the platform's status page. To have one call served by a particular
+model (e.g. a local model from another family as an independent reviewer), ask {{owner}} with `brunna send --to
+{{owner_alias}} --type task`: {{owner}} pins it in the platform's settings, and your code and registry entry stay the same.
 
 When the work needs an agent that reads and edits this project's files or fetches pages, not only an answer, declare it
 in `agents: {<name>: {tier: fast|standard|strong, allow: [<permission rules>], timeout: 45m}}` (a manifest.update) and

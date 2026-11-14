@@ -33,6 +33,7 @@ that day; they are listed at the end.
 | 11-08 | The platform runs its own checked copy of each coding agent; the tool's own auto-update stays on | `runtime-versions.md` DV1–DV5 |
 | 11-09 | A project's code asks the platform for model calls and confined agent calls; it never calls a provider itself | `project-agent-calls.md` |
 | 11-13 | Every platform run of Claude uses the headless token; the subscription login is only for registry jobs with `connectors: true`, and the hourly login check looks at it only while one exists | `known-issues.md` "Three credentials", `bin/check-claude-login.py` header |
+| 11-15 | A project's model call can be served by a local model the owner pins it to (`llm.points.<project>/<point>`); the project names only a tier, and a provider configured without `llm.use` moves no other point | `llm-providers.md` "Projects' calls on a provider" |
 
 **Order of the coding-agent adapters** (decided across 10-29, 11-01 and 11-08; no other doc has it whole):
 
