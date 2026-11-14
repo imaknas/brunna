@@ -175,7 +175,7 @@ class RunFile(Scratch):
         p.chmod(mode)
         return p
 
-    def run(self, path):
+    def load_run(self, path):
         import runtime_claude
         with mock.patch.object(credentials, "index", lambda: {"projects": {"demo": self.doc}}), \
                 mock.patch.object(runtime_ports, "load", lambda *a, **k: runtime_claude):
@@ -186,7 +186,7 @@ class RunFile(Scratch):
                 "tools": ["upwork__get_messages", "echo_auth"], **kw}
 
     def test_a_good_one(self):
-        r = self.run(self.write(self.body()))
+        r = self.load_run(self.write(self.body()))
         self.assertIsNone(r.refusal)
         self.assertEqual(set(r.tools), {"upwork__get_messages", "echo_auth"})
 
@@ -196,15 +196,22 @@ class RunFile(Scratch):
         for path, mode in cases:
             path.chmod(mode)
             with self.subTest(path.read_text()):
-                self.assertIsNotNone(self.run(path).refusal)
+                self.assertIsNotNone(self.load_run(path).refusal)
         outside = self.tmp / "credential-upwork.json"
         outside.write_text(json.dumps(self.body()))
         outside.chmod(0o600)
-        self.assertIsNotNone(self.run(outside).refusal)
+        self.assertIsNotNone(self.load_run(outside).refusal)
         link = cases[0][0].with_name("link.json")
         link.symlink_to(cases[0][0])
         cases[0][0].chmod(0o600)
-        self.assertIsNotNone(self.run(link).refusal)
+        self.assertIsNotNone(self.load_run(link).refusal)
+
+    def test_a_refused_run_says_so_where_llm_looks(self):
+        import llm
+        path = self.write(self.body(job="other"))
+        credential_bridge.Bridge(self.load_run(path), out=io.StringIO())
+        self.assertTrue((path.parent / "credential-upwork.status.json").exists())
+        self.assertIn("never connected", llm.bridge_failure(path.parent))
 
 
 class Attach(Scratch):

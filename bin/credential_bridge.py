@@ -181,7 +181,10 @@ class Run:
     def __init__(self, path: str):
         self.refusal, self.project, self.job, self.name, self.sec, self.tools = None, None, None, None, None, ()
         self.dir = pathlib.Path(path).parent
-        self.id = "x"
+        # the server id from the file's name (credential-<id>.json), so a refused run's status is where llm.py looks
+        name = pathlib.Path(path).name
+        self.id = name[len("credential-"):-len(".json")] if name.startswith("credential-") and name.endswith(".json") \
+            and len(name) > len("credential-.json") else "x"
         try:
             self._load(pathlib.Path(path))
         except Exception as e:
