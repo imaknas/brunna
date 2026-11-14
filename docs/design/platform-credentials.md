@@ -467,8 +467,9 @@ step 3's measurements of the bridge fail.
   - It uses an explicit opener with an empty `ProxyHandler`, and ignores the proxy and CA environment variables (the
     system trust store only).
 - **Methods.**
-  - It passes `initialize`, `server/discover`, `ping`, notifications, `tools/list` (filtered to the allowed tools) and
-    `tools/call` for an allowed tool.
+  - It passes `initialize`, `ping`, `notifications/initialized` and `notifications/cancelled`, `tools/list` (filtered
+    to the allowed tools) and `tools/call` for an allowed tool. `server/discover` is refused (as built; Claude then goes
+    on with `initialize`, measured), since its answer could list what the filter hides.
   - On `initialize` it strips the client's capabilities (roots, sampling, elicitation) before forwarding.
   - Server-to-client requests from upstream are answered upstream with an error, never passed to the client.
   - Everything else from the client gets a JSON-RPC error: resources, prompts, other methods, and batches.
@@ -662,6 +663,51 @@ the tests above, not against the real binary. What the run showed:
 - the bridge's status said initialized with 2 tools, and no auth failure.
 
 The conformance check passed on 2.1.325 without a model call.
+
+**After two cold reviews of the build (11-15)**: nothing blocking (no way for a secret to reach the agent, no
+change for today's jobs). Taken:
+- **401 vs 403.** Only a 401 is a refused credential. A 403 (`insufficient_scope`) is the job's failure, with no
+  refresh and no `needs_grant`.
+  - A refused static value is marked as needing the owner only after a fresh `ping` is refused too.
+  - A later success never clears a refused credential within the run.
+- **The bridge never fails open.**
+  - An answer that breaks off, is over 8 MiB or streams for over 600 s is refused.
+  - A session id that isn't visible ASCII is refused.
+  - Any other error becomes a JSON-RPC error and the status's `last_error`.
+  - A bridge that crashes writes `ended: crashed`, and `llm.py` fails the run on it.
+- **Lost answers.** `credentials.http` (on `http.client`, no redirects, no proxy) marks an error as lost only after the
+  request was written whole. A connection that never opened is an outage and is retried later, never `needs_grant`.
+  The one retry waits first.
+- **https everywhere.** The issuer and its metadata must be https. A registration or revocation endpoint that isn't
+  is left unused. Discovery adds OpenID's path-inserted URL.
+- **Revoke.**
+  - It works from the stored file itself, so orphans with no registry entry are revoked too, under the file's own lock.
+  - It takes a pending `.new` first and revokes the refresh and the access token.
+  - It says "revoked at the provider" or "deleted here only".
+  - It starts a new episode, so a still-listed credential gets a new to-do.
+  - `uninstall --purge` prints ✓ only for confirmed revocations.
+  - Orphans show in `rows`, doctor, check-secrets and the status page.
+- **The grant.**
+  - It asks for the owner's yes before anything is sent (a registration, a secret, the browser).
+  - Every registered redirect must be loopback.
+  - The callback takes only the first answer with the expected state.
+  - The token must be Bearer.
+  - The host warning names different hosts on one site softly, and different sites (with `co.uk`, `github.io` and the
+    like counted right) strongly.
+  - Provider text is clamped to RFC 6749's characters before it reaches a to-do, an alert or the terminal.
+- **Smaller fixes.**
+  - `granted()` writes under the lock.
+  - `SSLKEYLOGFILE` is dropped from the environment, and temporary files are cleaned up.
+  - The hourly job retries a to-do close that failed.
+  - check-secrets counts credential files as declared.
+  - `credentials:` is refused on the platform's own jobs, whose rules could write the bridge's status folder.
+  - `attach_credentials` checks the prompt file and folder against the frozen job.
+  - Redaction keeps tokens that were refreshed away, and covers URL-encoded and base64 forms (values under 4
+    characters aren't redacted: they would blank ordinary text).
+  - `rename-project.sh` moves the credentials on the hub machine, before the registry, and nothing moves unless every
+    destination is free.
+- **New seam tests.** A credentials run through `llm.run` (ports loaded, the bridge attached between the rule check and
+  the run, the bridge's status failing a model-green run). The backup's actual restic `--exclude`.
 
 **Not measured, waiting on the owner's first grant**:
 - a real Upwork authorization (route c, the owner's own developer app, until the shared client is published);
