@@ -38,16 +38,20 @@
     "jobs": {"type": "array", "items": {"type": "object", "required": ["name"], "properties": {
       "tier": {"enum": ["fast", "standard", "strong"], "description": "fast | standard | strong, agent jobs with allow: only: the model strength its run uses instead of the tool's default (an owner's pin on the judgment point still wins); only where the runtime can tell how the run is paid for, a pay-per-use one needing metered_models"},
       "mail": {"type": "boolean", "description": "a scheduled agent job with allow: only, never an event job: its run gets the platform's mail tools to start new letters (send, ask the owner, notes when its rules write them); never to read, reply or close"},
+      "credentials": {"type": "array", "items": {"type": "string"}, "description": "a scheduled agent job with allow: only, in a project that isn't sandboxed: the platform credentials (secrets: with kind) its run gets, through the platform's bridge to each server only; owner-only, the job frozen whole"},
       "trigger": {"type": "object", "description": "event-triggered job (docs/design/event-jobs.md): exactly one of at, every, trigger", "additionalProperties": false, "required": ["events"], "properties": {
         "events": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "bus event types (the hubbus contract's type enum)"},
         "projects": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "self (default), a project name or *; other projects only for the platform project and modules"},
         "sources": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "globs the event source must match"},
         "where": {"type": "object", "description": "payload key (dots for nesting) -> value or list of values; strings with * ? [ are globs"},
         "debounce": {"type": "string", "pattern": "^\\d+(m|h)$"}}}}}},
-    "secrets": {"type": "array", "description": "the credentials this project uses: only names, locations, expiry, no values", "items": {"type": "object", "required": ["name", "path"], "additionalProperties": false, "properties": {
+    "secrets": {"type": "array", "description": "the credentials this project uses: only names, locations, expiry, no values", "items": {"type": "object", "required": ["name"], "additionalProperties": false, "properties": {
       "name": {"type": "string"}, "path": {"type": "string"}, "env_key": {"type": "string"},
       "expires": {"type": "string", "pattern": "^\\d{4}-\\d{2}-\\d{2}$"}, "max_age_days": {"type": "integer", "minimum": 1},
-      "warn_days": {"type": "integer", "minimum": 1}, "backup": {"type": "boolean"}, "why": {"type": "string"}, "rotate": {"type": "string"}}}},
+      "warn_days": {"type": "integer", "minimum": 1}, "backup": {"type": "boolean"}, "why": {"type": "string"}, "rotate": {"type": "string"},
+      "kind": {"enum": ["oauth", "static"], "description": "a platform credential (docs/design/platform-credentials.md C1): the platform's own grant, placed by the platform (no path); owner-only"},
+      "server": {"type": "object", "additionalProperties": false, "required": ["id", "url"], "properties": {"id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"}, "url": {"type": "string", "pattern": "^https://"}, "header": {"type": "string"}}, "description": "with kind: the MCP server the credential is for: id is the tool prefix the job's rules use, url its exact URL, header (static) where the value goes"},
+      "broken": {"enum": ["todo", "alert"], "description": "with kind: what a broken grant raises: an alert and an owner to-do with the re-grant command (todo, the default), or the alert only"}}}},
     "enforce": {"type": "object", "properties": {"sandbox": {"type": "boolean"}, "capabilities": {"type": "array", "items": {"type": "string"}, "description": "platform capabilities (hub.json capabilities, e.g. gpu); inside the sandbox, hub-run --cap <capability> runs through the platform runner"},
         "work": {"type": "boolean", "description": "a discuss session (lease) may write to the project; requires sandbox: true (the OS sandbox blocks writes outside the folder). Turned on only when the owner confirms directly"}}, "additionalProperties": false},
     "network": {"type": "array", "items": {"type": "string"}},

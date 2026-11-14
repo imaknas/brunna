@@ -85,5 +85,11 @@
  "failed to resume one ({reason})": "接續這種 session 失敗({reason})",
  "hasn't been checked resuming one yet": "還沒檢查過能不能接續這種 session",
  "{file} declares hooks, which its sessions run outside the sandbox while the skill is in use": "{file} 宣告了 hooks,skill 使用中時它的 session 會在沙箱外執行它們",
- "{file} declares allowed-tools: tools its sessions may use without asking while the skill is in use": "{file} 宣告了 allowed-tools:skill 使用中時它的 session 可以不經詢問就用這些工具"
+ "{file} declares allowed-tools: tools its sessions may use without asking while the skill is in use": "{file} 宣告了 allowed-tools:skill 使用中時它的 session 可以不經詢問就用這些工具",
+ "{rule} runs code or reaches past the job's folder, which a credentials job may not (it could read the credential)": "{rule} 會執行程式或超出 job 的資料夾,憑證 job 不可以(它可能讀到憑證)",
+ "it holds a credential for {server} and names none of its tools": "它持有 {server} 的憑證,卻沒列出它的任何工具",
+ "{rule} names a tool server the job holds no credential for (its run loads only those)": "{rule} 指名了 job 沒有憑證的工具 server(它的執行只載入有憑證的)",
+ "{rule} reaches every file: a credentials job names a path in its folder": "{rule} 碰得到所有檔案:憑證 job 要寫出它資料夾裡的路徑",
+ "{rule} names a whole server: a credentials job names each tool it calls": "{rule} 指名了整個 server:憑證 job 要逐一寫出它呼叫的工具",
+ "{rule} names a path outside its folder, which a credentials job may not": "{rule} 指名了資料夾外的路徑,憑證 job 不可以"
 }

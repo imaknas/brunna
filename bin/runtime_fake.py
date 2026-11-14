@@ -374,3 +374,28 @@ def command_rules(rules) -> list:
 def run_server(task):
     """run_server: the fake keeps the servers as given (it starts nothing)."""
     return task
+
+
+# ---------- platform credentials ----------
+def rules_tools_named(rules, server_id: str) -> list:
+    """The fake's server tools are rules written srv:<server>:<tool>."""
+    prefix = f"srv:{server_id}:"
+    return [str(r)[len(prefix):] for r in rules or [] if str(r).startswith(prefix)]
+
+
+def tools_named(task, server_id: str) -> tuple:
+    import json
+    env = task.env or {}
+    rules = json.loads(env.get((task.spec or {}).get("allow_from_env") or "", "") or "[]")
+    return tuple(rules_tools_named(rules, server_id))
+
+
+def credential_rules_problems(rules, servers) -> list:
+    """The fake refuses its command rules (run:…) and a server named with no tool."""
+    out = [f"{r} runs code" for r in rules or [] if str(r).startswith("run:")]
+    out += [f"no tool of {s}" for s in sorted(servers or ()) if not rules_tools_named(rules, s)]
+    return out
+
+def sealed(task) -> bool:
+    """The fake's runs are sealed unless the caller says unsealed."""
+    return "unsealed" not in (task.extra or ())

@@ -69,6 +69,13 @@ schema v1 (contracts/project.v1.md has the full description):
                                   confined runs reads or writes them (a relative path under both its workspace and
                                   runtime; policy.secret_paths); `registry.py check --secrets-report` lists what that
                                   keeps from which jobs
+    kind: oauth | static (a platform credential, docs/design/platform-credentials.md C1): the platform's own grant for a
+      remote MCP server, held in its secrets directory (bin/credentials.py places it; no path, env_key or expiry), given
+      only to the jobs that list it in credentials:. server: {id, url, header?}: id is the tool prefix the job's rules
+      use, url the server's exact https URL, header (static only) the header the value goes in (default Authorization,
+      sent as Bearer <value>). backup defaults to false (re-grant after a restore), broken: todo (default; an alert and
+      an owner to-do with the re-grant command) | alert. An entry with kind is owner-only (credential_entries), and not
+      for modules
   gate: strict                    the merge gate enforced: main in the main checkout can't be committed to directly
                                   (only via merge-branch); by default it only detects
   jobs:      [{name, at | every | trigger, run | (kind: agent + prompt), cwd?, days?, days_of_month?, months?,
@@ -105,6 +112,11 @@ schema v1 (contracts/project.v1.md has the full description):
       start new letters (send a request, question, info or progress; ask the owner; write notes when its rules write
       them), never to read the mailbox, reply or close (docs/design/confined-mail-tools.md M1). Without it a confined job
       sends no mail. On an event job it is refused: any bus writer's text would then send as the project
+    credentials: [<name>] (a scheduled agent job with allow: only, in a project that isn't sandboxed): the platform
+      credentials (secrets: entries with kind) its run gets, each through the platform's bridge to that server only
+      (docs/design/platform-credentials.md C5, C6). Owner-only, and such a job is frozen whole (credential_jobs). Its
+      rules name exactly the tools of those servers it calls, and nothing that runs code or reads outside its folders
+      (the runtime's credential_tools port says which; a job they don't fit doesn't run)
     tier: fast | standard | strong (agent jobs with allow: only): the model strength its run uses, instead of the
       tool's default (an owner's model pin on the judgment point still wins). Only where the runtime can tell how the
       run is paid for (for Claude Code: the headless token, not the interactive login connectors: true uses); a
@@ -180,10 +192,16 @@ TIER_KEYS = {"tier", "run", "when", "paths", "jobs"}
 ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 # a secret's path goes into confined runs' deny rules (policy.secret_paths): no glob, bracket, brace or control character
 SECRET_PATH = re.compile(r"[^\x00-\x1f\x7f()\[\]{}*?]+")
-SECRET = {"name", "path", "env_key", "expires", "max_age_days", "warn_days", "backup", "why", "rotate"}
+SECRET = {"name", "path", "env_key", "expires", "max_age_days", "warn_days", "backup", "why", "rotate", "kind", "server",
+          "broken"}
+CREDENTIAL_KINDS = ("oauth", "static")
+CREDENTIAL_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")   # a file name and part of an owner to-do's key
+SERVER_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")         # runtime_ports.ToolServer.id's spelling
+HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
+RESERVED_LOCAL_PORTS = (47615,)   # credentials.CALLBACK_PORT: no service may listen there (tests check they agree)
 JOB = {"name", "at", "every", "trigger", "run", "kind", "prompt", "cwd", "days", "days_of_month", "months", "until",
        "between", "background", "after", "before", "max_attempts_per_day", "timeout", "legacy_name", "allow",
-       "connectors", "catch_up", "mail", "tier"}
+       "connectors", "catch_up", "mail", "tier", "credentials"}
 TRIGGER = {"events", "projects", "sources", "where", "debounce"}
 # the mailbox's own work and bookkeeping (inbox records, delivery and closing written by dispatch, which relays others'
 # letters without a chain): no event job reacts to them (event-jobs.md 3.5)
@@ -235,18 +253,30 @@ def resolves(cmd: str, cwd: pathlib.Path | None, search: str | None = None) -> s
     return None if found or first in ("cd", "test", "[", "true") else _("{first} is not on PATH", first=first)
 
 
-def validate_secrets(secrets) -> list[str]:
+def validate_secrets(secrets, credentials_ok: bool = True) -> list[str]:
     if secrets is None:
         return []
     if not isinstance(secrets, list):
         return [_("secrets must be a list")]
-    errs, seen = [], set()
+    errs, seen, ids = [], set(), set()
     for i, sec in enumerate(secrets):
         where = f"secrets[{i}]"
         if not isinstance(sec, dict):
             errs.append(_("{where} must be a mapping", where=where))
             continue
         errs += [_("{where}: unknown field {key}", where=where, key=k) for k in sec if k not in SECRET]
+        if "kind" in sec:
+            if not credentials_ok:
+                errs.append(_("{where}: kind (a platform credential) is for a project's registry entry, not a module",
+                              where=where))
+            errs += validate_credential(sec, where, ids)
+            if sec.get("name") in seen:
+                errs.append(_("{where}: name {name} is a duplicate", where=where, name=sec.get("name")))
+            seen.add(sec.get("name"))
+            continue
+        for k in ("server", "broken"):
+            if k in sec:
+                errs.append(_("{where}: {key} is only for an entry with kind (a platform credential)", where=where, key=k))
         for k in ("name", "path"):
             if not isinstance(sec.get(k), str) or not sec.get(k):
                 errs.append(_("{where}: {key} is required", where=where, key=k))
@@ -268,6 +298,63 @@ def validate_secrets(secrets) -> list[str]:
         if sec.get("backup") is False and not sec.get("why"):
             errs.append(_("{where}: backup: false needs a why (why it needs no backup)", where=where))
     return errs
+
+
+def validate_credential(sec: dict, where: str, ids: set) -> list[str]:
+    """A secrets: entry with kind: the platform's own grant (docs/design/platform-credentials.md C1). The platform places
+    its file, so it has no path; what it is for is server."""
+    errs = []
+    if sec["kind"] not in CREDENTIAL_KINDS:
+        errs.append(_("{where}: kind can only be {kinds}", where=where, kinds=" / ".join(CREDENTIAL_KINDS)))
+    if not isinstance(sec.get("name"), str) or not CREDENTIAL_NAME.fullmatch(sec["name"]):
+        errs.append(_("{where}: a platform credential's name is lowercase letters, digits and - (it names its file and "
+                      "its owner to-do)", where=where))
+    for k in ("path", "env_key", "expires", "max_age_days", "rotate"):
+        if k in sec:
+            errs.append(_("{where}: a platform credential has no {key} (the platform places it and knows its expiry)",
+                          where=where, key=k))
+    if "backup" in sec and not isinstance(sec["backup"], bool):
+        errs.append(_("{where}: backup must be true/false", where=where))
+    if sec.get("broken", "todo") not in ("todo", "alert"):
+        errs.append(_("{where}: broken can only be todo (an alert and an owner to-do, the default) or alert", where=where))
+    server = sec.get("server")
+    if not isinstance(server, dict) or set(server) - {"id", "url", "header"}:
+        return errs + [_("{where}: server is {{id, url}} (and header, for a static credential)", where=where)]
+    sid = server.get("id")
+    if not isinstance(sid, str) or not SERVER_ID.fullmatch(sid) or sid.endswith("-run"):
+        errs.append(_("{where}: server.id is lowercase letters, digits and -, and doesn't end in -run (the platform's own "
+                      "server's)", where=where))
+    elif sid in ids:
+        errs.append(_("{where}: server.id {id} is a duplicate", where=where, id=sid))
+    ids.add(sid)
+    if not credential_url_ok(server.get("url")):
+        errs.append(_("{where}: server.url is the server's exact https URL, with no user, query or fragment",
+                      where=where))
+    if "header" in server and (sec.get("kind") != "static" or not isinstance(server["header"], str)
+                               or not HEADER_NAME.fullmatch(server["header"])):
+        errs.append(_("{where}: server.header is a header name, for a static credential only", where=where))
+    return errs
+
+
+def credential_url_ok(url) -> bool:
+    import urllib.parse
+    if not isinstance(url, str) or any(c.isspace() or ord(c) < 32 for c in url):
+        return False
+    u = urllib.parse.urlsplit(url)
+    return u.scheme == "https" and bool(u.hostname) and "@" not in u.netloc and not u.query and not u.fragment \
+        and "#" not in url and "?" not in url
+
+
+def credential_entries(doc: dict) -> dict:
+    """{name: entry} of a registry entry's platform credentials (secrets: with kind): owner-only, compared whole."""
+    return {s.get("name"): s for s in doc.get("secrets") or [] if isinstance(s, dict) and "kind" in s}
+
+
+def credential_jobs(doc: dict) -> dict:
+    """The jobs that get a platform credential (credentials:), whole, with the folder they run in: as connector_jobs, a
+    project's letter can't add one, or change its rules, prompt or folder."""
+    return {j.get("name"): {**j, "cwd": j.get("cwd") or default_cwd(doc)}
+            for j in doc.get("jobs") or [] if isinstance(j, dict) and j.get("credentials")}
 
 
 def capabilities() -> dict[str, dict]:
@@ -438,6 +525,8 @@ def rules_refused(index: dict) -> dict[str, str]:
         if problems:
             out[f"{name}/agents.{agent}"] = _("agent call {agent} doesn't run until its allow: changes: {problems}",
                                               agent=f"{name}/{agent}", problems="; ".join(problems))
+    for job, why in credential_refusals(index).items():   # a credentials job: its rules against its servers too
+        out[job] = f"{out[job]}; {why}" if job in out else why
     return out
 
 
@@ -481,6 +570,10 @@ def platform_owned_changes(new: dict, cur: dict) -> list[str]:
     changed += [f"{top}.{key}" for top, key in PLATFORM_OWNED_NESTED if nested(new, top, key) != nested(cur, top, key)]
     if connector_jobs(new) != connector_jobs(cur):
         changed.append(_("a job with connectors: true"))
+    if credential_entries(new) != credential_entries(cur):
+        changed.append(_("a platform credential (secrets: with kind)"))
+    if credential_jobs(new) != credential_jobs(cur):
+        changed.append(_("a job with credentials:"))
     old = legacy_names(cur)
     if any(old.get(job) != name for job, name in legacy_names(new).items()):   # dropping one with its job is the project's
         changed.append(_("a job's legacy_name"))
@@ -721,6 +814,10 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
         if not n or not svc.get("run"):
             errs.append(_("service {name}: name and run are required", name=n))
             continue
+        port = (svc.get("expose") or {}).get("local_port") if isinstance(svc.get("expose"), dict) else None
+        if port in RESERVED_LOCAL_PORTS:
+            errs.append(_("service {name}: local_port {port} is the platform's (the sign-in callback of brunna "
+                          "credentials grant)", name=n, port=port))
         cwd = d.get(svc.get("cwd") or default_cwd(doc))
         if (e := resolves(svc["run"], cwd, hubconf.expand_env((svc.get("env") or {}).get("PATH") or hubconf.LAUNCHD_PATH))):
             errs.append(_("service {name}: {error}", name=n, error=e))
@@ -781,6 +878,7 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
         if job.get("connectors") is True and not job.get("allow"):
             errs.append(_("job {name}: connectors: true needs an allow: list (its run denies every MCP server the list "
                           "doesn't name, so without one it could use no connector)", name=n))
+        errs += [_("job {name}: {error}", name=n, error=e) for e in validate_job_credentials(job, doc)]
         if any(str(x).startswith("mcp__claude_ai_") for x in job.get("allow") or []) and not job.get("connectors"):
             errs.append(_("job {name}: allow has claude.ai connector tools; add connectors: true (the default headless token "
                            "loads no connectors)", name=n))
@@ -809,6 +907,59 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
                     errs.append(_("job {name}: {dep} in {key} is not in this project (another project or module is written "
                                    "<name>/<job>)", name=job.get("name"), key=key, dep=dep))
     return errs
+
+
+def validate_job_credentials(job: dict, doc: dict) -> list[str]:
+    """A job's credentials: (docs/design/platform-credentials.md C6), what the registry alone can tell; what its rules
+    may be is the runtime's (credential_refusals)."""
+    if "credentials" not in job:
+        return []
+    creds = job["credentials"]
+    if not isinstance(creds, list) or not creds or not all(isinstance(c, str) and c for c in creds) \
+            or len(set(creds)) != len(creds):
+        return [_("credentials must be a list of the names of this project's platform credentials (secrets: with kind)")]
+    errs = []
+    if job.get("kind") != "agent" or not job.get("allow") or "trigger" in job:
+        errs.append(_("credentials: is only for a scheduled agent job with an allow: list (an event job's prompt is any "
+                      "bus writer's text)"))
+    if job.get("connectors"):
+        errs.append(_("credentials: and connectors: true don't go together (a credentials job runs sealed, on the "
+                      "platform's login)"))
+    if sandbox_enforced(doc):
+        errs.append(_("credentials: is not for a sandboxed project yet: its confined runs may name no tool server's tools "
+                      "(docs/design/platform-credentials.md C7)"))
+    if doc.get("type") == "module":
+        errs.append(_("credentials: is for a project's jobs, not a module's"))
+    have = credential_entries(doc)
+    errs += [_("{name} is not a platform credential of this project (secrets: with kind)", name=c) for c in creds
+             if c not in have]
+    return errs
+
+
+def credential_refusals(index: dict, rt=None) -> dict[str, str]:
+    """{project/job: why} for the credentials jobs whose rules don't fit what such a run may have (the runtime's
+    credential_tools port: the rules name exactly the tools of the servers it lists, and nothing that runs code or reads
+    outside its folders). Listed, as rules_refused is; llm.py refuses the run too."""
+    jobs = [(name, doc, job) for name, doc in sorted(index["projects"].items()) for job in doc.get("jobs") or []
+            if isinstance(job, dict) and job.get("credentials") and job.get("allow")]
+    if not jobs:
+        return {}
+    import runtime_ports
+    if rt is None:
+        try:
+            rt = runtime_ports.load(None, ports=("credential_tools",))
+        except (runtime_ports.Unsupported, runtime_ports.MissingFunctions, LookupError, ImportError) as e:
+            return {f"{n}/{j.get('name')}": _("its credentials can't be given on this runtime: {why}", why=e)
+                    for n, _d, j in jobs}
+    out = {}
+    for name, doc, job in jobs:
+        have = credential_entries(doc)
+        servers = {have[c]["server"]["id"] for c in job["credentials"] if c in have}
+        problems = rt.credential_rules_problems(job["allow"], servers)
+        if problems:
+            out[f"{name}/{job.get('name')}"] = _("agent job {job} doesn't run until its allow: changes: {problems}",
+                                                 job=f"{name}/{job.get('name')}", problems="; ".join(problems))
+    return out
 
 
 # ---------- modules (docs/design/new-user.md 3.2) ----------
@@ -861,7 +1012,7 @@ def validate_module(doc, stem: str) -> list[str]:
             if key == "jobs" and isinstance(x, dict) and x.get("kind", "command") != "command":
                 errs.append(_("job {name}: a module can only have command jobs", name=x.get("name")))
     # the module's own credentials (the platform's; modules that are off aren't checked)
-    errs += validate_secrets(doc.get("secrets"))
+    errs += validate_secrets(doc.get("secrets"), credentials_ok=False)
     # contracts of others the module reads (e.g. the assistant module reads the assistant's handoff format); modules
     # that are off aren't compared
     for c in doc.get("consumes") or []:
@@ -1135,6 +1286,10 @@ def scheduler_jobs(index: dict, legacy_names: set[str]) -> tuple[list[dict], lis
                 # the platform's mail tools, only for a job that asks (llm-points mail_from_env)
                 if job.get("mail") is True:
                     cmd = f"AGENT_JOB_MAIL=1 {cmd}"
+                # the platform credentials it gets (llm-points credentials_from_env; llm.py reads them from the
+                # registry by this job's name, never from the environment)
+                if job.get("credentials"):
+                    cmd = f"AGENT_JOB_CREDENTIALS={shlex.quote(job['name'])} {cmd}"
                 # the model strength it chose (llm-points tier_from_env), behind llm.py's billing gate
                 if job.get("tier"):
                     cmd = f"AGENT_JOB_TIER={shlex.quote(job['tier'])} {cmd}"

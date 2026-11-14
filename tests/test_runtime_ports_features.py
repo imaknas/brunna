@@ -39,10 +39,13 @@ ROWS = {
 }
 LEASING = 5
 # agent-job-confined when a job opts in to the mail (mail_from_env)
-JOB_MAIL = -2
-# the last row: a project's declared agent calls (project-agent), always at a tier the project chose, so the billing gate
-# asks the login interface how it is paid for (llm.billing_gate: no auth port = unknown = refused)
-AGENT = -1
+JOB_MAIL = -3
+# a project's declared agent calls (project-agent), always at a tier the project chose, so the billing gate asks the
+# login interface how it is paid for (llm.billing_gate: no auth port = unknown = refused)
+AGENT = -2
+# the last row: agent-job-confined with credentials: (credentials_from_env), the platform's bridge attached as a tool
+# server, its tools from the job's rules (docs/design/platform-credentials.md C5)
+CREDENTIALS = -1
 
 
 def needs(points, providers: bool) -> set:
@@ -84,6 +87,13 @@ class FeatureNeeds(unittest.TestCase):
         for providers in (False, True):
             table = runtime_ports.features(providers=providers, propose=False)
             self.assertEqual(set(table[AGENT][1]), needs(("project-agent",), providers) | {"auth"})
+
+    def test_a_credentials_job_needs_the_server_and_the_tool_port(self):
+        self.assertIn("credentials_from_env", POINTS["agent-job-confined"])
+        for providers in (False, True):
+            table = runtime_ports.features(providers=providers, propose=False)
+            self.assertEqual(set(table[CREDENTIALS][1]),
+                             needs(("agent-job-confined",), providers) | {"run_server", "credential_tools"})
 
     def test_no_row_asks_for_a_login_but_leasing_and_agent_calls(self):
         """llm.py takes auth_env only from a runtime that has the port: without it the tool logs in itself. An agent call

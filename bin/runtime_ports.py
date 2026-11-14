@@ -66,6 +66,14 @@ The current interfaces (the other layers get added one at a time, following the 
                                                          rules give no use for taken out); the runtime then starts each
                                                          server for the run, allows only its tools, and adds no other rule.
                                                          A runtime without it runs no point that would get the mail tools
+  credential_tools: a credentials job's rules (docs/design/platform-credentials.md C6)
+    tools_named(task, server_id) -> tuple[str]           the tools of that server the run's own rules name, as the
+                                                         server calls them (the platform's bridge lets only those through)
+    rules_tools_named(rules, server_id) -> list[str]     the same for a job's allow: list
+    credential_rules_problems(rules, servers) -> list[str]   why a job holding credentials for these servers may not
+                                                         have these rules (code, a path outside its folder, a server
+                                                         it holds none for, a server with no tool named); [] = it may
+    sealed(task) -> bool                                 whether the run loads only the servers the platform gives it
   rule_check: what a confined run's own rules may be (docs/design/project-agent-calls.md A2): checked when every
   settings: platform run starts, never a registry validation error; a runtime without it runs none of them
     rule_problems(task, *, sandboxed, network, untrusted) -> list[str]   why this run's own rules (the point's, the
@@ -338,6 +346,7 @@ def port_labels() -> dict[str, str]:
             "tool_servers": _("way to tell which tool servers a run loads"),
             "rule_check": _("check of what a confined run's own rules may be"),
             "run_server": _("way to give a run the platform's mail tools"),
+            "credential_tools": _("way to tell which of a server's tools a credentials job's rules name"),
             "distribution": _("way to install and pin a checked version"),
             "worktree_maker": _("way to hand its own worktree mode to the platform")}
 
@@ -398,6 +407,10 @@ def features(providers: bool | None = None, propose: bool | None = None) -> tupl
         # project-agent: settings: platform, allow_from_env, tool_servers: none (the runtime seals it, nothing to ask), and
         # always a tier the project chose, which runs only where the login interface tells how it is paid for
         (_("a project's own agent calls (brunna agent)"), ("agent", "confine", "rule_check", "auth")),
+        # agent-job-confined with credentials: (registry): the platform's bridge attached as a tool server, its tools
+        # from the job's rules (docs/design/platform-credentials.md C5)
+        (_("unattended jobs on the platform's own MCP grants (credentials:)"),
+         ("agent", "confine", "rule_check", "tool_servers", "run_server", "credential_tools")),
     )
 
 
@@ -495,6 +508,9 @@ PORTS = {
     # rule_check: what the run's boundary rests on, so not OPTIONAL: a runtime without it runs no settings: platform point
     "rule_check": ("rule_problems", "rules_problems", "command_rules"),
     "run_server": ("run_server",),
+    # credential_tools (docs/design/platform-credentials.md C6): which tools of a server a credentials job's rules name
+    # (the bridge lets only those through), and why its rules don't fit such a run
+    "credential_tools": ("tools_named", "rules_tools_named", "credential_rules_problems", "sealed"),
     "wake": ("wake", "can_wake"),
     "session_status": ("session_status",),
     "session_summary": ("session_summary",),

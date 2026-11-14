@@ -805,6 +805,8 @@ def secret_paths(project: str) -> list:
     base = (hubconf.p("services_root") / project) if doc.get("runtime") is not None else hubconf.workspace(project)
     out = []
     for sec in doc.get("secrets") or []:
+        if not sec.get("path"):   # a platform credential (kind): in the platform's secrets directory, not the project's
+            continue
         p = pathlib.Path(os.path.expanduser(str(sec.get("path", ""))))
         if str(p) and base is not None:
             out.append(p if p.is_absolute() else base / p)

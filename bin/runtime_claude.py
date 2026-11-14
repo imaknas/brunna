@@ -1233,6 +1233,66 @@ def rule_problems(task, *, sandboxed: bool, network, untrusted: bool) -> list[st
                           servers=task.spec.get("tool_servers") != "none")
 
 
+# ---------- platform credentials (runtime_ports' credential_tools port; docs/design/platform-credentials.md C6) ----------
+# A credentials job's rules: each tool of a server it holds a credential for, named one by one; nothing that runs code, and
+# no file tool without a path in its folders (such a run could read the credential, or the run's file, directly).
+CREDENTIAL_SAFE_TOOLS = ("ToolSearch", "PushNotification", "TodoWrite", "WebSearch")
+
+
+def rules_tools_named(rules, server_id: str) -> list[str]:
+    """The tools of server_id the rules name, as the server calls them: `mcp__<id>__<tool>` with the prefix taken off (a
+    tool's own name may hold __, so the rule is never split on it). A rule naming the whole server names none."""
+    prefix = f"mcp__{mcp_id(server_id)}__"
+    return list(dict.fromkeys(r[len(prefix):] for r in rules or [] if isinstance(r, str) and r.startswith(prefix)
+                              and len(r) > len(prefix) and "(" not in r))
+
+
+def tools_named(task, server_id: str) -> tuple:
+    """rules_tools_named over the run's own rules (the point's, the caller's, the job's)."""
+    return tuple(rules_tools_named(_rules(task)[1], server_id))
+
+
+def sealed(task) -> bool:
+    """Whether the run loads only the servers the platform gives it (--strict-mcp-config)."""
+    return _sealed(task)
+
+
+def credential_rules_problems(rules, servers) -> list[str]:
+    """Why a job holding platform credentials for these servers (their ids) may not have these rules, one sentence each;
+    [] = it may."""
+    out, servers = [], set(servers or ())
+    named = {sid: rules_tools_named(rules, sid) for sid in servers}
+    for r in rules or []:
+        m = _PARTS.fullmatch(r) if isinstance(r, str) else None
+        if not m:
+            out.append(_("{rule} is not a permission rule", rule=r))
+            continue
+        tool, arg = m.group(1), m.group(2)
+        if tool.startswith("mcp__"):
+            sid = next((s for s in servers if tool == f"mcp__{mcp_id(s)}" or tool.startswith(f"mcp__{mcp_id(s)}__")), None)
+            if sid is None:
+                out.append(_("{rule} names a tool server the job holds no credential for (its run loads only those)",
+                             rule=r))
+            elif tool == f"mcp__{mcp_id(sid)}":
+                out.append(_("{rule} names a whole server: a credentials job names each tool it calls", rule=r))
+            continue
+        if tool in FILE_TOOLS:
+            if arg is None:
+                out.append(_("{rule} reaches every file: a credentials job names a path in its folder", rule=r))
+            elif _outside_path(arg, None):
+                out.append(_("{rule} names a path outside its folder, which a credentials job may not", rule=r))
+            continue
+        if tool == "WebFetch" and arg is not None and arg.startswith("domain:"):
+            continue
+        if tool not in CREDENTIAL_SAFE_TOOLS:
+            out.append(_("{rule} runs code or reaches past the job's folder, which a credentials job may not (it could "
+                         "read the credential)", rule=r))
+    for sid, tools in sorted(named.items()):
+        if not tools:
+            out.append(_("it holds a credential for {server} and names none of its tools", server=sid))
+    return out
+
+
 MEMORY_RULE = "Edit(./.agent-memory/memory/**)"
 
 
