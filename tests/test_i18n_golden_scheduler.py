@@ -186,7 +186,7 @@ class Golden(unittest.TestCase):
             out.append(("last-run state", (hub / ".state" / "scheduler-last-run.json").read_text()))
             with mock.patch.object(hubconf, "get", get), mock.patch.object(completion, "settings", lambda: None):
                 ctl("models, no providers", "models")
-            with mock.patch.object(hubconf, "get", get), mock.patch.object(completion, "settings", lambda: {"x": 1}), \
+            with mock.patch.object(hubconf, "get", get), mock.patch.object(completion, "settings", lambda: {"x": 1, "use": {"standard": "x"}}), \
                     mock.patch.object(completion, "resolve", resolve):
                 ctl("models, with providers", "models")
             ctl("set-model unknown", "set-model", "nosuch", "m-x")

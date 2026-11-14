@@ -411,7 +411,8 @@ class InCharge(unittest.TestCase):
         """no coding agent, an API provider: the completion versions take over without a setting"""
         with tempfile.TemporaryDirectory() as d:
             env, log = self.env(d, extra={"runtime": {"default": "none"},
-                                          "llm": {"providers": {"local": {"impl": "ollama"}}}})
+                                          "llm": {"providers": {"local": {"impl": "ollama"}},
+                                                  "use": {"fast": "local", "standard": "local", "strong": "local"}}})
             self.check_in_charge(env, log)
 
     def test_one_part_at_a_time(self):
