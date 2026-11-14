@@ -211,7 +211,7 @@ The owner to-do (C10) gives the exact line.
      - The command prints that provider's steps from the provider notes, or generic steps for an issuer with no entry.
      - It then reads the client ID, and a client secret without echo. The secret is stored with the grant, never in
        `brunna.json`.
-   - **The provider notes**, `bin/credential_providers.yaml`, are keyed by issuer. Each entry holds:
+   - **The provider notes**, `oauth/providers.yaml`, are keyed by issuer. Each entry holds:
      - the label shown to the owner;
      - whether its registration endpoint is RFC 7591;
      - what is known about loopback redirects (whether the fixed port or any port works);
@@ -219,7 +219,7 @@ The owner to-do (C10) gives the exact line.
      - the steps for (c);
      - a `checked_on` date and links to the provider's own docs.
 
-     What a grant learns (step 5) is written to the instance's own copy, `<config>/credential_providers.yaml`, which
+     What a grant learns (step 5) is written to the instance's own copy, `<config>/oauth-providers.yaml`, which
      overrides the shipped one. Doctor suggests sending it upstream.
    - The route used is recorded with the grant. A route moves on only when the server doesn't support it, never on an
      error. It never borrows another tool's client ID.
@@ -284,28 +284,38 @@ is still an IETF draft (`draft-ietf-oauth-client-id-metadata-document`, -00 to -
 spec of 2025-11-25 adopted it as the recommended way for a client to identify itself, which is why it is the default and
 (b) and (c) stay as fallbacks.
 
-- **Where it lives.**
-  - In the repository: `oauth/client.json`. It ships with every install, and that copy is the pin.
-  - **Published only from release tags.** A workflow, `.github/workflows/pages.yml`, runs on a pushed `v*` tag. It
-    stages `_site/oauth/client.json` and uploads `_site`.
-    - `upload-pages-artifact` serves the uploaded folder's contents. Uploading `oauth/` itself would serve
-      `…/client.json`, which wouldn't match the `client_id`.
-    - The workflow fails unless `_site` holds exactly that one regular file and no links.
+- **Where it lives.** Under the GitHub organization **`brunna-dev`** (created by the owner on 11-15, two-factor
+  authentication required of its members), in the organization's own Pages repository **`brunna-dev/brunna-dev.github.io`**.
+  It serves `https://brunna-dev.github.io/oauth/client.json`.
+  - **brunna's repository holds the pin**: `oauth/client.json`. It ships with every install.
+  - **The organization's repository holds the published copy itself**, plus the workflow that publishes it. Nothing in
+    brunna's repository can write there: no long-lived token crosses between the two repositories, and no workflow of
+    brunna's pushes anywhere.
+  - **How a change gets there:** only at a brunna release.
+    - The owner opens a pull request in `brunna-dev/brunna-dev.github.io` that copies the tagged release's
+      `oauth/client.json`, and reviews its diff before merging.
+    - `main` there is protected: changes come only through a pull request, with no force-push or deletion.
+    - Its Pages workflow (`.github/workflows/pages.yml`, actions pinned by commit SHA) runs on a push to `main`. It
+      stages `_site/oauth/client.json` and uploads `_site`, and fails unless `_site` holds exactly that one regular file
+      and no links. (`upload-pages-artifact` serves the uploaded folder's contents; uploading `oauth/` itself would
+      serve `/client.json`, which wouldn't match the `client_id`.)
+    - The `github-pages` environment is restricted to `main`.
+    - brunna's release checklist (CONTRIBUTING.md, "Releasing") then runs `brunna credentials check-published`, the
+      tripwire below run once. A release isn't announced while the published document's security fields differ from the
+      tag's.
+    - brunna's repository keeps the organization repository's workflow as a template, `oauth/pages.yml`, and tests it.
+      The owner copies it over once (step 4).
   - **Immutable.** A change to any security field never edits a published file. It publishes a new one beside it
     (`oauth/client-2.json`, a new `client_id`), so existing grants keep theirs. Older files stay published.
-  - **Its URL** is read only from the file's `client_id`. No account or host name is written in `bin/` or `tests/`
-    (`tests/test_personal_boundary.py` would match it). It lives under a GitHub organization, `<org>` (decided
-    11-15).
-  - Publishing needs Pages turned on with GitHub Actions as its source, and the tag pushed to GitHub. main is pushed as
-    of v0.17.0.
-- **Its contents.** The `client_id` must equal the URL it is served from, byte for byte; `<host-and-path>` is under
-  `<org>.github.io` (decided 11-15):
+  - **Its URL** is read only from the file's `client_id`. No personal account name is written in `bin/` or `tests/`
+    (`tests/test_personal_boundary.py` would match it); the organization's name is not personal and may appear.
+- **Its contents.** The `client_id` must equal the URL it is served from, byte for byte:
 
   ```json
   {
-    "client_id": "https://<host-and-path>/oauth/client.json",
+    "client_id": "https://brunna-dev.github.io/oauth/client.json",
     "client_name": "brunna",
-    "client_uri": "https://github.com/<repository>",
+    "client_uri": "https://github.com/brunna-dev",
     "redirect_uris": [
       "http://127.0.0.1:47615/callback",
       "http://127.0.0.1/callback"
@@ -330,9 +340,11 @@ spec of 2025-11-25 adopted it as the recommended way for a client to identify it
     can make any provider show a "brunna" consent screen with their own redirect URI, and phish **anyone**, not just
     brunna users. No check in an install stops that.
   - **The real controls:**
-    - the repository's `github-pages` environment restricted to release tags (protected), so only a tag can publish;
-    - every action in `pages.yml` pinned by commit SHA;
-    - two-factor authentication on every account that can push tags or change Pages settings;
+    - the organization repository's protected `main` (pull requests only) and its `github-pages` environment restricted
+      to `main`, so only a reviewed merge publishes;
+    - every action in its `pages.yml` pinned by commit SHA;
+    - two-factor authentication required by the organization (on since its creation), for every account that can merge
+      there or change its Pages settings;
     - **a daily tripwire in doctor.** It fetches the published document, compares its security fields with the
       installed copy, alerts on a mismatch (the owner learns of a hijack within a day), and records the result that
       route (a) reads.
@@ -589,7 +601,7 @@ Written in the build (Order of work, step 6), short, in the style of `docs/mcp.m
 
 ## Moving the daily job
 
-1. The owner creates the organization, and step 4 of the order of work publishes the shared client. Until a release ships
+1. Step 4 of the order of work publishes the shared client from `brunna-dev` (the organization exists). Until a release ships
    `oauth/published`, the grant takes route (c), the owner's own Upwork developer app, with the steps printed. Upwork's
    provider note rules out (b).
 2. The owner adds the credential entry and `credentials: [upwork]` to the job's registry entry (owner-only fields: a
@@ -687,8 +699,9 @@ The project hears about it with a `brunna send --type info` once it works (its s
   - its redirect URIs are loopback only, with 47615 first;
   - both auth method fields are present;
   - it has no field CIMD forbids for a public client;
-  - the staged `_site` holds exactly one regular file at `oauth/client.json` and no links;
-  - `pages.yml` runs only on tags, and its actions are pinned by SHA;
+  - the template `oauth/pages.yml` stages exactly one regular file at `oauth/client.json` and no links, runs only on a
+    push to `main`, and pins its actions by SHA;
+  - `brunna credentials check-published` against a local server: matching security fields pass, a difference fails;
   - the registry refuses `expose.local_port: 47615`;
   - `tests/test_personal_boundary.py` passes over `bin/` and `tests/`.
 - `check-secrets` rows come from status files only, with `backup: false` as the default. `bin/linux-test` runs the store
@@ -708,20 +721,27 @@ The project hears about it with a `brunna send --type info` once it works (its s
    - Before merge it measures what M4 left open on a real run: a `tools/call` through the bridge, the filter, the `-p`
      path, SSE, and a run on the shared `~/.claude`.
    - If the bridge fails there, the loopback proxy (M3) takes its place, with a design note first.
-4. **The shared client**, once the organization exists (`<org>`, decided 11-15).
-   - `oauth/client.json` and `.github/workflows/pages.yml` (tags only, staging `_site`, actions pinned by SHA), and
-     their tests.
-   - Doctor's tripwire, and `oauth_client` in the schema.
-   - Then the owner's part: turn Pages on (source: GitHub Actions), restrict the `github-pages` environment to tags,
-     and check 2FA.
-   - Then a release tag publishes the document, and the next release ships `oauth/published`.
+4. **The shared client**, under `brunna-dev` (created 11-15).
+   - In brunna's repository:
+     - `oauth/client.json` (the pin) and `oauth/pages.yml` (the template), and their tests;
+     - doctor's tripwire and `brunna credentials check-published`;
+     - `oauth_client` in the schema;
+     - the step in CONTRIBUTING.md's release checklist.
+   - Then the owner's part, once, in the organization (no session creates a repository or changes a GitHub setting):
+     1. create `brunna-dev/brunna-dev.github.io` (public);
+     2. protect `main` (pull requests only, no force-push or deletion);
+     3. add `oauth/client.json` from the release tag, and `oauth/pages.yml` as `.github/workflows/pages.yml`, through a
+        pull request;
+     4. turn on Pages with GitHub Actions as its source, and restrict the `github-pages` environment to `main`.
+   - Then the next release's checklist confirms the published document matches, and that release ships
+     `oauth/published`.
 5. **`brunna credentials grant|set|revoke`**:
    - discovery as C2 step 2;
    - the route picked from the metadata;
    - the pin of the security fields;
    - the callback on 47615 (reserved in the registry), loopback only;
    - the confirmation;
-   - `bin/credential_providers.yaml` (Upwork's entry first, written from its developer docs at build time, with
+   - `oauth/providers.yaml` (Upwork's entry first, written from its developer docs at build time, with
      `checked_on` and links), and the instance's learned copy;
    - the to-do closing.
 6. **The user guide**, `docs/credentials.md` (C11), with a line in `docs/features.md` and `docs/commands.md`.
@@ -741,12 +761,12 @@ Only the one the grant command asks:
 
 Decided, no longer questions:
 - **By the owner, 11-15, after r4: the shared client lives under a GitHub organization (r4's option (b))**, at its
-  default `github.io` address, with 2FA required. The organization's name is written `<org>` until it is chosen
-  (`brunna` is taken by a user; `brunna-dev`, `brunna-hub` and `brunnahq` were free on 11-15). The owner creates it.
-  - The `client_id` is `https://<org>.github.io/brunna/oauth/client.json` when the repository (or a Pages-only
-    repository named `brunna`) is in the organization, or `https://<org>.github.io/oauth/client.json` from an
-    `<org>.github.io` repository.
-  - Either way it is read only from `oauth/client.json`, written once the name is known (step 4).
+  default `github.io` address. The organization is **`brunna-dev`**, created by the owner on 11-15.
+  - Checked through GitHub's public API the same day: an organization, `two_factor_requirement_enabled: true`, no
+    repositories yet.
+  - The `client_id` is `https://brunna-dev.github.io/oauth/client.json`, served from the organization's Pages repository
+    `brunna-dev/brunna-dev.github.io`. That repository holds the file itself and changes only by a reviewed pull request
+    at a brunna release; no token crosses between the repositories (C2a).
   - The trade-offs it was chosen over (a personal `github.io`, which breaks on a rename or transfer; a domain, which
     has a renewal and DNS to guard) are in r4's question as recorded in the "r4" section.
 - In r2: the bridge with the proxy as fallback; tools only; refresh on demand plus a keep-alive job; no code-running
@@ -887,7 +907,7 @@ The owner decided these directly in the session on 11-15. Folded into the body a
    - `credentials.client_metadata_url` points an install at its own document.
    - Turning on Pages is a one-time owner action (owner question 1).
    - CIMD is still a draft, so (b) RFC 7591 registration where a provider documents it and (c) the owner's own
-     developer app, with per-provider printed steps (`bin/credential_providers.yaml`), stay as fallbacks.
+     developer app, with per-provider printed steps (`oauth/providers.yaml`), stay as fallbacks.
 2. **The grant command chooses for the user** (C2 steps 3–4).
    - It picks the route from the server's metadata ((a), then (b), then (c)).
    - It asks only what it can't detect, in plain language. The confirmation of the tools and of the grant's breadth is
