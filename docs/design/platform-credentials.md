@@ -1,7 +1,7 @@
 # Credentials for unattended jobs are the platform's own grants
 
-Status: design r3, 11-15: r2 after one blind review, r3 with the owner's decisions so that a new user needs no setup
-(both listed at the end). Not built. Measured the same day (Claude Code 2.1.323 from the store, Codex 0.167.0). The
+Status: design r4, 11-15: r2 after the first blind review, r3 with the owner's decisions so that a new user needs no
+setup, r4 after the third blind review (all listed at the end). Not built. Measured the same day (Claude Code 2.1.323 from the store, Codex 0.167.0). The
 owner's open questions are near the end.
 
 ## The problem
@@ -123,14 +123,16 @@ the dummy server's tool, through the nonce-bound proxy:
 
 ## The design
 
-This is r3. r2 came after the blind review of 11-15; r3 adds the owner's decisions of the same day so that a new user
-needs no setup. The sections "r2" and "r3" at the end list what each changed.
+This is r4. r2 came after the first blind review of 11-15, r3 added the owner's decisions of the same day so that a
+new user needs no setup, and r4 folds in the third blind review. The sections "r2", "r3" and "r4" at the end list what
+each changed.
 
 **What it is for.**
 - Any remote MCP server that follows the MCP authorization spec (OAuth 2.1 with PKCE, RFC 9728 and RFC 8414 discovery).
 - Static API keys or bearer tokens sent as a header.
 - v1 is for unsandboxed projects only (C7).
-- Upwork is the first user. Only "Moving the daily job" below is specific to it; nothing else names a service.
+- Upwork is the first user. Only "Moving the daily job" below and the examples are specific to it; no mechanism names a
+  service (what differs per provider is in the provider notes, C2).
 
 **What a user does.** Nothing until the platform asks. When a job needs a grant, an owner to-do appears with one command
 (C10). The command finds out everything it can by itself and asks only what it can't detect, in plain language (C2). A
@@ -179,118 +181,171 @@ The owner to-do (C10) gives the exact line.
 
 1. **Refusals.** It refuses inside any platform run (the job/lease variables are set, or the instance's run marker) and
    without a terminal. These are reinforcement only: the consent that counts is the owner's at the provider's page.
-2. **Discovery, checked.**
-   - RFC 9728 from `server.url`: the metadata's `resource` must equal `server.url`, or the grant stops.
-   - RFC 8414 from the named authorization server (OpenID discovery as a fallback): its `issuer` must equal the server it
-     was fetched for, or the grant stops.
+2. **Discovery, as MCP 2025-11-25 describes it, checked.**
+   - **Resource metadata (RFC 9728):** the command sends one unauthenticated request to `server.url`.
+     - It takes the 401's `WWW-Authenticate` `resource_metadata` URL first.
+     - Then the path-suffixed well-known URL (`/.well-known/oauth-protected-resource/<path>`), then the root one.
+     - The metadata's `resource` must equal `server.url`, or the grant stops.
+   - **Authorization server (RFC 8414, OpenID discovery as a fallback):** v1 takes the first one listed and says so when
+     there are several.
+     - Its `issuer` must equal the server it was fetched for.
+     - `code_challenge_methods_supported` must be present and hold `S256`; else the grant stops.
+   - **Scopes:** the 401 challenge's `scope` first, then `scopes_supported`, then `--scope`, else none requested.
    - The issuer, the endpoints and what is supported are recorded with the grant. They are **never re-discovered at a
      refresh**: a refresh uses the recorded token endpoint only.
 3. **The client: picked from the metadata, never asked.** In this order:
-   - **(a) brunna's shared client, a Client ID Metadata Document**, when the server says
-     `client_id_metadata_document_supported`. This is the default (C2a).
-   - **(b) RFC 7591 dynamic registration**, when the server has a `registration_endpoint` and the platform's provider
-     notes (below) say it is RFC 7591. Upwork's advertised one points at what looks like its human sign-up page, so it
-     is not tried there. It registers a public client named brunna (`token_endpoint_auth_method: none`, loopback
-     redirects only).
-   - **(c) The owner's own developer app**, when neither works.
-     - The command prints that provider's steps from the provider notes (`bin/credential_providers.yaml`, one entry per
-       issuer: where the developer portal is, what to create, which redirect URI to enter), or generic steps for an
-       issuer with no entry.
+   - **(a) brunna's shared client** (a Client ID Metadata Document, C2a). Used only when three things hold:
+     - the server says `client_id_metadata_document_supported`;
+     - this release ships the shared client as published (`oauth/published`, C2a);
+     - doctor's daily tripwire last found the published document matching (C2a).
+
+     A fetch error, or a mismatch, while the state says "published" **stops the grant** with the reason. It never falls
+     through to another route.
+   - **(b) RFC 7591 dynamic registration**, whenever the server advertises a `registration_endpoint`, unless the
+     provider notes say it isn't RFC 7591 (Upwork's points at what looks like its human sign-up page; its note says
+     so).
+     - It registers a public client named brunna (`token_endpoint_auth_method: none`, the loopback redirect of step 5).
+     - A reply that isn't an RFC 7591 registration (no `201` with JSON holding a `client_id`) counts as **unsupported**,
+       and the command moves on to (c). A network error stops the grant.
+   - **(c) The owner's own developer app.**
+     - The command prints that provider's steps from the provider notes, or generic steps for an issuer with no entry.
      - It then reads the client ID, and a client secret without echo. The secret is stored with the grant, never in
        `brunna.json`.
+   - **The provider notes**, `bin/credential_providers.yaml`, are keyed by issuer. Each entry holds:
+     - the label shown to the owner;
+     - whether its registration endpoint is RFC 7591;
+     - what is known about loopback redirects (whether the fixed port or any port works);
+     - a scope-to-tool map where the provider publishes scopes;
+     - the steps for (c);
+     - a `checked_on` date and links to the provider's own docs.
 
-   It records the route used, and falls back to the next route only when a route is unsupported by the server, never
-   on an error (an error stops the grant and says why). It never borrows another tool's client ID.
-4. **What it asks: only what it can't detect.** Before the browser opens, one confirmation, in plain language, per
-   credential:
+     What a grant learns (step 5) is written to the instance's own copy, `<config>/credential_providers.yaml`, which
+     overrides the shipped one. Doctor suggests sending it upstream.
+   - The route used is recorded with the grant. A route moves on only when the server doesn't support it, never on an
+     error. It never borrows another tool's client ID.
+4. **What it asks: only what it can't detect.** Before the browser opens, one confirmation per credential:
 
    > The job `daily-check` will use these 6 tools of Upwork: get_messages, list_freelancer_proposals, list_offers,
    > list_contracts, get_profile, get_tool_help.
    > Upwork publishes no narrower permissions, so the sign-in will give the platform everything your account can do
    > there; the platform lets only these tools through.
-   > It will sign in at www.upwork.com (authorize) and www.upwork.com (token).
+   > The sign-in is at www.upwork.com; the token will be sent to mcp.upwork.com.
    > Continue? [y/N]
 
-   - The middle sentence changes with the metadata. Where the server lists `scopes_supported`, the command requests the
-     narrowest set that covers the tools if the provider notes map them, else it says which it requests.
-   - The hosts line is the endpoint check.
-5. **Authorization code with PKCE `S256`**, `state`, and RFC 8707 `resource=<server.url>`.
-   - The redirect goes to a one-shot listener on a **loopback** URI (`http://127.0.0.1:<port>/callback`).
+   - The service's label comes from the provider notes, by issuer, never from the project's wording. An issuer with no
+     note is shown by its host.
+   - "Will be sent to" is `server.url`'s host. When that host and the authorization server's host are on different
+     sites (registrable domains), a warning line says so before the question.
+   - Where the provider notes map scopes to tools, the command requests the narrowest set that covers the job's tools,
+     and the middle sentence says so instead.
+5. **The callback, on loopback only.**
+   - It first uses the exact URI `http://127.0.0.1:47615/callback`. CIMD draft -00 has no exception for loopback ports;
+     draft -03 (section 4.2) allows random ports via RFC 9700 section 4.1.3. The exact URI works under both.
+   - It binds `127.0.0.1:47615` explicitly before the browser opens, without `SO_REUSEPORT`.
+     - On `EADDRINUSE` it names the process holding the port.
+     - It then uses a random port with the portless `http://127.0.0.1/callback`, unless the provider notes say that
+       issuer refuses it.
+   - The registry reserves 47615: no project's `expose.local_port` may take it.
    - **The command refuses any redirect URI that isn't loopback**, whatever the client's document or registration says.
-     A hijacked document can't send the code anywhere else.
+   - If no callback comes within a few minutes, it asks in plain words: "Did the sign-in page show an error? [r]etry on
+     another port, use [y]our own app (route c), or [q]uit". What worked is recorded in the provider notes (step 3).
    - When the owner's browser is on another machine, they paste the full redirected URL back into the terminal (the page
      fails to load there, but its URL carries the code).
-   - On the redirect: `state` must match, and `iss` must equal the recorded issuer when the server advertises
+   - On the redirect: `state` must match. `iss` must equal the recorded issuer when the server advertises
      `authorization_response_iss_parameter_supported` (RFC 9207).
 6. **Exchange and store** (C3), then **verify**.
+   - The authorization code is exchanged with PKCE and RFC 8707 `resource=<server.url>`. Every token request sends
+     `resource`, refreshes included.
    - It runs `initialize` and `tools/list` through the bridge's own code, never a `tools/call`.
-   - It checks every tool the job names is listed, and says which are missing.
-   - It prints what the owner will see next: "granted; the job's next run at 09:00 will use it". It never prints a
-     token.
-7. It closes the owner to-do for this credential (C10).
+   - It checks that every tool the job names is listed, and says which are missing.
+   - It prints what the owner will see next ("granted; the job's next run at 09:00 will use it"), never a token.
+7. It closes the owner to-do for this grant episode (C10).
 
-`brunna credentials set <project> <name>` stores a `static` value read from the terminal without echo, then verifies
-it the same way.
+**`brunna credentials set <project> <name>`** stores a `static` value read from the terminal without echo. It first
+shows the same confirmation: the job, its tools, and the host the value will be sent to. Then it verifies the same way.
 
-`brunna credentials revoke <project> <name>`:
+**`brunna credentials revoke <project> <name>`:**
 - takes the lock (C4) and calls the revocation endpoint (RFC 7009) with the refresh token;
 - deletes the file and any `.new`, **even when the revocation call fails**. A failed revocation raises an alert telling
   the owner to revoke at the provider's connected-apps page.
 
+**v1's limits, stated** (each says so when hit; none is silently worked around):
+- No step-up: a 403 `insufficient_scope` in a run becomes the job's failure, with the scope named. Re-granting with
+  that scope is the owner's to-do.
+- Of several authorization servers, the first listed.
+- Tools only: no resources or prompts.
+- The Claude runtime only, until another runtime has `run_server`.
+- Unsandboxed projects only (C7).
+
 #### C2a. brunna's shared client (CIMD)
 
 The brunna project publishes **one Client ID Metadata Document**, which every install uses as its `client_id`. CIMD
-(`draft-ietf-oauth-client-id-metadata-document`) is still an IETF draft. The MCP authorization spec of 2025-11-25
-adopted it as the recommended way for a client to identify itself, which is why it is the default and (b) and (c)
-stay as fallbacks.
+is still an IETF draft (`draft-ietf-oauth-client-id-metadata-document`, -00 to -03 read for this). The MCP authorization
+spec of 2025-11-25 adopted it as the recommended way for a client to identify itself, which is why it is the default and
+(b) and (c) stay as fallbacks.
 
 - **Where it lives.**
-  - In the repository: `oauth/client.json` at the repo root. It ships with every install, as the copy that pins it.
-  - Published by GitHub Pages from a workflow, `.github/workflows/pages.yml`, that uploads only the `oauth/` folder
-    from `main`. The Pages site then serves nothing else.
-  - The URL is `https://<owner>.github.io/brunna/oauth/client.json`, for the account the public repository lives
-    under.
-  - Turning on Pages (source: GitHub Actions) is a **one-time owner action** at the repository's settings (owner
-    question 1).
-- **Its exact contents** (the `client_id` must equal the URL it is served from, byte for byte):
+  - In the repository: `oauth/client.json`. It ships with every install, and that copy is the pin.
+  - **Published only from release tags.** A workflow, `.github/workflows/pages.yml`, runs on a pushed `v*` tag. It
+    stages `_site/oauth/client.json` and uploads `_site`.
+    - `upload-pages-artifact` serves the uploaded folder's contents. Uploading `oauth/` itself would serve
+      `…/client.json`, which wouldn't match the `client_id`.
+    - The workflow fails unless `_site` holds exactly that one regular file and no links.
+  - **Immutable.** A change to any security field never edits a published file. It publishes a new one beside it
+    (`oauth/client-2.json`, a new `client_id`), so existing grants keep theirs. Older files stay published.
+  - **Its URL** is read only from the file's `client_id`. No account or host name is written in `bin/` or `tests/`
+    (`tests/test_personal_boundary.py` would match it). Where it lives for good is owner question 1.
+  - Publishing needs Pages turned on with GitHub Actions as its source, and the tag pushed to GitHub. main is pushed as
+    of v0.17.0.
+- **Its contents.** The `client_id` must equal the URL it is served from, byte for byte; `<host-and-path>` is owner
+  question 1's answer:
 
   ```json
   {
-    "client_id": "https://<owner>.github.io/brunna/oauth/client.json",
+    "client_id": "https://<host-and-path>/oauth/client.json",
     "client_name": "brunna",
-    "client_uri": "https://github.com/<owner>/brunna",
+    "client_uri": "https://github.com/<repository>",
     "redirect_uris": [
-      "http://127.0.0.1/callback",
-      "http://127.0.0.1:47615/callback"
+      "http://127.0.0.1:47615/callback",
+      "http://127.0.0.1/callback"
     ],
     "grant_types": ["authorization_code", "refresh_token"],
     "response_types": ["code"],
-    "token_endpoint_auth_method": "none"
+    "token_endpoint_auth_method": "none",
+    "token_endpoint_auth_methods_supported": ["none"]
   }
   ```
 
-  - The portless entry relies on RFC 8252 section 7.3: an authorization server lets a loopback IP redirect use any
-    port. The command then uses a free port.
-  - Whether a given server applies that to a CIMD client is learned at its first grant. When it doesn't, the command
-    retries once on the fixed port `47615` (chosen when this is built; one the platform uses for nothing else).
+  - The fixed port comes first (C2 step 5). The portless entry is for a random port where an issuer allows it.
   - `localhost` is left out on purpose: RFC 8252 prefers the loopback IP.
-  - No `logo_uri` and no `jwks`: it is a public client.
-- **Integrity.**
-  - The command fetches the published document and compares it, parsed, with the copy in the installed brunna
-    (`oauth/client.json`). Any difference refuses the grant and says why: "brunna's published client document differs
-    from this install's; run `brunna upgrade`, or report it if upgrading doesn't help".
-  - So a hijacked Pages site can't change the redirect URIs or the name a user consents to without the install
-    noticing.
-  - The loopback-only rule (C2 step 5) holds even if both copies were changed.
+  - It carries no `jwks`: it is a public client.
+- **What the pin protects, and what it doesn't.**
+  - **The pin.** At each grant the command fetches the published document and compares its **security fields** with
+    the installed copy: `client_id`, `redirect_uris`, `client_name`, `grant_types`, and the auth method fields. A
+    difference refuses the grant and says why. Other fields may differ.
+  - **What that protects:** this install's own grants. A changed document can't get this install's consent with other
+    redirects. The loopback-only rule holds even if both copies were changed.
+  - **What it doesn't:** the authorization server fetches the document itself. Whoever controls the published document
+    can make any provider show a "brunna" consent screen with their own redirect URI, and phish **anyone**, not just
+    brunna users. No check in an install stops that.
+  - **The real controls:**
+    - the repository's `github-pages` environment restricted to release tags (protected), so only a tag can publish;
+    - every action in `pages.yml` pinned by commit SHA;
+    - two-factor authentication on every account that can push tags or change Pages settings;
+    - **a daily tripwire in doctor.** It fetches the published document, compares its security fields with the
+      installed copy, alerts on a mismatch (the owner learns of a hijack within a day), and records the result that
+      route (a) reads.
+- **The "published" state.** `oauth/published` is a marker file shipped in a release, added in the first release after
+  the document is live. Without it, route (a) isn't offered, even if a document happens to be reachable.
 - **An install's own document.**
-  - `credentials.client_metadata_url` in `brunna.json` points an install at a document it hosts itself.
-  - That document has no copy shipped with brunna, so its SHA-256 is recorded at its first use (shown to the owner to
-    confirm) and kept in `credentials.client_metadata_sha256`. A later change refuses the grant until the owner
-    confirms the new hash.
-  - The loopback-only rule still applies.
+  - `oauth_client.metadata_url` in `brunna.json` (a new key in `contracts/hub.v1.schema.json`; `credentials` already
+    names the sandbox's credential folders and files) points an install at a document it hosts itself.
+  - Its SHA-256 is recorded at first use, after the owner confirms it, in `oauth_client.metadata_sha256`. A later change
+    refuses the grant until the owner confirms the new hash.
+  - The loopback-only rule still applies. The tripwire compares it with the recorded hash.
 - **What a shared client means.** Every install looks like the same client to a provider, so a provider that limits or
-  blocks that client affects all of them. A provider may also show users an "unverified app" notice, and the consent
-  page names brunna. Risks says what then.
+  blocks that client affects all of them. A provider may also show users an "unverified app" notice. Risks says what
+  then.
 
 ### C3. Storage
 
@@ -348,6 +403,11 @@ Access tokens are refreshed on demand, before a run. The scheduled job only keep
   `needs_grant`. It never loops.
 - **Failure.**
   - `invalid_grant`, a revoked grant or the lost response above sets `needs_grant`.
+  - **`invalid_client`** also sets `needs_grant`. Its reason names the client document: "the provider no longer accepts
+    brunna's client document (<client_id>)". Under CIMD (draft -03, section 6.1) that is how a provider reports a
+    document it couldn't fetch, or rejected.
+  - **An HTTP 503** from the token endpoint is transient (draft -03 says the same of a document it couldn't fetch for
+    now). It is retried at the next launch or tick, never counted as a broken grant.
   - It raises an alert (`alert.py`: once, again daily, and a recovery when it is granted again).
   - By default (`broken: todo`, the owner's decision of 11-15) it also raises an owner to-do carrying the exact
     re-grant command (C10). `broken: alert` leaves the to-do out.
@@ -489,10 +549,17 @@ step 3's measurements of the bridge fail.
    `needs_grant`, is "waiting for the owner". `brunna/credentials` (hourly) and `check-secrets` find it.
 3. **The owner gets one to-do** carrying the exact command, for example: "The job daily-check needs your sign-in at
    Upwork: run `brunna credentials grant <project> upwork` in a terminal on the hub machine".
-   - It is sent with the platform's own owner-task channel (`hubbus`, `--type task` with a key per credential,
-     `credential:<project>/<name>`), so it shows wherever owner tasks show: the assistant when the assistant module is
-     on, the built-in owner side otherwise.
-   - It is sent once per key, never duplicated, and closed (`--type done --task <key>`) when the grant succeeds.
+   - It is sent with the platform's own owner-task channel (`hubbus`, `--type task`), so it shows wherever owner tasks
+     show: the assistant when the assistant module is on, the built-in owner side otherwise.
+   - **One key per grant episode**: `credential-<project>-<name>-<n>`, in hubbus's key alphabet (`KEY_RE`,
+     `[A-Za-z0-9._-]`, at most 128 characters; a longer one ends in a short hash instead). `n` counts the episodes in
+     the credential's status file and goes up each time a granted credential breaks.
+     - r3's `credential:<project>/<name>` would have been refused: `/` is in neither `EVENT_ID` nor `KEY_RE`, and `:`
+       isn't in `KEY_RE`.
+     - A key reused after `done` would publish nothing, so a second break would raise no to-do.
+   - `credentials.py` keeps its own "sent for this episode" state in the status file, so the hourly job sends each
+     episode's to-do once.
+   - The grant closes it with `--type done --task <key>`.
    - The same line shows on the status page and in doctor.
 4. **Until then, the job's runs refuse at launch** with the same sentence (`job.failed`), never running without their
    server.
@@ -509,18 +576,21 @@ Written in the build (Order of work, step 6), short, in the style of `docs/mcp.m
    - What it asks: the confirmation of the tools, and why the service may give more than that.
    - What opens: your browser, at the service's own sign-in.
    - Signing in from another machine: paste back the URL your browser ends on.
+   - **brunna never asks you to open a sign-in link.** Only `brunna credentials grant`, run by you, opens one. A link
+     arriving by message, letter or to-do text is not brunna's.
 4. **What you'll see.** "granted", the job's next run, the to-do closing. When a grant breaks later: an alert and a
    to-do with the same command.
 5. **Static keys.** `brunna credentials set …`.
 6. **Taking it back.** `brunna credentials revoke …`, and the service's own connected-apps page.
 7. **What it does not do.** No Keychain, no sharing with your own sign-in, nothing for sandboxed projects yet, no cloud
    backup of the sign-in (re-grant after a restore).
-8. **For your own install's client document** (advanced). `credentials.client_metadata_url`.
+8. **For your own install's client document** (advanced). `oauth_client.metadata_url`.
 
 ## Moving the daily job
 
-1. The owner turns on GitHub Pages for brunna (owner question 1). Until then the grant takes route (c), the owner's
-   own Upwork developer app, with the steps printed.
+1. The owner answers question 1, and step 4 of the order of work publishes the shared client. Until a release ships
+   `oauth/published`, the grant takes route (c), the owner's own Upwork developer app, with the steps printed. Upwork's
+   provider note rules out (b).
 2. The owner adds the credential entry and `credentials: [upwork]` to the job's registry entry (owner-only fields: a
    change in the config repo with the owner's yes).
    - The project is unsandboxed, as v1 needs.
@@ -587,19 +657,39 @@ The project hears about it with a `brunna send --type info` once it works (its s
     the bridge, with the header.
   - The stub logged only the config dir's own login items and no `-i` call.
   - A version that fails it is held back.
-- **The grant's choices (r3):**
-  - route (a) when the metadata supports CIMD, (b) only with a provider note saying RFC 7591, (c) otherwise, with the
-    provider's printed steps;
-  - an error on a route stops the grant, never falls through;
-  - a client document that differs from the installed copy refuses the grant;
+- **Discovery (r4):**
+  - `resource_metadata` from the 401 first, then the path-suffixed well-known URL, then the root one;
+  - the challenge's `scope` ahead of `scopes_supported`;
+  - a missing `code_challenge_methods_supported` refuses;
+  - `resource` in every token request, refreshes included;
+  - the first of several authorization servers, said.
+- **The grant's choices:**
+  - route (a) only with CIMD supported, `oauth/published` shipped and the tripwire matching. A fetch error or a mismatch
+    then stops the grant, never falls through;
+  - (b) whenever advertised, unless a provider note says it isn't RFC 7591. A non-RFC-7591 reply moves on to (c); a
+    network error stops;
+  - (c) with the provider's printed steps;
+  - a client document whose security fields differ from the installed copy refuses, while other fields may differ;
   - an install's own document has its hash recorded at first use, and a changed hash refuses;
   - a non-loopback redirect URI is refused even when the document lists it;
-  - the retry on the fixed port;
-  - the confirmation text from a job's tools and the metadata (no scopes published, scopes published).
-- **C10:** a listed but ungranted credential raises one owner task with the exact command, never a second one for the
-  same key; a successful grant closes it; a run refuses at launch with the same sentence; doctor's rows.
-- **`oauth/client.json`:** a test checks its `client_id` equals the Pages URL for the repository, its redirect URIs are
-  loopback only, and it has no field CIMD forbids for a public client.
+  - port 47615 bound explicitly, and `EADDRINUSE` names the holder and falls back to a random port;
+  - the timeout's question;
+  - what was learned written to the instance's provider notes;
+  - the confirmation: the label by issuer, the token's host, the different-sites warning;
+  - `credentials set` confirms too.
+- **Token endpoint answers:** `invalid_client` → `needs_grant` naming the client document; 503 → retried, not broken.
+- **C10:** a listed but ungranted credential raises one owner task with the exact command, and the grant closes it.
+  **Break, re-grant, break again gives exactly two to-dos**, each with a key `KEY_RE` accepts (run through hubbus
+  itself, not a fake). A run refuses at launch with the same sentence. Doctor's rows.
+- **`oauth/client.json` and the workflow:**
+  - its `client_id` is `https`, ends in `/oauth/client.json`, and has no account name written in the test;
+  - its redirect URIs are loopback only, with 47615 first;
+  - both auth method fields are present;
+  - it has no field CIMD forbids for a public client;
+  - the staged `_site` holds exactly one regular file at `oauth/client.json` and no links;
+  - `pages.yml` runs only on tags, and its actions are pinned by SHA;
+  - the registry refuses `expose.local_port: 47615`;
+  - `tests/test_personal_boundary.py` passes over `bin/` and `tests/`.
 - `check-secrets` rows come from status files only, with `backup: false` as the default. `bin/linux-test` runs the store
   and refresh on Linux.
 
@@ -617,11 +707,22 @@ The project hears about it with a `brunna send --type info` once it works (its s
    - Before merge it measures what M4 left open on a real run: a `tools/call` through the bridge, the filter, the `-p`
      path, SSE, and a run on the shared `~/.claude`.
    - If the bridge fails there, the loopback proxy (M3) takes its place, with a design note first.
-4. **The shared client:** `oauth/client.json`, `.github/workflows/pages.yml` (uploads only `oauth/`), and its test. It
-   is merged before the owner turns Pages on (owner question 1), so the site's first content is the document.
-5. **`brunna credentials grant|set|revoke`**: the route picked from the metadata, the integrity check, the loopback-only
-   rule, the confirmation, `bin/credential_providers.yaml` (Upwork's entry first, written from its developer docs at
-   build time), and the to-do closing.
+4. **The shared client**, once owner question 1 is answered.
+   - `oauth/client.json` and `.github/workflows/pages.yml` (tags only, staging `_site`, actions pinned by SHA), and
+     their tests.
+   - Doctor's tripwire, and `oauth_client` in the schema.
+   - Then the owner's part: turn Pages on (source: GitHub Actions), restrict the `github-pages` environment to tags,
+     and check 2FA.
+   - Then a release tag publishes the document, and the next release ships `oauth/published`.
+5. **`brunna credentials grant|set|revoke`**:
+   - discovery as C2 step 2;
+   - the route picked from the metadata;
+   - the pin of the security fields;
+   - the callback on 47615 (reserved in the registry), loopback only;
+   - the confirmation;
+   - `bin/credential_providers.yaml` (Upwork's entry first, written from its developer docs at build time, with
+     `checked_on` and links), and the instance's learned copy;
+   - the to-do closing.
 6. **The user guide**, `docs/credentials.md` (C11), with a line in `docs/features.md` and `docs/commands.md`.
 7. **The daily job's move** (above), by the owner.
 
@@ -630,23 +731,41 @@ cold review.
 
 ## Open owner questions
 
-Only two, both outward-facing:
+One question now, and one the grant command asks:
 
-1. **Turn on GitHub Pages for brunna** (repository settings, source: GitHub Actions). It publishes one public file,
-   `oauth/client.json`, at `https://<owner>.github.io/brunna/oauth/client.json`. From then on every brunna install
-   presents itself to OAuth providers as the client "brunna", under the owner's GitHub account.
-   - Recommended: yes, after step 4 is merged, so the site's only content is the document.
-   - Until then the grant falls back to (b) where a provider documents it and to (c) otherwise. For Upwork that means
-     the owner's own developer app, with the steps printed.
-2. **Accept full rights at Upwork's first grant.** Upwork publishes no scopes, so the sign-in gives the platform
-   everything the owner's account can do on its MCP (send messages, submit proposals). Only the bridge's tool filter
-   holds the job to its six read tools. The command asks this itself, at the grant, in the words of C2 step 4.
-   - Recommended: yes.
+1. **Where the shared client's `client_id` lives for good, decided before its first publish.** Changing it later means a
+   new `client_id`, so every install re-grants. If the old URL stops serving the document (a rename, a transfer, an
+   expired domain), a provider may invalidate every install's refresh tokens at once (CIMD draft -03, section 6.1).
+   Whoever controls that URL controls the consent screen every provider shows as "brunna", for everyone (C2a).
+   - **(a) `<owner>.github.io/brunna`, the personal account.**
+     - Costs nothing, can be done today, and has nothing new to guard.
+     - It breaks on a username rename or a transfer of the repository, since GitHub Pages doesn't redirect and a
+       provider must not follow redirects anyway.
+     - Everyone's consent screen is guarded by one personal account.
+   - **(b) A GitHub organization for brunna** (e.g. `brunna-dev`, if free), with the repository or a small Pages-only
+     repository in it.
+     - Costs nothing, and survives a personal rename.
+     - The organization can require 2FA of every member, and later maintainers can be added without sharing a personal
+       account.
+     - It still breaks if the organization is renamed. It is one more account to set up once.
+   - **(c) A domain the project owns**, served from Pages or anywhere.
+     - Independent of GitHub account names, and movable between hosts.
+     - It costs a yearly renewal. Two more things must be guarded (the registrar and DNS).
+     - An expired or hijacked domain is the worst case: someone else serves "brunna"'s document.
+
+   **Recommended: (b), an organization, at its default `github.io` address, with 2FA required.** It removes the
+   personal-rename risk at no cost and nothing to renew. A custom domain could be added later only with a re-grant for
+   everyone, so (c) is worth it only if a domain is wanted anyway. With (b), the repository's move into the organization
+   (GitHub redirects the repository itself) can come at any time; the Pages URL is what has to be right first.
+2. **Full rights at a service's first grant**, asked by the command itself (C2 step 4), never in advance. Upwork
+   publishes no scopes, so the sign-in gives the platform everything the owner's account can do on its MCP, and only
+   the bridge's tool filter holds the job to its six read tools.
+   - Recommended: yes, for this job's read-only tools.
 
 Decided, no longer questions:
 - In r2: the bridge with the proxy as fallback; tools only; refresh on demand plus a keep-alive job; no code-running
   rules.
-- By the owner in r3 (11-15):
+- By the owner in r3 (11-15) (r3's question on turning Pages on is now part of question 1):
   - brunna's shared CIMD client as the default route, (b) and (c) as fallbacks;
   - the command picks the route itself;
   - no cloud backup of credentials, and a broken grant gives an alert plus a to-do (both defaults, overridable per
@@ -669,10 +788,19 @@ Decided, no longer questions:
 - **The shared client.**
   - Every install is the same client to a provider, so a provider that rate-limits, flags or blocks "brunna" affects
     them all. The fallbacks (b) and (c) and an install's own document keep a way through.
-  - Pages being down or the repository moving stops new grants, not existing ones: refreshes never fetch the document.
-    The client ID is recorded with each grant, so a move needs a re-grant (C10 raises it) and a new release with the
-    new URL.
-  - A hijacked Pages site is refused by the integrity check and the loopback-only rule (C2a).
+  - **The document going away can end existing grants.** r3 said refreshes never fetch the document; that holds
+    for the client, not the provider. Under CIMD the provider re-fetches the document (draft -03, sections 6 and 6.1:
+    no redirects followed).
+    - A transient failure (Pages down) should not invalidate anything, and shows as a 503 that is retried.
+    - A terminal one (a 404 after a rename or transfer, a changed `client_id`) may invalidate every install's refresh
+      tokens. That shows as `invalid_client` → `needs_grant` with the client document named (C4).
+    - That is why owner question 1 is settled before the first publish.
+  - **A hijacked document phishes everyone, not only brunna users.** The provider fetches it itself, so an attacker who
+    changes it gets "brunna" consent screens with their own redirect. An install's pin and loopback rule protect only
+    its own grants.
+    - The controls are the publishing side's: tags only, a protected `github-pages` environment, actions pinned by SHA,
+      2FA.
+    - Detection is doctor's daily tripwire (C2a).
   - CIMD is a draft and may change. The command's route (a) follows the version the MCP spec names, and the fallbacks
     don't depend on it.
 - **The token at rest.** A file readable by the owner's user, like the headless token and the backup keys. This is
@@ -794,3 +922,56 @@ The owner decided these directly in the session on 11-15. Folded into the body a
    - Upwork is the first user, and only the migration section names it.
 
 The owner questions are now the two outward-facing ones: turning on Pages, and full rights at Upwork's first grant.
+
+## r4 (11-15), after the third blind review
+
+A cold review of r3. The architecture holds; one blocking finding, eight should-fix and four nits, all taken. The review's
+sources were the CIMD drafts -00 and -03 and a probe of hubbus's keys. The key rules were checked again here:
+`EVENT_ID` is `[A-Za-z0-9._:-]`, `KEY_RE` is `[A-Za-z0-9._-]`.
+
+- **B1, the C10 key.** `credential:<project>/<name>` is refused by hubbus, and a key reused after `done` publishes
+  nothing.
+  - Now one key per grant episode, `credential-<project>-<name>-<n>`, in `KEY_RE`'s alphabet.
+  - `credentials.py` keeps its own "sent for this episode" state.
+  - Test: break, re-grant, break again gives exactly two to-dos (C10, Tests).
+- **S1, what Pages serves.** `upload-pages-artifact` serves the folder's contents. So the workflow stages
+  `_site/oauth/client.json` and uploads `_site`, and fails unless `_site` holds that one regular file and no links
+  (C2a).
+- **S2, the pin and publishing.**
+  - Published only from release tags; a security-field change goes to a new file and a new `client_id`, never an edit.
+  - The pin compares only the security fields.
+  - r3 overstated what the pin protects: the provider fetches the document itself, so a hijacked document phishes anyone
+    with a "brunna" consent screen. The real controls are now named: the tag-restricted `github-pages` environment,
+    actions pinned by SHA, 2FA, and doctor's daily tripwire (C2a, Risks).
+- **S3, the document going away.** Under draft -03 sections 6 and 6.1 that can end existing grants. `invalid_client`
+  → `needs_grant` naming the client document, and a 503 is a retry (C4). The Risks text is corrected.
+- **S4, route (a)'s availability and failures.**
+  - Route (a) is used only with `oauth/published` shipped and the tripwire matching. A fetch error then stops the grant.
+  - The exact `http://127.0.0.1:47615/callback` comes first: draft -00 has no loopback-port exception, while -03 section
+    4.2 cites RFC 9700 section 4.1.3.
+  - A random port is used only when 47615 is busy, naming the holder.
+  - A timeout asks in plain words.
+  - What was learned is recorded per issuer (C2 steps 3 and 5).
+- **S5, the confirmation.** It names the token's host and warns when that host and the sign-in's are on different sites.
+  The label comes by issuer from the provider notes. `credentials set` confirms too (C2).
+- **S6, MCP 2025-11-25 conformance.**
+  - Resource metadata from the 401's `resource_metadata` first, then the path-suffixed and root well-known URLs.
+  - The challenge's `scope` first.
+  - A missing `code_challenge_methods_supported` refuses.
+  - `resource` goes in every token request.
+  - v1's limits are stated: no step-up on `insufficient_scope`, the first authorization server, tools only, the Claude
+    runtime (C2).
+- **S7, route (b).** Tried whenever advertised, unless a provider note says it isn't RFC 7591. A non-RFC-7591 reply is
+  "unsupported", not an error. Provider entries carry `checked_on` and links (C2 step 3).
+- **S8, no account name in code.** None in `bin/` or `tests/`. The URL is read only from `oauth/client.json`'s
+  `client_id`, and its shape is tested without naming the account (C2a, Tests).
+- **N1.** The brunna.json key is `oauth_client` (`metadata_url`, `metadata_sha256`), added to the schema. `credentials`
+  is already the sandbox's.
+- **N2.** The listener binds `127.0.0.1:47615` explicitly before the browser opens, without `SO_REUSEPORT`, and names
+  the holder on `EADDRINUSE`. The registry reserves the port. The guide says brunna never asks you to open a sign-in
+  link (C2 step 5, C11).
+- **N3.** `token_endpoint_auth_methods_supported: ["none"]` is added; the logo sentence is dropped.
+- **N4.** Publishing needs the tag pushed to GitHub (main is pushed as of v0.17.0).
+- **Owner questions.** New question 1, where the `client_id` lives for good, is laid out with its trade-offs and a
+  recommendation (an organization). r3's "turn on Pages" is part of it. Full rights stays asked by the command at
+  grant time.

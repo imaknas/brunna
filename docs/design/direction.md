@@ -148,8 +148,9 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
    grants, such as an OAuth MCP server's, in the secrets directory and hands one to a job's run only through a stdio
    bridge it attaches (r2 after a blind review; a loopback proxy is the fallback). No job reads the Keychain (DV5
    stays). v1 is for unsandboxed projects. r3: a new user needs no setup. brunna's shared CIMD client is the default,
-   the grant command picks the route itself, and an owner to-do carries the exact command. Owner questions: turning on
-   GitHub Pages for brunna (after step 4), and full rights at Upwork's first grant (asked by the command).
+   the grant command picks the route itself, and an owner to-do carries the exact command. r4 comes after the third
+   blind review. Owner question: where the shared client's `client_id` lives for good (recommended: a GitHub
+   organization), decided before its first publish. Full rights at a service's first grant are asked by the command.
 7. **A project's skills** (`skills-sync.md`, the owner's decision 11-15, built 11-15): a sandboxed project develops them
    in `skills/`, and `brunna skills sync` installs them into the agents' skill folders only after the owner's typed
    yes (the platform reminds with an owner to-do per change set). Left: the migration of the project that tracks 44
