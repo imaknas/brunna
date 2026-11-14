@@ -22,7 +22,10 @@ NEUTRAL = ["policy.py", "seatbelt.py", "landlock.py", "isolation.py", "sandboxed
            # (docs/design/runtime-codex.md, Step 4 r2, S12)
            "hub-event", "render-project-settings.py",
            # the owner's skills review: each tool's skill folders are its adapter's SKILL_DIRS
-           "skills_sync.py"]
+           "skills_sync.py",
+           # the platform's credentials and its bridge to a remote server: a job's rules are read through the adapter
+           # (credential_tools), never here (docs/design/platform-credentials.md C6)
+           "credentials.py", "credential_bridge.py"]
 PATTERNS = [
     (re.compile(r"(?<![\w])\.claude\b"), "Claude's settings/credentials directory"),
     (re.compile(r"\b(Read|Edit|Write|MultiEdit|NotebookEdit|Bash|WebFetch|WebSearch|Glob|Grep)\("),

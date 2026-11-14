@@ -364,7 +364,8 @@ def run(a) -> int:
         # a settings: platform run's rules are checked when it starts: a runtime that can't check them runs none; a run
         # that gets the mail tools needs the runtime to attach the platform's server
         ports = ("agent",) + (("confine",) if confined else ()) + (("rule_check",) if spec.get("settings") == "platform" else ()) \
-            + (("run_server",) if mail_tools(spec, os.environ) else ())
+            + (("run_server",) if mail_tools(spec, os.environ) or job_credentials(spec, os.environ) else ()) \
+            + (("credential_tools",) if job_credentials(spec, os.environ) else ())
         # a dry run starts nothing: it describes the run even with no checked copy of the tool to start it with
         rt = runtime_ports.load(point_runtime(a.point, spec), ports=ports, platform_runs=not getattr(a, "dry_run", False))
     except runtime_ports.Unsupported as e:   # no coding agent, or no checked copy of it: the declared failure path, said
@@ -548,6 +549,98 @@ def attach_server(point: str, spec: dict, rt, task, run_dir) -> tuple:
     return task, None
 
 
+def job_credentials(spec: dict, env) -> str | None:
+    """The registry job whose platform credentials this run gets (credentials_from_env), or None."""
+    var = spec.get("credentials_from_env")
+    return (env or {}).get(var) or None if var else None
+
+
+def attach_credentials(point: str, spec: dict, rt, task, run_dir, dry_run: bool = False) -> tuple:
+    """A credentials job's servers (docs/design/platform-credentials.md C5): → (task, None), or (task, why it can't run).
+    The job, its credentials and its rules come from the registry (the environment only names the job); each credential
+    is made fresh here, before the launch, and reaches the run only through the platform's bridge, which reads it
+    itself: this adds a tool server per credential, appended to the run's others, whose file names the project, the
+    job and the credential."""
+    import credentials
+    import registry
+    import runtime_ports
+    job_name = job_credentials(spec, task.env)
+    if not job_name:
+        return task, None
+    project = (task.env or {}).get(spec.get("project_env") or "")
+    if not run_dir or not project:
+        return task, _("{point} did not start: a run with platform credentials needs its project and run folder",
+                       point=point)
+    idx = registry.refresh()
+    doc = idx["projects"].get(project) or {}
+    job = next((j for j in doc.get("jobs") or [] if isinstance(j, dict) and j.get("name") == job_name), None)
+    if job is None or not job.get("credentials"):
+        return task, _("{point} did not start: {project} has no job {job} with credentials:", point=point,
+                       project=project, job=job_name)
+    if json.dumps(job.get("allow") or []) != json.dumps(json.loads((task.env or {}).get(spec.get("allow_from_env") or "")
+                                                                   or "[]")):
+        return task, _("{point} did not start: its rules aren't the ones the registry gives {project}/{job}",
+                       point=point, project=project, job=job_name)
+    if not rt.sealed(task):
+        return task, _("{point} did not start: a run with platform credentials loads only the platform's servers, and "
+                       "this one would load the environment's", point=point)
+    why = registry.credential_refusals({"projects": {project: doc}}, rt).get(f"{project}/{job_name}")
+    if why:
+        return task, why
+    have = registry.credential_entries(doc)
+    env = {k: os.environ[k] for k in ("HOME", "PATH") if k in os.environ}
+    import mcp_server
+    for loc in mcp_server.LOCATIONS:
+        for k in names.env_names(loc):
+            if k in os.environ:
+                env[k] = os.environ[k]
+    servers = []
+    for name in job["credentials"]:
+        sec = have[name]
+        sid = sec["server"]["id"]
+        if not dry_run:
+            try:
+                credentials.fresh(project, name, need_s=int(task.timeout_s) + 300, idx=idx)
+            except (credentials.NeedsGrant, credentials.Transient) as e:
+                return task, _("{point} did not start: {why}", point=point, why=e)
+        run_file = pathlib.Path(run_dir) / f"credential-{sid}.json"
+        tools = tuple(rt.tools_named(task, sid))
+        body = {"project": project, "job": job_name, "credential": name, "tools": list(tools)}
+        fd = os.open(run_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(json.dumps(body, ensure_ascii=False))
+        server = runtime_ports.ToolServer(id=sid, command=sys.executable,
+                                          args=("-I", str(hubconf.ROOT / "bin" / "credential_bridge.py"), "--run",
+                                                str(run_file)), env=env, tools=tools)
+        if any("$" in x for x in (server.command, *server.args, *env.values())):
+            return task, _("{point} did not start: the platform's tool server for it would be given a $ in its command, "
+                           "arguments or environment, which the runtime may expand", point=point)
+        servers.append(server)
+    return rt.run_server(task._replace(servers=(*task.servers, *servers))), None
+
+
+def bridge_failure(run_dir) -> str | None:
+    """After a credentials run: why it failed on the bridge's side, whatever the model said (a bridge that never
+    initialized, or one that ended on a credential the server refused), from the bridges' status files."""
+    if not run_dir:
+        return None
+    for run_file in sorted(pathlib.Path(run_dir).glob("credential-*.json")):
+        if run_file.name.endswith(".status.json"):
+            continue
+        sid = run_file.name[len("credential-"):-len(".json")]
+        try:
+            st = json.loads((pathlib.Path(run_dir) / f"credential-{sid}.status.json").read_text())
+        except (OSError, ValueError):
+            return _("the platform's bridge to {server} never started", server=sid)
+        if st.get("unrecovered"):
+            return _("the server {server} refused the platform's credential: {why}", server=sid,
+                     why=st.get("last_error") or "-")
+        if not st.get("initialized"):
+            return _("the platform's bridge to {server} never connected: {why}", server=sid,
+                     why=st.get("last_error") or "-")
+    return None
+
+
 def run_letters(env, var: str) -> list[str] | None:
     """The letters a mail handler's run is started for (a JSON list in env[var]): None when there is none, or when any
     entry isn't a letter id."""
@@ -608,6 +701,13 @@ def _launch(a, spec: dict, rt, env: dict, prompt: str, model, run_dir, how: str 
                 print(why, file=sys.stderr)
                 return 2
             return fail(key, spec, why)
+    if job_credentials(spec, env):
+        task, why = attach_credentials(a.point, spec, rt, task, run_dir, dry_run=getattr(a, "dry_run", False))
+        if why:
+            if getattr(a, "dry_run", False):
+                print(why, file=sys.stderr)
+                return 2
+            return fail(key, spec, why)
     if spec.get("tool_servers") == "allowed_only":
         task, why, checked = deny_unnamed_servers(a.point, task)
         real = a.cmd == "run" and not getattr(a, "dry_run", False)   # a dry run only shows, never alerts
@@ -648,6 +748,8 @@ def _launch(a, spec: dict, rt, env: dict, prompt: str, model, run_dir, how: str 
         import completion
         completion.record_run(key, point_runtime(a.point, spec) or runtime_ports.default_name(), model, how,
                               res.cost_usd, res.stop, env.get(spec.get("project_env") or "") or None)
+    if job_credentials(spec, env) and (why := bridge_failure(run_dir)):
+        return fail(key, spec, why)
     if not res.ok:
         return fail(key, spec, res.error)
     # no structured_output isn't a failure: handed to the caller as is (the librarian deliberately "still goes by the
@@ -702,6 +804,10 @@ def mail_problems(name: str, spec: dict) -> list[str]:
     for key in ("mail_from_env", "letters_env"):
         if key in spec and spec.get("mail") != "tools":
             bad.append(_("judgment point {name}: {key} needs mail: tools", name=name, key=key))
+    if "credentials_from_env" in spec and (spec.get("settings") != "platform" or not spec.get("allow_from_env")
+                                           or spec.get("prompt_source") == "untrusted"):
+        bad.append(_("judgment point {name}: credentials_from_env is only for a settings: platform point with "
+                     "allow_from_env whose prompt is the owner's", name=name))
     if spec.get("mail") == "tools" and spec.get("tool_servers") != "allowed_only":
         bad.append(_("judgment point {name}: mail: tools needs tool_servers: allowed_only (a server under the platform's "
                      "own id would otherwise go unchecked)", name=name))

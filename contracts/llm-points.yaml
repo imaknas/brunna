@@ -192,6 +192,9 @@ points:
     mail: tools
     mail_from_env: AGENT_JOB_MAIL
     tier_from_env: AGENT_JOB_TIER
+    # the platform credentials of the registry job this names (docs/design/platform-credentials.md C5): each through
+    # the platform's bridge, read from the registry, never from the environment
+    credentials_from_env: AGENT_JOB_CREDENTIALS
     timeout_s: 3600
     output: {format: text}
     on_failure: say_so      # the job fails, status page red

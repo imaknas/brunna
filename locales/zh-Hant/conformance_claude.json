@@ -52,5 +52,9 @@
  "the first run named no session": "第一次執行沒有給出 session",
  "the fork didn't run: {why}": "分支沒跑起來:{why}",
  "the fork kept the session's own id": "分支沿用了原 session 的 id",
- "the fork didn't read the session it was forked from": "分支沒讀到它分出來的那個 session"
+ "the fork didn't read the session it was forked from": "分支沒讀到它分出來的那個 session",
+ "a sealed run didn't start its stdio server and list its tools ({seen})": "封閉的執行沒有啟動它的 stdio server 並列出工具({seen})",
+ "the server's tool isn't named as the rules name it": "server 的工具名稱和規則寫的不一樣",
+ "tools_named doesn't read the rule back": "tools_named 讀不回這條規則",
+ "the run called `security -i` (a Keychain write) with a stdio server attached": "掛上 stdio server 的執行呼叫了 `security -i`(寫入 Keychain)"
 }

@@ -42,5 +42,14 @@
  "the request needs a prompt, and a schema that is a JSON object if any": "請求要有 prompt;有 schema 的話要是 JSON 物件",
  "{key} declares a timeout of {minutes} minutes; the most is {limit}": "{key} 宣告的時限是 {minutes} 分鐘;最多 {limit} 分鐘",
  "a project's own declared agent call (run by cap-runner)": "專案自己宣告的 agent 呼叫(由 cap-runner 執行)",
- "{key} declares no tier (one of {tiers})": "{key} 沒有宣告 tier({tiers} 其中之一)"
+ "{key} declares no tier (one of {tiers})": "{key} 沒有宣告 tier({tiers} 其中之一)",
+ "{point} did not start: a run with platform credentials needs its project and run folder": "{point} 沒有啟動:帶平台憑證的執行需要它的專案和執行資料夾",
+ "{point} did not start: {project} has no job {job} with credentials:": "{point} 沒有啟動:{project} 沒有帶 credentials: 的 job {job}",
+ "{point} did not start: its rules aren't the ones the registry gives {project}/{job}": "{point} 沒有啟動:它的規則不是登錄給 {project}/{job} 的那些",
+ "{point} did not start: a run with platform credentials loads only the platform's servers, and this one would load the environment's": "{point} 沒有啟動:帶平台憑證的執行只載入平台給的 server,這次卻會載入環境裡的",
+ "the server {server} refused the platform's credential: {why}": "server {server} 拒絕了平台的憑證:{why}",
+ "the platform's bridge to {server} never connected: {why}": "平台到 {server} 的 bridge 一直沒連上:{why}",
+ "judgment point {name}: credentials_from_env is only for a settings: platform point with allow_from_env whose prompt is the owner's": "判斷點 {name}:credentials_from_env 只給有 allow_from_env、提示是擁有者寫的 settings: platform 判斷點",
+ "the platform's bridge to {server} never started": "平台到 {server} 的 bridge 一直沒啟動",
+ "{point} did not start: {why}": "{point} 沒有啟動:{why}"
 }

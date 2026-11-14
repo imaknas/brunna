@@ -490,6 +490,60 @@ def auth_keychain(world) -> Outcome:
     return Outcome("fail", _("it looked up the user's own login item")) if own else Outcome("pass")
 
 
+# ---------- credential_tools: the platform's bridge as a run's stdio server (platform-credentials.md C5) ----------
+BRIDGE_PROBE = r"""import json, sys
+log = sys.argv[1]
+for line in sys.stdin:
+    m = json.loads(line)
+    open(log, "a").write(json.dumps({"method": m.get("method")}) + "\n")
+    if "id" not in m:
+        continue
+    if m.get("method") == "initialize":
+        r = {"protocolVersion": "2025-11-25", "capabilities": {"tools": {}}, "serverInfo": {"name": "probe", "version": "0"}}
+    elif m.get("method") == "tools/list":
+        r = {"tools": [{"name": "probe__read_one", "inputSchema": {"type": "object"}}]}
+    else:
+        print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "error": {"code": -32601, "message": "no"}}), flush=True)
+        continue
+    print(json.dumps({"jsonrpc": "2.0", "id": m["id"], "result": r}), flush=True)
+"""
+
+
+def credential_bridge(world) -> Outcome:
+    """A sealed run (--strict-mcp-config) loads a stdio server from --mcp-config and lists its tools before any login is
+    used, the server id and a tool name holding __ kept as tools_named reads them, and nothing reaches for the Keychain
+    on that server's behalf: no `security -i` (a write), only the run's own config dir's login lookups. No model call:
+    the run has no login, so it stops after connecting."""
+    root = pathlib.Path(world.root)
+    probe, log = root / "bridge_probe.py", root / "bridge_probe.log"
+    probe.write_text(BRIDGE_PROBE)
+    stub = root / "bridge-stub"
+    stub.mkdir(mode=0o700, exist_ok=True)
+    calls = stub / "calls.log"
+    (stub / "security").write_text(f'#!/bin/sh\nprintf "%s\\n" "$*" >> "{calls}"\nexit 44\n')
+    (stub / "security").chmod(0o700)
+    cfg = root / "bridge-mcp.json"
+    cfg.write_text(json.dumps({"mcpServers": {"probe-server": {"command": sys.executable,
+                                                               "args": ["-I", str(probe), str(log)], "env": {}}}}))
+    env = {k: v for k, v in os.environ.items() if k != rc.TOKEN_VAR}
+    env["PATH"] = f"{stub}:{env.get('PATH', '')}"
+    r = _claude(["-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--mcp-config", str(cfg),
+                 "--no-session-persistence"], cwd=world.project, stdin=ASK, env=env, timeout=120)
+    seen = [json.loads(x).get("method") for x in log.read_text().splitlines()] if log.exists() else []
+    if "initialize" not in seen or "tools/list" not in seen:
+        return Outcome("fail", _("a sealed run didn't start its stdio server and list its tools ({seen})",
+                                 seen=", ".join(map(str, seen)) or "-"))
+    tools = _init_tools(r) or []
+    if tools and "mcp__probe-server__probe__read_one" not in tools:
+        return Outcome("fail", _("the server's tool isn't named as the rules name it"))
+    if rc.rules_tools_named(["mcp__probe-server__probe__read_one"], "probe-server") != ["probe__read_one"]:
+        return Outcome("fail", _("tools_named doesn't read the rule back"))
+    lookups = calls.read_text().splitlines() if calls.exists() else []
+    if any(c.split()[:1] == ["-i"] for c in lookups):
+        return Outcome("fail", _("the run called `security -i` (a Keychain write) with a stdio server attached"))
+    return Outcome("pass")
+
+
 # ---------- control and confine-sandbox: a sandboxed throwaway project's session (section 7, step 4) ----------
 # The world gets a sandboxed project and a neighbour in its own registry; the project's session settings are rendered by
 # the platform's renderer (policy → settings), and a throwaway session in bypass mode (V-M9: denies hold there, the
@@ -857,6 +911,7 @@ CHECKS = [
           "each rule form the platform writes, probed against the tool's own parser"),
     Check("run-server", "run_server", "function", None,
           "a run with the platform's mail server attached lists its tools in the init event"),
+    Check("credential-bridge", "credential_tools", "safety", credential_bridge, timeout_s=180),
     Check("session-status", "session_status", "function", None, V_M6, side="session"),
     Check("session-summary", "session_summary", "function", None, V_M6, side="session"),
     Check("wake", "wake", "function", None, V_M6, side="session"),
