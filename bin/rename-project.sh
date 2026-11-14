@@ -89,7 +89,8 @@ hub_say "rename-project: {old} → {new}
                           {folder}" \
   old="$OLD" new="$NEW" old_path="$OLD_PATH" new_path="$NEW_PATH" old_origin="$OLD_ORIGIN" new_origin="$NEW_ORIGIN" \
   old_mirror="$OLD_MIRROR_NAME" new_mirror="$NEW_MIRROR_NAME" remote="$MEMORY_REMOTE" url="$(mini_memory_url "$NEW")" folder="$folder"
-"$HUB/bin/py" "$HUB/bin/credentials.py" rename "$OLD" "$NEW"   # the platform credentials that move, if any
+# the platform credentials that move, if any (they are on the hub machine: listed here only when this is it)
+! on_mini || "$HUB/bin/py" "$HUB/bin/credentials.py" rename "$OLD" "$NEW"
 $APPLY || { hub_say "(dry-run; add --apply to carry it out)"; exit 0; }
 
 if [ "$NEW_PATH" != "$OLD_PATH" ]; then
@@ -137,6 +138,8 @@ mv ~/.memory-copies/$OLD ~/.memory-copies/$NEW
 git -C ~/.memory-copies/$NEW remote set-url origin ~/git-origin/$NEW-memory.git
 git -C ~/.memory-copies/$NEW fetch -q origin
 [ -f $ckpt/$OLD.sha ] && mv $ckpt/$OLD.sha $ckpt/$NEW.sha || true
+# the platform credentials and their statuses (bin/credentials.py rename: nothing moves unless every place is free)
+$hubdir/bin/py $hubdir/bin/credentials.py rename $OLD $NEW --apply
 '
 EOF
 # The mirror is renamed only when origin really is a URL. A project without a remote has origin "(native)": it used
@@ -182,9 +185,6 @@ hub_say "[local] remote / folder / worktree updated"
 # the project registry is the source of truth (jobs, services, privacy labels are all in it and move together)
 "$HUB/bin/py" "$HUB/bin/registry.py" rename "$OLD" "$NEW" "$NEW_PATH" "$NEW_ORIGIN" "~/git-origin/$NEW-memory.git" \
   || fail "$(hub_msg "renaming the registry entry failed (projects/{old}.yaml → {new}.yaml); the other steps are done, so fix the registry entry by hand" old="$OLD" new="$NEW")"
-# the platform's grants and their statuses follow the project (docs/design/platform-credentials.md C3)
-"$HUB/bin/py" "$HUB/bin/credentials.py" rename "$OLD" "$NEW" --apply \
-  || fail "$(hub_msg "moving the platform credentials of {old} failed; move <secrets>/credentials*/{old} by hand" old="$OLD")"
 # transcripts under the old name count toward the new name: rename it in legacy-paths.tsv and record the old path
 # that moved away too
 awk -F'\t' -v OFS='\t' -v o="$OLD" -v n="$NEW" '$1==o{$1=n} {print}' "$LEGACY" > "$LEGACY.tmp" && mv "$LEGACY.tmp" "$LEGACY"

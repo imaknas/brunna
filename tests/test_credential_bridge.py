@@ -112,6 +112,72 @@ class Bridge(Scratch):
         self.assertTrue(declined and all("error" in e["body"] for e in declined), "answered upstream with an error")
         self.assertEqual(self.srv.posts()[-1]["headers"].get("Mcp-Session-Id"), "s-1")
 
+    def test_a_403_is_not_a_refused_credential(self):
+        b, out = self.bridge()
+        self.session(b)
+        refreshed = []
+        with mock.patch.object(credential_bridge.Bridge, "refresh", lambda self: refreshed.append(1) or False), \
+                mock.patch.object(credential_bridge.Upstream, "send",
+                                  side_effect=credential_bridge.Forbidden("403 insufficient_scope")):
+            b.handle(json.dumps({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}))
+        self.assertEqual(self.replies(out)[-1]["error"]["code"], -32003)
+        self.assertEqual(refreshed, [], "no refresh for a 403")
+        st = self.status()
+        self.assertFalse(st["unrecovered"])
+        import llm
+        (self.tmp / "credential-upwork.json").write_text("{}")
+        self.assertIn("refused a call the job needs", llm.bridge_failure(self.tmp))
+
+    def test_an_answer_that_breaks_off_is_refused(self):
+        import http.client
+        b, out = self.bridge()
+        self.session(b)
+        with mock.patch.object(credential_bridge.Upstream, "_deliver", side_effect=http.client.IncompleteRead(b"{")):
+            b.handle(json.dumps({"jsonrpc": "2.0", "id": 9, "method": "tools/list"}))
+        self.assertEqual(self.replies(out)[-1]["error"]["code"], -32002)
+        self.assertIn("broke off", self.status()["last_error"])
+
+    def test_a_session_id_must_be_visible_ascii(self):
+        self.assertTrue(credential_bridge.SESSION_ID.fullmatch("s-1"))
+        for bad in ("a\r\nX-Evil: 1", "a b", "", "é"):
+            self.assertIsNone(credential_bridge.SESSION_ID.fullmatch(bad), bad)
+
+    def test_anything_else_becomes_an_error_and_a_crash_fails_the_run(self):
+        b, out = self.bridge()
+        with mock.patch.object(credential_bridge.Bridge, "forward", side_effect=KeyError("x")):
+            b.handle(json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/list"}))
+        self.assertEqual(self.replies(out)[-1]["error"]["code"], -32603)
+        self.assertIn("KeyError", self.status()["last_error"])
+        import llm
+        (self.tmp / "credential-upwork.json").write_text("{}")
+        st = self.status()
+        (self.tmp / "credential-upwork.status.json").write_text(json.dumps({**st, "initialized": True, "ended": "crashed"}))
+        self.assertIn("crashed", llm.bridge_failure(self.tmp))
+        (self.tmp / "credential-upwork.status.json").write_text(json.dumps({**st, "initialized": True, "ended": "terminated"}))
+        self.assertIsNone(llm.bridge_failure(self.tmp), "the agent closing its servers is how a run ends")
+
+    def test_redaction_forms_and_the_token_refreshed_away(self):
+        import base64
+        import urllib.parse
+        b, out = self.bridge()
+        b.hide({"access_token": "new-token-123456"})
+        for form in (TOKEN, urllib.parse.quote("tok/en+" + TOKEN, safe=""), base64.b64encode(TOKEN.encode()).decode(),
+                     base64.b64encode(f"Bearer {TOKEN}".encode()).decode(), "new-token-123456"):
+            b.write({"jsonrpc": "2.0", "id": 1, "result": {"text": form}})
+        text = out.getvalue()
+        for secret in (TOKEN, base64.b64encode(TOKEN.encode()).decode().rstrip("="), "new-token-123456"):
+            self.assertNotIn(secret, text)
+
+    def test_a_later_success_doesnt_clear_a_refused_credential(self):
+        self.cred["access_token"] = "a-wrong-one"
+        b, out = self.bridge()
+        with mock.patch.object(credential_bridge.Bridge, "refresh", lambda self: False):
+            b.handle(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
+        b.cred = {**b.cred, "access_token": TOKEN}
+        b.up.header = credential_bridge.header_for(b.run.sec, b.cred)
+        b.handle(json.dumps({"jsonrpc": "2.0", "id": 2, "method": "initialize", "params": {}}))
+        self.assertTrue(self.status()["unrecovered"])
+
     def test_a_redirect_is_never_followed(self):
         other = mcp_fixture.Server(self, token=TOKEN)
         self.srv.redirect_to = other.url
@@ -223,6 +289,15 @@ class DetachedRefresh(Scratch):
         [post] = self.srv.posts("/token")
         self.assertIn("refresh_token=r1", post["body"])
 
+    def test_a_static_value_refused_once_is_retried_not_marked(self):
+        static = {"v": 1, "kind": "static", "value": TOKEN}   # the server takes it: the ping goes through
+        started = []
+        self.cred = static
+        b, _out = self.bridge()
+        with mock.patch("subprocess.Popen", lambda *a, **k: started.append(a)):
+            self.assertTrue(b.refresh(), "one retry with the same value")
+        self.assertEqual(started, [], "nothing marked")
+
     def test_a_refused_static_value_needs_the_owner(self):
         tmp, sec, doc, sent = self.tmp, {**self.sec, "kind": "static"}, self.doc, []
         bases = (tmp / "creds", tmp / "creds-kept")
@@ -311,18 +386,24 @@ class RunFile(Scratch):
 class Attach(Scratch):
     """llm.py adds one bridge per credential, after the mail server, only to a sealed run whose rules are the registry's."""
 
-    def attach(self, extra=(), allow=ALLOW, fresh=None):
+    def attach(self, extra=(), allow=ALLOW, fresh=None, prompt="daily.md", cwd=None):
         import llm
+        import registry
         import runtime_claude
+        (self.tmp / "daily.md").write_text("p")
+        doc = {**self.doc, "paths": {"workspace": str(self.tmp)},
+               "jobs": [{**self.doc["jobs"][0], "cwd": "workspace", "prompt": "jobs/daily.md"}]}
         spec = {"settings": "platform", "project_env": "AGENT_JOB_PROJECT", "allow_from_env": "AGENT_JOB_ALLOW",
                 "credentials_from_env": "AGENT_JOB_CREDENTIALS"}
         env = {"AGENT_JOB_PROJECT": "demo", "AGENT_JOB_ALLOW": json.dumps(allow), "AGENT_JOB_CREDENTIALS": "daily"}
         mail = runtime_ports.ToolServer("brunna-run", "py", (), {}, ("send",))
         task = runtime_ports.Task("agent-job-confined", "p", spec, env=env, extra=tuple(extra), servers=(mail,),
-                                  run_dir=str(self.tmp))
-        with mock.patch("registry.refresh", lambda: {"projects": {"demo": self.doc}}), \
+                                  run_dir=str(self.tmp), cwd=str(cwd or self.tmp))
+        with mock.patch("registry.refresh", lambda: {"projects": {"demo": doc}}), \
+                mock.patch.object(registry, "job_prompt", lambda stem, job: self.tmp / "daily.md"), \
                 mock.patch.object(credentials, "fresh", fresh or (lambda *a, **k: TOKEN)):
-            return llm.attach_credentials("agent-job-confined", spec, runtime_claude, task, self.tmp)
+            return llm.attach_credentials("agent-job-confined", spec, runtime_claude, task, self.tmp,
+                                          prompt_file=str(self.tmp / prompt))
 
     def test_appended_with_its_file(self):
         task, why = self.attach(extra=("--strict-mcp-config",))
@@ -343,6 +424,81 @@ class Attach(Scratch):
         def needs(*a, **k):
             raise credentials.NeedsGrant("demo/upwork needs the owner: run brunna credentials grant demo upwork")
         self.assertIn("credentials grant", self.attach(extra=("--strict-mcp-config",), fresh=needs)[1])
+        other = self.tmp / "elsewhere"
+        other.mkdir()
+        self.assertIn("folder", self.attach(extra=("--strict-mcp-config",), cwd=other)[1], "the frozen job's folder")
+        (self.tmp / "other.md").write_text("p")
+        self.assertIn("prompt", self.attach(extra=("--strict-mcp-config",), prompt="other.md")[1], "and its prompt")
+
+
+class LlmRun(Scratch):
+    """A credentials job through llm.run itself, on a stand-in runtime: the ports it loads, the bridge attached after
+    the rule check and before the run, and the bridge's status read after it (a dry run, then stubbed runs)."""
+
+    def run_llm(self, status=None, dry=False):
+        import argparse
+        import types
+        import llm
+        import registry
+        ws = self.tmp / "ws"
+        ws.mkdir(exist_ok=True)
+        (self.tmp / "daily.md").write_text("probe")
+        doc = {**self.doc, "paths": {"workspace": str(ws)},
+               "jobs": [{**self.doc["jobs"][0], "cwd": "workspace", "prompt": "jobs/daily.md"}]}
+        seen = {"loaded": [], "order": []}
+
+        def run(task):
+            seen["order"].append("run")
+            seen["task"] = task
+            if status is not None:
+                (pathlib.Path(task.run_dir) / "credential-upwork.status.json").write_text(json.dumps(status))
+            return runtime_ports.TaskResult(ok=True, text="done")
+
+        def rule_problems(task, **k):
+            seen["order"].append("rules")
+            return []
+        import runtime_claude
+        rt = types.SimpleNamespace(
+            run=run, describe=lambda task: seen.update(task=task) or ["described"], rule_problems=rule_problems,
+            run_server=lambda task: task, sealed=runtime_claude.sealed, tools_named=runtime_claude.tools_named,
+            rules_tools_named=runtime_claude.rules_tools_named,
+            credential_rules_problems=runtime_claude.credential_rules_problems,
+            ambient_servers=lambda task: None, servers_named=lambda task: [])
+
+        def load(name=None, ports=(), **k):
+            seen["loaded"].append(tuple(ports))
+            return rt
+        env = {"AGENT_JOB_PROJECT": "demo", "AGENT_JOB_ALLOW": json.dumps(ALLOW), "AGENT_JOB_CREDENTIALS": "daily"}
+        a = argparse.Namespace(cmd="run", point="agent-job-confined", cwd=str(ws), model=None,
+                               prompt_file=str(self.tmp / "daily.md"), dry_run=dry, extra=["--strict-mcp-config"])
+        failed = []
+        with mock.patch.dict(os.environ, env), mock.patch.object(hubconf, "STATE", self.tmp / "state"), \
+                mock.patch.object(runtime_ports, "load", load), \
+                mock.patch.object(runtime_ports, "capabilities", lambda name=None: {"agent", "confine", "rule_check"}), \
+                mock.patch("registry.refresh", lambda: {"projects": {"demo": doc}}), \
+                mock.patch.object(registry, "job_prompt", lambda stem, job: self.tmp / "daily.md"), \
+                mock.patch.object(credentials, "fresh", lambda *a, **k: TOKEN), \
+                mock.patch.object(llm, "job_failed", lambda point, reason: failed.append(reason)), \
+                mock.patch("sys.stdout", io.StringIO()):
+            code = llm.run(a)
+        return code, seen, failed
+
+    def test_the_dry_run_describes_a_run_with_the_bridge(self):
+        code, seen, failed = self.run_llm(dry=True)
+        self.assertEqual((code, failed), (0, []))
+        self.assertTrue(any("credential_tools" in p and "run_server" in p for p in seen["loaded"]), seen["loaded"])
+        self.assertEqual([s.id for s in seen["task"].servers], ["upwork"])
+
+    def test_a_run_whose_bridge_connected_passes_and_one_whose_didnt_fails(self):
+        code, seen, failed = self.run_llm(status={"initialized": True, "ended": "terminated"})
+        self.assertEqual((code, failed), (0, []))
+        self.assertEqual(seen["order"], ["rules", "run"], "the rules checked before, the run after the attachment")
+        self.assertEqual([s.id for s in seen["task"].servers], ["upwork"])
+        code, _seen, failed = self.run_llm(status={"initialized": False, "last_error": "x"})
+        self.assertEqual(code, 1)
+        self.assertIn("never connected", failed[0], "the model's success doesn't make the run green")
+        code, _seen, failed = self.run_llm(status=None)
+        self.assertIn("never started", failed[0])
 
 
 if __name__ == "__main__":

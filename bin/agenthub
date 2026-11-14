@@ -1789,7 +1789,9 @@ def doctor_credentials(add) -> None:
         add("warn", _("platform credentials: can't be read ({why})", why=e))
         return
     for row in rows:
-        if row["state"] == "granted":
+        if row["state"] == "orphaned":
+            add("warn", credentials.waiting_text(row), row["command"])
+        elif row["state"] == "granted":
             add("ok", _("platform credential {project}/{name}: granted", project=row["project"], name=row["name"]))
         elif row["jobs"] or row["state"] == "needs_grant":
             add("warn", credentials.waiting_text(row), row["command"])

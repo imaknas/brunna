@@ -271,8 +271,8 @@ def main(argv: list[str]) -> int:
         copies = hubconf.p("memory_copies", "~/.memory-copies")
         if purge:   # the platform's grants are revoked at their providers before the instance goes
             import credentials
-            for line in credentials.revoke_all():
-                print(_("✓ {what}", what=line))
+            for ok, line in credentials.revoke_all():
+                print(_("✓ {what}", what=line) if ok else f"⚠️ {line}")
         for p in data:
             if p.parent == copies and (p / ".git").is_dir():   # a memory copy goes holding its writer lock (memlock)
                 with memlock.hold(p, "uninstall") as got:

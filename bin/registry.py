@@ -930,6 +930,9 @@ def validate_job_credentials(job: dict, doc: dict) -> list[str]:
                       "(docs/design/platform-credentials.md C7)"))
     if doc.get("type") == "module":
         errs.append(_("credentials: is for a project's jobs, not a module's"))
+    if doc.get("type") == "platform" or doc.get("name") in names.all("project"):
+        # its rules may write the platform's own state, where a run's bridge keeps its status
+        errs.append(_("credentials: is not for the platform's own jobs (their rules may write the platform's state)"))
     have = credential_entries(doc)
     errs += [_("{name} is not a platform credential of this project (secrets: with kind)", name=c) for c in creds
              if c not in have]

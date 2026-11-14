@@ -75,6 +75,9 @@ class Registry(unittest.TestCase):
             d = self.doc(**job)
             with self.subTest(job):
                 self.assertNotEqual(registry.validate_job_credentials(d["jobs"][0], d), [])
+        platform = {**ok, "name": "brunna", "type": "platform"}
+        self.assertTrue(any("platform's own jobs" in e for e in registry.validate_job_credentials(ok["jobs"][0], platform)),
+                        "a job of the platform's own may write its state, the bridge's status folder included")
         sandboxed = {**ok, "enforce": {"sandbox": True}}
         self.assertTrue(any("sandboxed" in e for e in registry.validate_job_credentials(ok["jobs"][0], sandboxed)))
 
@@ -228,6 +231,7 @@ class Store(unittest.TestCase):
         lost = credentials.Transient("timed out")
         lost.lost = True
         with mock.patch.object(credentials, "token_request", side_effect=lost) as tr, \
+                mock.patch.object(credentials, "RETRY_BACKOFF_S", 0), \
                 self.assertRaisesRegex(credentials.NeedsGrant, "lost twice"):
             credentials.fresh("demo", "upwork", idx=self.idx)
         self.assertEqual(tr.call_count, 2)
@@ -254,6 +258,60 @@ class Store(unittest.TestCase):
         self.assertIn("credentials grant demo upwork", tasks[0][5])
         self.assertEqual(dones[0][3], keys[0], "the grant closed the first episode's to-do")
 
+    def test_a_connection_that_never_opened_is_not_lost(self):
+        import socket
+        with mock.patch.object(socket, "create_connection", side_effect=TimeoutError("timed out")):
+            with self.assertRaises(credentials.Transient) as e:
+                credentials.http("POST", self.srv.base + "/token", data=b"x")
+        self.assertFalse(e.exception.lost)
+        self.grant(access_expires_at=time.time() - 1)
+        with mock.patch.object(socket, "create_connection", side_effect=TimeoutError("timed out")), \
+                self.assertRaises(credentials.Transient):
+            credentials.fresh("demo", "upwork", idx=self.idx)
+        self.assertEqual(credentials.read_status("demo", "upwork")["state"], "granted", "an outage never needs the owner")
+
+    def test_a_token_that_isnt_bearer_is_refused(self):
+        self.grant(access_expires_at=time.time() - 1)
+        self.srv.token_answers = [(200, {"access_token": "acc-2", "token_type": "mac"})]
+        with self.assertRaisesRegex(credentials.NeedsGrant, "bearer"):
+            credentials.fresh("demo", "upwork", idx=self.idx)
+
+    def test_provider_text_is_clamped(self):
+        self.assertEqual(credentials.clamp('a"b\\c\nd'), "a?b?c?d")
+        self.assertLessEqual(len(credentials.clamp("x" * 500)), 120)
+
+    def test_the_host_warning(self):
+        self.assertEqual(credentials.host_lines("mcp.upwork.com", "mcp.upwork.com"), [])
+        self.assertIn("different hosts", credentials.host_lines("www.upwork.com", "mcp.upwork.com")[0])
+        for a, b in (("auth.example.co.uk", "mcp.other.co.uk"), ("alice.github.io", "bob.github.io"),
+                     ("login.example.org", "mcp.example.net")):
+            self.assertIn("different sites", credentials.host_lines(a, b)[0], (a, b))
+        self.assertIn("different hosts", credentials.host_lines("a.alice.github.io", "b.alice.github.io")[0])
+
+    def test_https_everywhere_and_the_discovery_order(self):
+        gets = []
+        meta = {"issuer": "https://as.example.com/t1", "authorization_endpoint": "https://as.example.com/a",
+                "token_endpoint": "https://as.example.com/t", "code_challenge_methods_supported": ["S256"],
+                "registration_endpoint": "http://as.example.com/r", "revocation_endpoint": "http://as.example.com/v"}
+
+        def get_json(url, op=None):
+            gets.append(url)
+            if url == "https://mcp.example.com/.well-known/oauth-protected-resource/mcp":
+                return {"resource": "https://mcp.example.com/mcp", "authorization_servers": [issuer[0]]}
+            return meta if url == "https://as.example.com/t1/.well-known/openid-configuration" else None
+        issuer = ["https://as.example.com/t1"]
+        with mock.patch.object(credentials, "http", lambda *a, **k: (401, {}, b"")), \
+                mock.patch.object(credentials, "get_json", get_json):
+            d = credentials.discover("https://mcp.example.com/mcp")
+            self.assertNotIn("registration_endpoint", d["as"])
+            self.assertNotIn("revocation_endpoint", d["as"])
+            self.assertEqual(gets[1:], ["https://as.example.com/.well-known/oauth-authorization-server/t1",
+                                        "https://as.example.com/.well-known/openid-configuration/t1",
+                                        "https://as.example.com/t1/.well-known/openid-configuration"])
+            issuer[0] = "http://as.example.com"
+            with self.assertRaisesRegex(ValueError, "issuer"):
+                credentials.discover("https://mcp.example.com/mcp")
+
     def test_a_long_key_stays_in_the_alphabet(self):
         k = credentials.todo_key("p" * 90, "n" * 48, 12)
         self.assertLessEqual(len(k), 128)
@@ -276,12 +334,58 @@ class Store(unittest.TestCase):
     def test_revoke_deletes_even_when_the_provider_fails(self):
         self.grant()
         self.srv.revoke_status = 500
-        with mock.patch.object(credentials, "entry", lambda p, n, idx=None: (self.doc, self.sec)):
-            self.assertFalse(credentials.revoke("demo", "upwork"))
+        with mock.patch.object(credentials, "REQUIRE_HTTPS", False):
+            self.assertEqual(credentials.revoke("demo", "upwork"), "local", "deleted here only")
         self.assertIsNone(credentials.found("demo", "upwork"))
         self.assertTrue(any(k.startswith("credential-revoke") for k, _p in self.alerts))
-        [post] = self.srv.posts("/revoke")
-        self.assertIn("token=ref-1", post["body"])
+        posts = self.srv.posts("/revoke")
+        self.assertIn("token=ref-1", posts[0]["body"])
+        self.assertIn("token=acc-1", posts[1]["body"], "the access token too")
+        self.assertEqual(credentials.revoke("demo", "upwork"), "none")
+
+    def test_revoke_takes_the_newest_and_works_without_a_registry_entry(self):
+        cred = self.grant()
+        path = credentials.found("demo", "upwork")
+        credentials._write_private(path.with_name(path.name + ".new"), {**cred, "refresh_token": "ref-newest",
+                                                                        "issued_at": time.time() + 5})
+        self.doc["secrets"] = []   # an orphan: no entry declares it any more
+        [row] = [r for r in credentials.rows(self.idx) if r["state"] == "orphaned"]
+        self.assertIn("credentials revoke demo upwork", credentials.waiting_text(row))
+        with mock.patch.object(credentials, "REQUIRE_HTTPS", False):
+            self.assertEqual(credentials.revoke("demo", "upwork"), "provider")
+        self.assertIn("token=ref-newest", self.srv.posts("/revoke")[0]["body"])
+        self.assertFalse(path.with_name(path.name + ".new").exists())
+
+    def test_a_revoke_starts_a_new_episode(self):
+        self.grant()
+        before = credentials.read_status("demo", "upwork").get("episode") or 1
+        credentials.revoke("demo", "upwork")
+        credentials.keepalive(self.idx)
+        tasks = [a for a in self.sent if a[1] == "task"]
+        self.assertEqual(len(tasks), 1)
+        self.assertTrue(tasks[0][3].endswith(f"-{before + 1}"))
+
+    def test_the_hourly_job_closes_a_todo_whose_close_failed(self):
+        credentials.keepalive(self.idx)   # not granted: a to-do
+        with mock.patch.object(credentials, "owner_notify", side_effect=OSError("bus down")):
+            self.grant()   # its close fails
+        self.assertFalse(credentials.read_status("demo", "upwork")["todo"]["closed"])
+        credentials.keepalive(self.idx)
+        self.assertTrue(credentials.read_status("demo", "upwork")["todo"]["closed"])
+        self.assertEqual([a[1] for a in self.sent], ["task", "done"])
+
+    def test_check_secrets_counts_credential_files_as_declared(self):
+        import hubconf
+        spec = importlib.util.spec_from_file_location("check_secrets_t", ROOT / "bin" / "check-secrets.py")
+        cs = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cs)
+        sec = hubconf.secrets_dir()
+        f = sec / "credentials" / "demo" / "github-token.json"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("{}")
+        self.addCleanup(shutil.rmtree, sec / "credentials", True)
+        listed = cs.undeclared(hubconf.hub_project(), {"name": hubconf.hub_project()}, set())
+        self.assertNotIn(f, listed)
 
     def test_backup_false_stays_out_of_the_backup(self):
         import backup
@@ -290,10 +394,44 @@ class Store(unittest.TestCase):
 
     def test_rename_moves_both(self):
         self.grant()
-        with mock.patch.object(credentials.hubconf, "STATE", self.tmp / "state-root"):
-            self.assertEqual(len(credentials.rename("demo", "demo2", apply=False)), 1)
+        root = self.tmp / "state-root"
+        (root / "credentials" / "demo").mkdir(parents=True)
+        (root / "credentials" / "demo" / "upwork.json").write_text("{}")
+        with mock.patch.object(credentials.hubconf, "STATE", root):
+            self.assertEqual(len(credentials.rename("demo", "demo2", apply=False)), 2)
+            (root / "credentials" / "demo2").mkdir()
+            with self.assertRaises(ValueError):   # a destination taken: nothing moves
+                credentials.rename("demo", "demo2", apply=True)
+            self.assertTrue((credentials.bases()[0] / "demo" / "upwork.json").exists())
+            (root / "credentials" / "demo2").rmdir()
             credentials.rename("demo", "demo2", apply=True)
         self.assertTrue((credentials.bases()[0] / "demo2" / "upwork.json").exists())
+        self.assertTrue((root / "credentials" / "demo2" / "upwork.json").exists(), "the status moves too")
+
+    def test_the_backup_leaves_credentials_out_and_keeps_kept(self):
+        import backup
+        import hubconf
+        import subprocess
+        calls = []
+
+        def restic(*args, **k):
+            calls.append(args)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        sec = hubconf.secrets_dir()
+        sec.mkdir(parents=True, exist_ok=True)
+        with mock.patch.object(backup, "ensure_repo", lambda: None), \
+                mock.patch.object(backup, "stage", lambda: {"sqlite": [], "bundles": [], "workspace": []}), \
+                mock.patch.object(backup, "included", lambda: [sec]), mock.patch.object(backup, "restic", restic), \
+                mock.patch.object(backup, "retention_due", lambda *a: False), \
+                mock.patch.object(backup, "OUT", self.tmp / "out"), mock.patch.object(backup, "say", lambda m: None):
+            backup.cmd_run()
+            self.assertTrue(backup.covers(sec / "credentials-kept" / "demo" / "upwork.json"))
+            self.assertFalse(backup.covers(sec / "credentials" / "demo" / "upwork.json"))
+        [args] = [a for a in calls if a[0] == "backup"]
+        i = [j for j, x in enumerate(args) if x == "--exclude" and args[j + 1] == str(sec / "credentials")]
+        self.assertTrue(i, args)
+        self.assertNotIn(str(sec / "credentials-kept"), args)
+        self.assertIn(str(sec), args)
 
     def test_discovery_checks_what_it_is_told(self):
         with mock.patch.object(credentials, "REQUIRE_HTTPS", False):
@@ -364,7 +502,7 @@ class Store(unittest.TestCase):
         self.assertEqual(other.log, [], "the redirect was never followed, the header never sent there")
 
     # ---- the grant, driven end to end: a fake browser follows the authorization URL to the callback ----
-    def grant_cmd(self, browser, answers=("cid", "y"), own_app=True, meta=None):
+    def grant_cmd(self, browser, answers=("y", "cid"), own_app=True, meta=None):
         self.srv.oauth(**(meta or {}))
         self.srv.token = "tok-granted"
         self.srv.token_answers = [(200, {"access_token": "tok-granted", "refresh_token": "r1", "expires_in": 3600})]
@@ -375,6 +513,7 @@ class Store(unittest.TestCase):
                 mock.patch.object(credentials, "ask", side_effect=list(answers)), \
                 mock.patch("getpass.getpass", lambda prompt="": ""), mock.patch("webbrowser.open", browser), \
                 mock.patch.object(credentials, "learn", lambda *a, **k: None), \
+                mock.patch.object(credentials, "CALLBACK_WAIT_S", 2), \
                 mock.patch.object(runtime_ports, "load", lambda *a, **k: runtime_claude):
             return credentials.cmd_grant("demo", "upwork", own_app=own_app, port=0)
 
@@ -410,7 +549,7 @@ class Store(unittest.TestCase):
 
     def test_a_wrong_state_or_a_missing_iss_is_refused(self):
         open_, _seen = self.browser(state="forged")
-        self.assertEqual(self.grant_cmd(open_), 1)
+        self.assertEqual(self.grant_cmd(open_, answers=("y", "cid", "q")), 1, "the forged answer is ignored; none comes")
         self.assertIsNone(credentials.load("demo", "upwork"))
         open_, _seen = self.browser()
         self.assertEqual(self.grant_cmd(open_, meta={"authorization_response_iss_parameter_supported": True}), 1)
@@ -420,8 +559,25 @@ class Store(unittest.TestCase):
 
     def test_saying_no_stops_before_the_browser(self):
         opened = []
-        self.assertEqual(self.grant_cmd(lambda url: opened.append(url), answers=("cid", "n")), 1)
+        self.assertEqual(self.grant_cmd(lambda url: opened.append(url), answers=("n",)), 1)
         self.assertEqual(opened, [])
+        self.assertEqual(self.srv.posts("/register"), [], "nothing sent before the owner's yes")
+
+    def test_only_the_first_matching_callback_counts(self):
+        import urllib.error
+        import urllib.request
+        want = {"state": "s-1"}
+        srv, got, done = credentials.bind_callback(0, want)
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        base = f"http://127.0.0.1:{srv.server_address[1]}/callback"
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(base + "?code=evil&state=other")
+        self.assertFalse(done.is_set())
+        urllib.request.urlopen(base + "?code=good&state=s-1")
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(base + "?code=late&state=s-1")
+        self.assertEqual(got["code"], "good")
 
     def test_a_pasted_address(self):
         r, w = os.pipe()

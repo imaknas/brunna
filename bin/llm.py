@@ -555,7 +555,8 @@ def job_credentials(spec: dict, env) -> str | None:
     return (env or {}).get(var) or None if var else None
 
 
-def attach_credentials(point: str, spec: dict, rt, task, run_dir, dry_run: bool = False) -> tuple:
+def attach_credentials(point: str, spec: dict, rt, task, run_dir, dry_run: bool = False,
+                       prompt_file: str | None = None) -> tuple:
     """A credentials job's servers (docs/design/platform-credentials.md C5): → (task, None), or (task, why it can't run).
     The job, its credentials and its rules come from the registry (the environment only names the job); each credential
     is made fresh here, before the launch, and reaches the run only through the platform's bridge, which reads it
@@ -580,6 +581,17 @@ def attach_credentials(point: str, spec: dict, rt, task, run_dir, dry_run: bool 
     if json.dumps(job.get("allow") or []) != json.dumps(json.loads((task.env or {}).get(spec.get("allow_from_env") or "")
                                                                    or "[]")):
         return task, _("{point} did not start: its rules aren't the ones the registry gives {project}/{job}",
+                       point=point, project=project, job=job_name)
+    # the frozen job (registry.credential_jobs): its prompt file and its folder are the registry's too
+    want_prompt = registry.job_prompt(project, job)
+    if prompt_file is None or want_prompt is None \
+            or pathlib.Path(prompt_file).resolve() != pathlib.Path(want_prompt).resolve():
+        return task, _("{point} did not start: its prompt isn't the one the registry gives {project}/{job}",
+                       point=point, project=project, job=job_name)
+    want_cwd = hubconf.STATE / "agent-jobs" / registry.agent_state_name(project, job) if job.get("cwd") == "state" \
+        else registry.dirs(doc).get(job.get("cwd") or registry.default_cwd(doc))
+    if not want_cwd or not task.cwd or pathlib.Path(task.cwd).resolve() != pathlib.Path(want_cwd).resolve():
+        return task, _("{point} did not start: its folder isn't the one the registry gives {project}/{job}",
                        point=point, project=project, job=job_name)
     if not rt.sealed(task):
         return task, _("{point} did not start: a run with platform credentials loads only the platform's servers, and "
@@ -632,9 +644,13 @@ def bridge_failure(run_dir) -> str | None:
             st = json.loads((pathlib.Path(run_dir) / f"credential-{sid}.status.json").read_text())
         except (OSError, ValueError):
             return _("the platform's bridge to {server} never started", server=sid)
+        if st.get("ended") == "crashed":
+            return _("the platform's bridge to {server} crashed: {why}", server=sid, why=st.get("last_error") or "-")
         if st.get("unrecovered"):
             return _("the server {server} refused the platform's credential: {why}", server=sid,
                      why=st.get("last_error") or "-")
+        if st.get("scope_error"):
+            return _("the server {server} refused a call the job needs: {why}", server=sid, why=st["scope_error"])
         if not st.get("initialized"):
             return _("the platform's bridge to {server} never connected: {why}", server=sid,
                      why=st.get("last_error") or "-")
@@ -702,7 +718,8 @@ def _launch(a, spec: dict, rt, env: dict, prompt: str, model, run_dir, how: str 
                 return 2
             return fail(key, spec, why)
     if job_credentials(spec, env):
-        task, why = attach_credentials(a.point, spec, rt, task, run_dir, dry_run=getattr(a, "dry_run", False))
+        task, why = attach_credentials(a.point, spec, rt, task, run_dir, dry_run=getattr(a, "dry_run", False),
+                                       prompt_file=getattr(a, "prompt_file", None))
         if why:
             if getattr(a, "dry_run", False):
                 print(why, file=sys.stderr)

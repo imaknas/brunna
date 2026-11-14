@@ -198,5 +198,6 @@
  "service {name}: local_port {port} is the platform's (the sign-in callback of brunna credentials grant)": "服務 {name}:local_port {port} 是平台的(brunna credentials grant 登入的回呼)",
  "{where}: kind (a platform credential) is for a project's registry entry, not a module": "{where}:kind(平台憑證)是給專案的登錄項目,不是模組",
  "{where}: {key} is only for an entry with kind (a platform credential)": "{where}:{key} 只給帶 kind 的項目(平台憑證)",
- "its credentials can't be given on this runtime: {why}": "在這個 runtime 上給不了它的憑證:{why}"
+ "its credentials can't be given on this runtime: {why}": "在這個 runtime 上給不了它的憑證:{why}",
+ "credentials: is not for the platform's own jobs (their rules may write the platform's state)": "credentials: 不給平台自己的 job(它們的規則可能寫到平台的狀態)"
 }

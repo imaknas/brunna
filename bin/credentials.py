@@ -40,7 +40,6 @@ import stat
 import subprocess
 import sys
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -61,7 +60,9 @@ KEEPALIVE_S = 23 * 3600        # a refresh token unused this long is used (provi
 HTTP_TIMEOUT_S = 30
 REQUIRE_HTTPS = True           # the metadata and endpoints a grant follows (tests serve them over local http)
 # what makes an HTTP client go elsewhere than where it is told: never honoured here or in the bridge (C5)
-ENV_DROP = ("http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
+MAX_BODY = 1 << 20             # an answer from a token, metadata or registration endpoint: at most this
+RETRY_BACKOFF_S = 3            # before the one retry of a refresh whose answer was lost
+ENV_DROP = ("SSLKEYLOGFILE", "http_proxy", "https_proxy", "all_proxy", "no_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
             "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE")
 SECURITY_FIELDS = ("client_id", "redirect_uris", "client_name", "grant_types", "token_endpoint_auth_method",
                    "token_endpoint_auth_methods_supported")
@@ -157,11 +158,15 @@ def _write_private(path: pathlib.Path, data: dict) -> None:
     tmp = path.with_name(f".{path.name}.{os.getpid()}.{secrets.token_hex(4)}")
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
-        os.write(fd, json.dumps(data, ensure_ascii=False, indent=1).encode())
-        os.fsync(fd)
-    finally:
-        os.close(fd)
-    os.replace(tmp, path)
+        try:
+            os.write(fd, json.dumps(data, ensure_ascii=False, indent=1).encode())
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)   # never a stray copy of a credential beside it
+        raise
     dfd = os.open(path.parent, os.O_RDONLY)
     try:
         os.fsync(dfd)
@@ -199,10 +204,11 @@ def token_hash(token: str | None) -> str:
 
 
 class Lock:
-    """flock on <name>.lock beside the credential: one refresher or revoker at a time."""
+    """flock on <name>.lock beside the credential: one writer (a grant, a refresh, a revoke, a move) at a time. base:
+    the folder the stored file is in (an orphan's, or one whose backup: setting changed), else the entry's."""
 
-    def __init__(self, project: str, name: str, sec: dict):
-        self.path = base_for(sec) / project / f"{name}.lock"
+    def __init__(self, project: str, name: str, sec: dict | None = None, base: pathlib.Path | None = None):
+        self.path = (base or base_for(sec or {})) / project / f"{name}.lock"
 
     def __enter__(self):
         self.path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -237,25 +243,41 @@ def opener():
                                        urllib.request.HTTPSHandler(context=ctx))
 
 
+def _transient(e, lost: bool) -> Transient:
+    err = Transient(clamp(e, 200))
+    err.lost = lost
+    return err
+
+
 def http(method: str, url: str, *, data: bytes | None = None, headers: dict | None = None, op=None):
-    """→ (status, headers, body). A network error raises Transient; 'lost' is set on it when the request may have been
-    received (a timeout or a reset after sending)."""
-    req = urllib.request.Request(url, data=data, method=method,
-                                 headers={"User-Agent": f"{names.current('cli')}-credentials", **(headers or {})})
+    """→ (status, headers, body), body at most MAX_BODY. No redirect is followed (a 3xx is returned as it is), no proxy
+    or CA from the environment. A network error raises Transient, with 'lost' set only when the request was written
+    whole and its answer didn't come (the provider may have acted on it); a connection that never opened isn't lost."""
+    import http.client as hc
+    import ssl
+    scrub_env()
+    u = urllib.parse.urlsplit(url)
+    if u.scheme not in ("https", "http") or not u.hostname:
+        raise _transient(ValueError(f"not an http(s) URL: {url}"), lost=False)
+    conn = hc.HTTPSConnection(u.hostname, u.port, timeout=HTTP_TIMEOUT_S, context=ssl.create_default_context()) \
+        if u.scheme == "https" else hc.HTTPConnection(u.hostname, u.port, timeout=HTTP_TIMEOUT_S)
     try:
-        r = (op or opener()).open(req, timeout=HTTP_TIMEOUT_S)
-        return r.status, r.headers, r.read()
-    except urllib.error.HTTPError as e:
-        return e.code, e.headers, e.read()
-    except (TimeoutError, ConnectionResetError) as e:
-        err = Transient(str(e))
-        err.lost = True
-        raise err
-    except (urllib.error.URLError, OSError) as e:
-        lost = isinstance(getattr(e, "reason", None), (TimeoutError, ConnectionResetError))
-        err = Transient(str(getattr(e, "reason", e)))
-        err.lost = lost
-        raise err
+        try:
+            conn.connect()
+            conn.request(method, (u.path or "/") + (f"?{u.query}" if u.query else ""), body=data,
+                         headers={"User-Agent": f"{names.current('cli')}-credentials", **(headers or {})})
+        except (OSError, hc.HTTPException) as e:
+            raise _transient(e, lost=False)
+        try:
+            r = conn.getresponse()
+            body = r.read(MAX_BODY + 1)
+        except (OSError, hc.HTTPException) as e:
+            raise _transient(e, lost=True)
+        if len(body) > MAX_BODY:
+            raise _transient(ValueError(f"an answer over {MAX_BODY} bytes"), lost=True)
+        return r.status, r.headers, body
+    finally:
+        conn.close()
 
 
 def get_json(url: str, op=None) -> dict | None:
@@ -294,6 +316,22 @@ def token_request(cred: dict, form: dict, op=None) -> tuple[int, dict]:
     except ValueError:
         d = {}
     return status, d if isinstance(d, dict) else {}
+
+
+ERROR_CHARS = re.compile(r"[^\x20\x21\x23-\x5b\x5d-\x7e]")   # RFC 6749's error and error_description characters
+
+
+def clamp(text, n: int = 120) -> str:
+    """A provider's text (an error code, a client ID, a description) before it reaches a to-do, an alert or a terminal:
+    RFC 6749's characters only, at most n of them."""
+    out = ERROR_CHARS.sub("?", str(text if text is not None else ""))
+    return out if len(out) <= n else out[:n - 1] + "…"
+
+
+def bearer(answer: dict) -> bool:
+    """A token response's token_type, where it says one, is Bearer (the only kind the bridge sends)."""
+    t = answer.get("token_type")
+    return t is None or (isinstance(t, str) and t.lower() == "bearer")
 
 
 def apply_tokens(cred: dict, answer: dict) -> dict:
@@ -357,11 +395,15 @@ def refresh(project: str, name: str, failed: str | None = None, idx: dict | None
                 status, answer = token_request(cred, form, op=op)
                 break
             except Transient as e:
-                if not getattr(e, "lost", False):
+                if not getattr(e, "lost", False):   # never sent, or not whole: an outage, tried again later
                     _note(project, name, last_result="transient", last_error=str(e))
                     raise
                 if attempt == 2:   # a rotated refresh token may be gone with the lost answer: never a loop
                     raise _broken(project, name, sec, _("the answer to a refresh was lost twice ({why})", why=e))
+                time.sleep(RETRY_BACKOFF_S)
+        if status == 200 and answer.get("access_token") and not bearer(answer):
+            raise _broken(project, name, sec, _("✗ the token isn't a bearer token ({type}): refused",
+                                                type=clamp(answer.get("token_type"))))
         if status == 200 and answer.get("access_token"):
             cred = apply_tokens(cred, answer)
             _commit(path, cred)
@@ -371,9 +413,9 @@ def refresh(project: str, name: str, failed: str | None = None, idx: dict | None
         err = answer.get("error")
         if err == "invalid_client":
             raise _broken(project, name, sec, _("the provider no longer accepts this grant's client ({client}): "
-                                                "invalid_client", client=cred["client"].get("client_id")))
+                                                "invalid_client", client=clamp(cred["client"].get("client_id"), 80)))
         if err in ("invalid_grant", "unauthorized_client") or status in (400, 401):
-            raise _broken(project, name, sec, _("the provider refused the refresh ({error})", error=err or status))
+            raise _broken(project, name, sec, _("the provider refused the refresh ({error})", error=clamp(err or status)))
         _note(project, name, last_result="transient", last_error=f"HTTP {status}")
         raise Transient(_("the token endpoint answered HTTP {status}", status=status))
 
@@ -464,7 +506,7 @@ def raise_todo(project: str, name: str, sec: dict, why: str | None = None) -> bo
     doc = index()["projects"].get(project) or {}
     jobs = ", ".join(j.get("name") for j in jobs_using(doc, name)) or "-"
     text = _c("{project}: the job {jobs} needs your sign-in for {name}{why}. Run in a terminal on the hub machine: "
-              "{command}", project=project, jobs=jobs, name=name, why=f" ({why})" if why else "",
+              "{command}", project=project, jobs=jobs, name=name, why=f" ({clamp(why, 200)})" if why else "",
               command=grant_command(project, name, sec))
     key = todo_key(project, name, episode)
     try:
@@ -495,11 +537,13 @@ def close_todo(project: str, name: str) -> None:
 
 
 def granted(project: str, name: str, sec: dict, cred: dict, route: str | None = None) -> None:
-    """A new grant stored: the status is granted, this episode's to-do closed, the alert recovered."""
-    _commit(cred_path(project, name, sec), cred)
-    other = [b / project / f"{name}.json" for b in bases() if b != base_for(sec)]
-    for o in other:
-        o.unlink(missing_ok=True)
+    """A new grant stored, under the lock: the status is granted, this episode's to-do closed, the alert recovered."""
+    with Lock(project, name, sec):
+        path = cred_path(project, name, sec)
+        path.with_name(path.name + ".new").unlink(missing_ok=True)   # an older refresh's leftover never wins over it
+        _commit(path, cred)
+        for o in [b / project / f"{name}.json" for b in bases() if b != base_for(sec)]:
+            o.unlink(missing_ok=True)
     _note(project, name, state="granted", granted_at=now_iso(), route=route or cred.get("client", {}).get("route"),
           last_result="ok", last_error=None, refresh_used_at=now_iso(), access_expires_at=cred.get("access_expires_at"))
     close_todo(project, name)
@@ -554,7 +598,10 @@ def _keep(project, name, sec, doc, idx, op) -> None:
             raise_todo(project, name, sec)
         return
     if not st.get("state"):
-        _note(project, name, state="granted")
+        st = _note(project, name, state="granted")
+    todo = st.get("todo") or {}
+    if st.get("state") == "granted" and todo.get("sent") and not todo.get("closed"):
+        close_todo(project, name)   # its close failed at the grant: tried again each hour
     cred = _read_private(path)
     if cred.get("kind") == "oauth" and cred.get("refresh_token"):
         last = st.get("refresh_used_at")
@@ -583,11 +630,24 @@ def rows(idx: dict | None = None) -> list[dict]:
                         "access_expires_at": st.get("access_expires_at"), "last_refresh": st.get("last_refresh"),
                         "last_error": st.get("last_error"), "refresh_used_at": st.get("refresh_used_at"),
                         "mode": mode, "command": grant_command(project, name, sec), "broken": sec.get("broken", "todo")})
+    # stored credentials no registry entry declares any more: still live at their provider until revoked
+    declared = {(r["project"], r["name"]) for r in out}
+    for b in bases():
+        for f in sorted(b.glob("*/*.json")) if b.is_dir() else []:
+            if (f.parent.name, f.stem) not in declared:
+                declared.add((f.parent.name, f.stem))
+                out.append({"project": f.parent.name, "name": f.stem, "kind": None, "state": "orphaned", "jobs": [],
+                            "server": None, "access_expires_at": None, "last_refresh": None, "last_error": None,
+                            "refresh_used_at": None, "mode": f.stat().st_mode & 0o777, "broken": "alert",
+                            "command": f"{names.current('cli')} credentials revoke {f.parent.name} {f.stem}"})
     return out
 
 
 def waiting_text(row: dict) -> str:
     """One line saying a credential waits for the owner, with the command (the status page, doctor, check-secrets)."""
+    if row["state"] == "orphaned":
+        return _("{project}/{name} is stored but no registry entry declares it; revoke it: {command}",
+                 project=row["project"], name=row["name"], command=row["command"])
     if row["state"] == "needs_grant":
         return _("{project}/{name} needs your sign-in again ({why}): {command}", project=row["project"],
                  name=row["name"], why=row.get("last_error") or "-", command=row["command"])
@@ -596,7 +656,7 @@ def waiting_text(row: dict) -> str:
 
 
 def waiting(idx: dict | None = None) -> list[dict]:
-    return [r for r in rows(idx) if r["state"] != "granted" and (r["jobs"] or r["state"] == "needs_grant")]
+    return [r for r in rows(idx) if r["state"] != "granted" and (r["jobs"] or r["state"] in ("needs_grant", "orphaned"))]
 
 
 def cmd_status(argv: list[str]) -> int:
@@ -709,9 +769,31 @@ def learn(issuer: str, **facts) -> None:
 
 
 # ---------- the grant (C2) ----------
+# public suffixes under which different names are different owners: the registrable domain is one label more there
+# (a short list of the common ones; with no list in the standard library, an unknown one counts as two labels)
+SHARED_SUFFIXES = {"co.uk", "org.uk", "ac.uk", "gov.uk", "me.uk", "com.au", "net.au", "org.au", "co.jp", "co.nz",
+                   "com.br", "com.cn", "co.in", "co.kr", "com.tw", "github.io", "gitlab.io", "herokuapp.com",
+                   "vercel.app", "netlify.app", "pages.dev", "workers.dev", "appspot.com", "azurewebsites.net",
+                   "cloudfront.net", "fly.dev", "onrender.com", "web.app", "firebaseapp.com"}
+
+
 def _site(host: str) -> str:
-    """A host's site, roughly (its last two labels): enough to warn when the token goes elsewhere than the sign-in."""
-    return ".".join((host or "").lower().split(".")[-2:])
+    """A host's registrable domain, roughly: its last two labels, three under a shared suffix (co.uk, github.io…)."""
+    labels = (host or "").lower().rstrip(".").split(".")
+    n = 3 if ".".join(labels[-2:]) in SHARED_SUFFIXES else 2
+    return ".".join(labels[-n:])
+
+
+def host_lines(sign_in: str, token_host: str) -> list[str]:
+    """The confirmation's warning when the token goes to another host than the sign-in: soft on the same site, strong
+    across sites."""
+    if not sign_in or sign_in.lower() == token_host.lower():
+        return []
+    if _site(sign_in) == _site(token_host):
+        return [_("The sign-in ({host}) and the server the token goes to ({token_host}) are different hosts of {site}.",
+                  host=sign_in, token_host=token_host, site=_site(token_host))]
+    return [_("⚠️ The sign-in ({host}) and the server the token goes to ({token_host}) are on different sites.",
+              host=sign_in, token_host=token_host)]
 
 
 def _challenge(header: str | None) -> dict:
@@ -720,6 +802,12 @@ def _challenge(header: str | None) -> dict:
     for k, v in re.findall(r'(\w+)="([^"]*)"', header or ""):
         out[k] = v
     return out
+
+
+def secure(url) -> bool:
+    """https (or, only in tests that switch REQUIRE_HTTPS off, http)."""
+    scheme = urllib.parse.urlsplit(str(url or "")).scheme
+    return scheme == "https" or (not REQUIRE_HTTPS and scheme == "http")
 
 
 def discover(server_url: str, op=None) -> dict:
@@ -737,7 +825,7 @@ def discover(server_url: str, op=None) -> dict:
                               f"{origin}/.well-known/oauth-protected-resource") if c]
     rm = None
     for c in candidates:
-        if urllib.parse.urlsplit(c).scheme != "https" and (REQUIRE_HTTPS or urllib.parse.urlsplit(c).scheme != "http"):
+        if not secure(c):
             continue
         rm = get_json(c, op=op)
         if rm:
@@ -745,17 +833,23 @@ def discover(server_url: str, op=None) -> dict:
     if not rm:
         raise ValueError(_("the server publishes no protected-resource metadata (RFC 9728); it can't be granted this way"))
     if rm.get("resource") != server_url:
-        raise ValueError(_("the server's metadata names the resource {got}, not {url}: refused", got=rm.get("resource"),
+        raise ValueError(_("the server's metadata names the resource {got}, not {url}: refused", got=clamp(rm.get("resource")),
                            url=server_url))
     servers = [s for s in rm.get("authorization_servers") or [] if isinstance(s, str)]
     if not servers:
         raise ValueError(_("the server names no authorization server"))
     issuer = servers[0]
+    if not secure(issuer):
+        raise ValueError(_("the authorization server's {key} is not https: refused", key="issuer"))
     iu = urllib.parse.urlsplit(issuer)
     ipath = iu.path.rstrip("/")
+    root = f"{iu.scheme}://{iu.netloc}"
+    # RFC 8414's path-inserted URL, then OpenID's path-inserted and path-appended ones (MCP 2025-11-25's order)
+    tries = [f"{root}/.well-known/oauth-authorization-server{ipath}", f"{root}/.well-known/openid-configuration{ipath}"]
+    if ipath:
+        tries.append(f"{issuer.rstrip('/')}/.well-known/openid-configuration")
     meta = None
-    for c in (f"{iu.scheme}://{iu.netloc}/.well-known/oauth-authorization-server{ipath}",
-              f"{issuer.rstrip('/')}/.well-known/openid-configuration"):
+    for c in dict.fromkeys(tries):
         meta = get_json(c, op=op)
         if meta:
             break
@@ -763,20 +857,24 @@ def discover(server_url: str, op=None) -> dict:
         raise ValueError(_("the authorization server {issuer} publishes no metadata (RFC 8414)", issuer=issuer))
     if meta.get("issuer") != issuer:
         raise ValueError(_("the authorization server's metadata says its issuer is {got}, not {issuer}: refused",
-                           got=meta.get("issuer"), issuer=issuer))
+                           got=clamp(meta.get("issuer")), issuer=issuer))
     if "S256" not in (meta.get("code_challenge_methods_supported") or []):
         raise ValueError(_("the authorization server doesn't say it takes PKCE S256 (code_challenge_methods_supported): "
                            "refused"))
     for k in ("authorization_endpoint", "token_endpoint"):
-        scheme = urllib.parse.urlsplit(str(meta.get(k) or "")).scheme
-        if scheme != "https" and (REQUIRE_HTTPS or scheme != "http"):
+        if not secure(meta.get(k)):
             raise ValueError(_("the authorization server's {key} is not https: refused", key=k))
+    for k in ("registration_endpoint", "revocation_endpoint"):   # optional ones: dropped when not https
+        if k in meta and not secure(meta.get(k)):
+            print(_("The authorization server's {key} is not https; it is not used.", key=k))
+            meta = {key: v for key, v in meta.items() if key != k}
     scope = ch.get("scope") or " ".join(rm.get("scopes_supported") or []) or None
     return {"resource": server_url, "issuer": issuer, "as": meta, "scope": scope, "several": len(servers) > 1}
 
 
 def register_client(meta: dict, redirect: str, op=None) -> dict | None:
-    """Route (b): RFC 7591. None when the endpoint's answer isn't a registration (unsupported, not an error)."""
+    """Route (b): RFC 7591. None when the endpoint's answer isn't a registration (unsupported, not an error).
+    ValueError when it registered redirects off this machine's loopback."""
     body = {"client_name": names.current("cli"), "redirect_uris": [redirect], "grant_types": ["authorization_code",
             "refresh_token"], "response_types": ["code"], "token_endpoint_auth_method": "none"}
     status, _h, raw = http("POST", meta["registration_endpoint"], data=json.dumps(body).encode(), op=op,
@@ -787,8 +885,11 @@ def register_client(meta: dict, redirect: str, op=None) -> dict | None:
         return None
     if status not in (200, 201) or not isinstance(d, dict) or not isinstance(d.get("client_id"), str):
         return None
+    uris = d.get("redirect_uris") or [redirect]
+    if not isinstance(uris, list) or not all(isinstance(x, str) and loopback(x) for x in uris):
+        raise ValueError(_("✗ the client's redirect isn't on this machine's loopback: refused"))
     method = d.get("token_endpoint_auth_method") or "none"
-    return {"route": "b", "client_id": d["client_id"], "client_secret": d.get("client_secret"),
+    return {"route": "b", "client_id": d["client_id"], "client_secret": d.get("client_secret"), "redirect_uris": uris,
             "auth_method": method if method in ("none", "client_secret_basic", "client_secret_post") else "none"}
 
 
@@ -803,12 +904,12 @@ def loopback(uri: str) -> bool:
     return u.scheme == "http" and u.hostname == "127.0.0.1" and not u.query and not u.fragment
 
 
-def bind_callback(port: int):
+def bind_callback(port: int, want: dict | None = None):
     """The one-shot listener, bound to 127.0.0.1 explicitly, without address or port reuse. OSError(EADDRINUSE) when
-    another process has it."""
+    another process has it. Only the first request whose state is want["state"] is taken; the rest are ignored."""
     import http.server
     import threading
-    got = {}
+    got, want = {}, want if want is not None else {}
     done = threading.Event()
 
     class H(http.server.BaseHTTPRequestHandler):
@@ -817,16 +918,18 @@ def bind_callback(port: int):
 
         def do_GET(self):
             u = urllib.parse.urlsplit(self.path)
-            if u.path != "/callback":
+            q = {k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()}
+            if u.path != "/callback" or done.is_set() or not want.get("state") \
+                    or not secrets.compare_digest(q.get("state") or "", want["state"]):
                 self.send_response(404)
                 self.end_headers()
                 return
-            got.update({k: v[0] for k, v in urllib.parse.parse_qs(u.query).items()})
+            got.update(q)
+            done.set()
             self.send_response(200)
             self.send_header("Content-Type", "text/plain; charset=utf-8")
             self.end_headers()
             self.wfile.write(_("You can close this page and go back to the terminal.").encode())
-            done.set()
 
     class S(http.server.HTTPServer):
         allow_reuse_address = False
@@ -848,6 +951,10 @@ def port_holder(port: int) -> str:
 def ask(prompt: str) -> str:
     print(prompt, end=" ", flush=True)
     return sys.stdin.readline().strip()
+
+
+def yes(prompt: str) -> bool:
+    return ask(prompt).lower() in ("y", "yes")
 
 
 def refuse_unattended() -> str | None:
@@ -875,12 +982,13 @@ def confirm_text(project: str, name: str, doc: dict, sec: dict, label: str, sign
     if sign_in_host:
         lines.append(_("The sign-in is at {host}; the token will be sent to {token_host}.", host=sign_in_host,
                        token_host=token_host))
-        if _site(sign_in_host) != _site(token_host):
-            lines.insert(0, _("⚠️ The sign-in ({host}) and the server the token goes to ({token_host}) are on different "
-                              "sites.", host=sign_in_host, token_host=token_host))
+        lines[:0] = host_lines(sign_in_host, token_host)
     else:
         lines.append(_("The value will be sent to {token_host}.", token_host=token_host))
     return lines
+
+
+CALLBACK_WAIT_S = 300
 
 
 def cmd_grant(project: str, name: str, own_app: bool = False, port: int = CALLBACK_PORT) -> int:
@@ -902,10 +1010,16 @@ def cmd_grant(project: str, name: str, own_app: bool = False, port: int = CALLBA
     if d["several"]:
         print(_("The server lists several authorization servers; this version uses the first, {issuer}.",
                 issuer=d["issuer"]))
-    # the callback first: the redirect URI a registration names
+    # the owner's yes before anything is sent anywhere (a registration, a secret asked for, the browser)
+    for line in confirm_text(project, name, doc, sec, label, urllib.parse.urlsplit(meta["authorization_endpoint"]).hostname,
+                             scoped=bool(d["scope"]) and bool(notes.get("scopes"))):
+        print(line)
+    if not yes(_("Continue? [y/N]")):
+        return 1
+    want = {}
     srv = None
     try:
-        srv, got, done = bind_callback(port)
+        srv, got, done = bind_callback(port, want)
         port = srv.server_address[1]   # --port=0: the port the system gave
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
@@ -914,23 +1028,19 @@ def cmd_grant(project: str, name: str, own_app: bool = False, port: int = CALLBA
         if notes.get("any_port") is False:
             print(_("✗ {label} accepts only the fixed port; free it and try again", label=label), file=sys.stderr)
             return 1
-        srv, got, done = bind_callback(0)
+        srv, got, done = bind_callback(0, want)
         port = srv.server_address[1]
     redirect = f"http://127.0.0.1:{port}/callback"
     try:
-        client = choose_client(meta, notes, redirect, label, own_app)
+        try:
+            client = choose_client(meta, notes, redirect, label, own_app)
+        except ValueError as e:
+            print(e, file=sys.stderr)
+            return 1
         if client is None:
             return 1
-        if not loopback(client.get("redirect_uri") or redirect):
-            print(_("✗ the client's redirect isn't on this machine's loopback: refused"), file=sys.stderr)
-            return 1
-        for line in confirm_text(project, name, doc, sec, label, urllib.parse.urlsplit(meta["authorization_endpoint"]).hostname,
-                                 scoped=bool(d["scope"]) and bool(notes.get("scopes"))):
-            print(line)
-        if ask(_("Continue? [y/N]")).lower() not in ("y", "yes"):
-            return 1
         verifier, challenge = pkce()
-        state = secrets.token_urlsafe(32)
+        want["state"] = state = secrets.token_urlsafe(32)
         params = {"response_type": "code", "client_id": client["client_id"], "redirect_uri": redirect,
                   "code_challenge": challenge, "code_challenge_method": "S256", "state": state, "resource": url}
         if d["scope"]:
@@ -945,18 +1055,19 @@ def cmd_grant(project: str, name: str, own_app: bool = False, port: int = CALLBA
             webbrowser.open(auth_url)
         except Exception:
             pass
-        answer = wait_callback(got, done)
+        answer = wait_callback(got, done, CALLBACK_WAIT_S)
         if answer is None:
             return 1
     finally:
         if srv:
             srv.shutdown()
-    if answer.get("state") != state:
+            srv.server_close()
+    if not secrets.compare_digest(answer.get("state") or "", state):
         print(_("✗ the answer's state doesn't match: refused"), file=sys.stderr)
         return 1
     if answer.get("error"):
-        print(_("✗ {label} said: {error} {detail}", label=label, error=answer["error"],
-                detail=answer.get("error_description") or ""), file=sys.stderr)
+        print(_("✗ {label} said: {error} {detail}", label=label, error=clamp(answer["error"]),
+                detail=clamp(answer.get("error_description") or "")), file=sys.stderr)
         return 1
     if meta.get("authorization_response_iss_parameter_supported") and answer.get("iss") != d["issuer"]:
         print(_("✗ the answer's issuer isn't {issuer}: refused", issuer=d["issuer"]), file=sys.stderr)
@@ -971,7 +1082,11 @@ def cmd_grant(project: str, name: str, own_app: bool = False, port: int = CALLBA
         print(_("✗ the token endpoint couldn't be reached ({why})", why=e), file=sys.stderr)
         return 1
     if status != 200 or not tokens.get("access_token"):
-        print(_("✗ the token endpoint refused the code ({error})", error=tokens.get("error") or status), file=sys.stderr)
+        print(_("✗ the token endpoint refused the code ({error})", error=clamp(tokens.get("error") or status)),
+              file=sys.stderr)
+        return 1
+    if not bearer(tokens):
+        print(_("✗ the token isn't a bearer token ({type}): refused", type=clamp(tokens.get("token_type"))), file=sys.stderr)
         return 1
     cred = apply_tokens(cred, tokens)
     granted(project, name, sec, cred, client["route"])
@@ -980,14 +1095,18 @@ def cmd_grant(project: str, name: str, own_app: bool = False, port: int = CALLBA
 
 
 def choose_client(meta: dict, notes: dict, redirect: str, label: str, own_app: bool = False) -> dict | None:
-    """C2 step 3: (a) when published and supported, (b) when advertised and not ruled out, else (c)."""
+    """C2 step 3: (a) when published and supported, (b) when advertised and not ruled out, else (c). Each registered
+    redirect is on this machine's loopback, or the route is refused (ValueError)."""
     if own_app:
         pass
     elif meta.get("client_id_metadata_document_supported"):
         ok, why = shared_client_state()
         if ok:
             pin = shared_client()
-            return {"route": "a", "client_id": pin["client_id"], "auth_method": "none"}
+            uris = pin.get("redirect_uris") or []
+            if not uris or not all(isinstance(x, str) and loopback(x) for x in uris):
+                raise ValueError(_("✗ the client's redirect isn't on this machine's loopback: refused"))
+            return {"route": "a", "client_id": pin["client_id"], "auth_method": "none", "redirect_uris": uris}
         print(_("Route (a), brunna's shared client: {why}.", why=why))
     if own_app:
         pass
@@ -1024,7 +1143,11 @@ def wait_callback(got: dict, done, timeout_s: int = 300) -> dict | None:
     while time.time() < deadline:
         if done.is_set():
             return dict(got)
-        r, _w, _x = select.select([sys.stdin], [], [], 1)
+        try:
+            r, _w, _x = select.select([sys.stdin], [], [], 1)
+        except (OSError, ValueError, TypeError):   # no stdin to read: only the listener
+            time.sleep(0.2)
+            continue
         if r:
             line = sys.stdin.readline().strip()
             if line:
@@ -1047,7 +1170,7 @@ def verify(project: str, name: str, doc: dict, sec: dict, cred: dict) -> int:
         up = credential_bridge.Upstream(sec["server"]["url"], credential_bridge.header_for(sec, cred))
         tools = up.list_tools()
     except Exception as e:
-        print(_("⚠️ stored, but the server didn't answer as expected: {why}", why=e))
+        print(_("⚠️ stored, but the server didn't answer as expected: {why}", why=clamp(e, 300)))
         return 1
     rt = runtime_ports.load(None, ports=("credential_tools",))
     bad = 0
@@ -1073,7 +1196,7 @@ def cmd_set(project: str, name: str) -> int:
     for line in confirm_text(project, name, doc, sec, urllib.parse.urlsplit(sec["server"]["url"]).hostname or "", "",
                              scoped=True):
         print(line)
-    if ask(_("Continue? [y/N]")).lower() not in ("y", "yes"):
+    if not yes(_("Continue? [y/N]")):
         return 1
     import getpass
     value = getpass.getpass(_("Value (not shown): ")).strip()
@@ -1086,34 +1209,52 @@ def cmd_set(project: str, name: str) -> int:
     return verify(project, name, doc, sec, cred)
 
 
-def revoke(project: str, name: str, op=None) -> bool:
-    """Revoke at the provider (RFC 7009) and delete here, even when the provider's endpoint fails (then an alert says
-    to revoke at its connected-apps page). → whether the provider confirmed."""
-    _doc, sec = entry(project, name)
-    ok = True
-    with Lock(project, name, sec):
-        path = found(project, name)
+def _revoke_at_provider(cred: dict, op=None) -> bool:
+    """RFC 7009 for the refresh token and the access token (where the provider takes it): → whether the provider
+    confirmed the refresh token's (or, with none, the access token's)."""
+    if cred.get("kind") != "oauth" or not secure(cred.get("revocation_endpoint")):
+        return False
+    confirmed = None
+    for hint in ("refresh_token", "access_token"):
+        if not cred.get(hint):
+            continue
+        form = {"token": cred[hint], "token_type_hint": hint}
+        headers = {"Content-Type": "application/x-www-form-urlencoded", **client_auth(cred["client"], form)}
+        try:
+            status, _h, _b = http("POST", cred["revocation_endpoint"], data=urllib.parse.urlencode(form).encode(),
+                                  headers=headers, op=op)
+            ok = status == 200
+        except Transient:
+            ok = False
+        if confirmed is None:
+            confirmed = ok
+    return bool(confirmed)
+
+
+def revoke(project: str, name: str, op=None) -> str:
+    """Revoke at the provider (RFC 7009) and delete here, from the stored file itself (its endpoint and client: an
+    orphan with no registry entry too), under its lock, the newest token first (a .new taken). Deleted even when the
+    provider's endpoint fails, then an alert says to revoke at its connected-apps page. → "provider" (the provider
+    confirmed), "local" (deleted here only) or "none" (nothing stored)."""
+    path = found(project, name)
+    if path is None:
+        return "none"
+    with Lock(project, name, base=path.parent.parent):
         cred = None
         try:
-            cred = _read_private(path) if path else None
+            cred = _take_pending(path, _read_private(path))
         except (OSError, ValueError):
             pass
-        if cred and cred.get("kind") == "oauth" and cred.get("revocation_endpoint") and cred.get("refresh_token"):
-            form = {"token": cred["refresh_token"], "token_type_hint": "refresh_token"}
-            headers = {"Content-Type": "application/x-www-form-urlencoded", **client_auth(cred["client"], form)}
-            try:
-                status, _h, _b = http("POST", cred["revocation_endpoint"], data=urllib.parse.urlencode(form).encode(),
-                                      headers=headers, op=op)
-                ok = status == 200
-            except Transient:
-                ok = False
+        confirmed = bool(cred) and _revoke_at_provider(cred, op)
         for b in bases():
             for suffix in ("", ".new"):
                 (b / project / f"{name}.json{suffix}").unlink(missing_ok=True)
     st = read_status(project, name)
-    st.update(state="not_granted", updated_at=now_iso(), last_result="revoked")
+    if st.get("state") in ("granted", "needs_grant"):
+        st["episode"] = int(st.get("episode") or 1) + 1   # a still-listed credential gets a new to-do
+    st.update(state="not_granted", updated_at=now_iso(), last_result="revoked" if confirmed else "deleted")
     write_status(project, name, st)
-    if not ok:
+    if not confirmed:
         try:
             import alert
             alert.once(f"credential-revoke:{project}:{name}",
@@ -1121,11 +1262,12 @@ def revoke(project: str, name: str, op=None) -> bool:
                           "it at the provider's connected-apps page", project=project, name=name)], "")
         except Exception:
             pass
-    return ok
+    return "provider" if confirmed else "local"
 
 
-def revoke_all() -> list[str]:
-    """uninstall --purge: every credential revoked before the instance goes. → what was done, one line each."""
+def revoke_all() -> list[tuple[bool, str]]:
+    """uninstall --purge: every stored credential revoked before the instance goes, registered or not. → (revoked at
+    the provider, what was done) per credential."""
     out = []
     for b in bases():
         if not b.is_dir():
@@ -1133,25 +1275,26 @@ def revoke_all() -> list[str]:
         for f in sorted(b.glob("*/*.json")):
             project, name = f.parent.name, f.stem
             try:
-                out.append(_("{project}/{name} revoked", project=project, name=name) if revoke(project, name)
-                           else _("{project}/{name} deleted (revoke it at the provider)", project=project, name=name))
+                how = revoke(project, name)
+                out.append((how == "provider", _("{project}/{name} revoked at the provider", project=project, name=name)
+                            if how == "provider" else
+                            _("{project}/{name} deleted here only (the provider wasn't told; revoke it there)",
+                              project=project, name=name)))
             except (OSError, ValueError) as e:
-                out.append(f"{project}/{name}: {e}")
+                out.append((False, f"{project}/{name}: {e}"))
     return out
 
 
 def rename(old: str, new: str, apply: bool) -> list[str]:
-    """rename-project.sh: the credentials and their statuses follow the project. → what moves (moved when apply)."""
-    out = []
-    for b in [*bases(), hubconf.STATE / "credentials"]:
-        src, dst = b / old, b / new
-        if src.is_dir():
-            out.append(f"{src} → {dst}")
-            if apply:
-                if dst.exists():
-                    raise ValueError(_("{path} already exists", path=dst))
-                os.rename(src, dst)
-    return out
+    """rename-project.sh: the credentials and their statuses follow the project. → what moves (moved when apply). No
+    destination may exist before anything moves."""
+    moves = [(b / old, b / new) for b in [*bases(), hubconf.STATE / "credentials"] if (b / old).is_dir()]
+    if apply:
+        if (taken := [str(d) for _s, d in moves if d.exists()]):
+            raise ValueError(_("{path} already exists", path=", ".join(taken)))
+        for src, dst in moves:
+            os.rename(src, dst)
+    return [f"{src} → {dst}" for src, dst in moves]
 
 
 def main(argv: list[str]) -> int:
@@ -1171,15 +1314,24 @@ def main(argv: list[str]) -> int:
         if cmd == "set" and len(rest) == 2:
             return cmd_set(*rest)
         if cmd == "revoke" and len(rest) == 2:
-            ok = revoke(*rest)
-            print(_("✓ revoked and deleted") if ok else _("deleted here; the provider didn't confirm: revoke it at its "
-                                                          "connected-apps page"))
-            return 0 if ok else 1
+            if (why := refuse_unattended()):
+                print(why, file=sys.stderr)
+                return 2
+            how = revoke(*rest)
+            print({"provider": _("✓ revoked at the provider and deleted here"),
+                   "local": _("deleted here only (the provider wasn't told): revoke it at its connected-apps page"),
+                   "none": _("nothing is stored for it")}[how])
+            return 0 if how != "local" else 1
         if cmd == "keepalive" and not rest:
             return keepalive()
         if cmd == "check-published" and not rest:
             return cmd_check_published()
         if cmd == "refresh" and len(rest) in (2, 4):
+            # started by the platform's bridge, with an environment of its own; never from inside an agent's run
+            if names.env("CONFINED") or os.environ.get("HUB_LLM_POINT"):
+                print(_("credentials are granted by the owner, in a terminal on the hub machine, never inside a platform run"),
+                      file=sys.stderr)
+                return 2
             failed = rest[3] if len(rest) == 4 and rest[2] == "--failed" else None
             if len(rest) == 4 and failed is None:
                 return 2

@@ -132,13 +132,15 @@ def undeclared(project: str, doc: dict, declared: set[pathlib.Path]) -> list[pat
     roots = [hubconf.secrets_dir()] if project == hubconf.hub_project() else \
         [r for r in (d["runtime"], d["workspace"]) if r]
     found, skip, skip_tmp = [], hubconf.session_addresses_dir(), hubconf.secrets_dir() / "tmp"
+    # the platform's grants (bin/credentials.py): declared by their registry entries, or listed as orphaned below
+    skips = {skip, skip_tmp, hubconf.secrets_dir() / "credentials", hubconf.secrets_dir() / "credentials-kept"}
     for root in roots:
         if not root.is_dir():
             continue
         for dirpath, dirnames, filenames in os.walk(root):
             depth = len(pathlib.Path(dirpath).relative_to(root).parts)
             dirnames[:] = [] if depth >= 3 else [x for x in dirnames if x not in SKIP_DIRS
-                                                 and pathlib.Path(dirpath, x) not in (skip, skip_tmp)]
+                                                 and pathlib.Path(dirpath, x) not in skips]
             for fn in filenames:
                 path = pathlib.Path(dirpath) / fn
                 if LOOKS_SECRET.search(fn) and not NOT_SECRET.search(fn) and path.resolve() not in declared:
@@ -179,6 +181,9 @@ def main(argv: list[str]) -> int:
                                           "secrets": [*(projects[hub].get("secrets") or []), *alert_keys, *llm_keys]}}
     import credentials
     cred_rows = {(r["project"], r["name"]): r for r in credentials.rows(index)}
+    for row in cred_rows.values():   # stored, declared nowhere: still live at the provider
+        if row["state"] == "orphaned" and (not argv or row["project"] in argv):
+            problems.append(credentials.waiting_text(row))
     for project in sorted(argv or [*projects, *modules]):
         doc = projects.get(project) or modules.get(project) or {}
         declared = set(module_paths) if project == hubconf.hub_project() else set()

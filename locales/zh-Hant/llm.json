@@ -51,5 +51,9 @@
  "the platform's bridge to {server} never connected: {why}": "平台到 {server} 的 bridge 一直沒連上:{why}",
  "judgment point {name}: credentials_from_env is only for a settings: platform point with allow_from_env whose prompt is the owner's": "判斷點 {name}:credentials_from_env 只給有 allow_from_env、提示是擁有者寫的 settings: platform 判斷點",
  "the platform's bridge to {server} never started": "平台到 {server} 的 bridge 一直沒啟動",
- "{point} did not start: {why}": "{point} 沒有啟動:{why}"
+ "{point} did not start: {why}": "{point} 沒有啟動:{why}",
+ "{point} did not start: its prompt isn't the one the registry gives {project}/{job}": "{point} 沒有啟動:它的提示不是登錄給 {project}/{job} 的那個",
+ "{point} did not start: its folder isn't the one the registry gives {project}/{job}": "{point} 沒有啟動:它的資料夾不是登錄給 {project}/{job} 的那個",
+ "the platform's bridge to {server} crashed: {why}": "平台到 {server} 的 bridge 當掉了:{why}",
+ "the server {server} refused a call the job needs: {why}": "server {server} 拒絕了 job 需要的呼叫:{why}"
 }
