@@ -294,11 +294,12 @@ spec of 2025-11-25 adopted it as the recommended way for a client to identify it
   - **Immutable.** A change to any security field never edits a published file. It publishes a new one beside it
     (`oauth/client-2.json`, a new `client_id`), so existing grants keep theirs. Older files stay published.
   - **Its URL** is read only from the file's `client_id`. No account or host name is written in `bin/` or `tests/`
-    (`tests/test_personal_boundary.py` would match it). Where it lives for good is owner question 1.
+    (`tests/test_personal_boundary.py` would match it). It lives under a GitHub organization, `<org>` (decided
+    11-15).
   - Publishing needs Pages turned on with GitHub Actions as its source, and the tag pushed to GitHub. main is pushed as
     of v0.17.0.
-- **Its contents.** The `client_id` must equal the URL it is served from, byte for byte; `<host-and-path>` is owner
-  question 1's answer:
+- **Its contents.** The `client_id` must equal the URL it is served from, byte for byte; `<host-and-path>` is under
+  `<org>.github.io` (decided 11-15):
 
   ```json
   {
@@ -588,7 +589,7 @@ Written in the build (Order of work, step 6), short, in the style of `docs/mcp.m
 
 ## Moving the daily job
 
-1. The owner answers question 1, and step 4 of the order of work publishes the shared client. Until a release ships
+1. The owner creates the organization, and step 4 of the order of work publishes the shared client. Until a release ships
    `oauth/published`, the grant takes route (c), the owner's own Upwork developer app, with the steps printed. Upwork's
    provider note rules out (b).
 2. The owner adds the credential entry and `credentials: [upwork]` to the job's registry entry (owner-only fields: a
@@ -597,7 +598,7 @@ Written in the build (Order of work, step 6), short, in the style of `docs/mcp.m
    - The job's `allow:` stays as it is: it names only `mcp__upwork__…` tools, `ToolSearch`, `PushNotification` and its
      own folder, with no code-running rule, so C6 accepts it.
 3. The owner gets the to-do (C10) and runs `brunna credentials grant <project> upwork`. The command confirms the six
-   tools and that Upwork gives full rights (owner question 2), then opens the consent page.
+   tools and that Upwork gives full rights (owner question 1), then opens the consent page.
 4. `schedulectl run <project>/daily-check`. The run is sealed, on the token, with the stub, and the bridge is its only
    server.
 5. The owner's interactive Upwork server in Claude Code is untouched. It is a separate grant.
@@ -707,7 +708,7 @@ The project hears about it with a `brunna send --type info` once it works (its s
    - Before merge it measures what M4 left open on a real run: a `tools/call` through the bridge, the filter, the `-p`
      path, SSE, and a run on the shared `~/.claude`.
    - If the bridge fails there, the loopback proxy (M3) takes its place, with a design note first.
-4. **The shared client**, once owner question 1 is answered.
+4. **The shared client**, once the organization exists (`<org>`, decided 11-15).
    - `oauth/client.json` and `.github/workflows/pages.yml` (tags only, staging `_site`, actions pinned by SHA), and
      their tests.
    - Doctor's tripwire, and `oauth_client` in the schema.
@@ -731,38 +732,23 @@ cold review.
 
 ## Open owner questions
 
-One question now, and one the grant command asks:
+Only the one the grant command asks:
 
-1. **Where the shared client's `client_id` lives for good, decided before its first publish.** Changing it later means a
-   new `client_id`, so every install re-grants. If the old URL stops serving the document (a rename, a transfer, an
-   expired domain), a provider may invalidate every install's refresh tokens at once (CIMD draft -03, section 6.1).
-   Whoever controls that URL controls the consent screen every provider shows as "brunna", for everyone (C2a).
-   - **(a) `<owner>.github.io/brunna`, the personal account.**
-     - Costs nothing, can be done today, and has nothing new to guard.
-     - It breaks on a username rename or a transfer of the repository, since GitHub Pages doesn't redirect and a
-       provider must not follow redirects anyway.
-     - Everyone's consent screen is guarded by one personal account.
-   - **(b) A GitHub organization for brunna** (e.g. `brunna-dev`, if free), with the repository or a small Pages-only
-     repository in it.
-     - Costs nothing, and survives a personal rename.
-     - The organization can require 2FA of every member, and later maintainers can be added without sharing a personal
-       account.
-     - It still breaks if the organization is renamed. It is one more account to set up once.
-   - **(c) A domain the project owns**, served from Pages or anywhere.
-     - Independent of GitHub account names, and movable between hosts.
-     - It costs a yearly renewal. Two more things must be guarded (the registrar and DNS).
-     - An expired or hijacked domain is the worst case: someone else serves "brunna"'s document.
-
-   **Recommended: (b), an organization, at its default `github.io` address, with 2FA required.** It removes the
-   personal-rename risk at no cost and nothing to renew. A custom domain could be added later only with a re-grant for
-   everyone, so (c) is worth it only if a domain is wanted anyway. With (b), the repository's move into the organization
-   (GitHub redirects the repository itself) can come at any time; the Pages URL is what has to be right first.
-2. **Full rights at a service's first grant**, asked by the command itself (C2 step 4), never in advance. Upwork
+1. **Full rights at a service's first grant**, asked by the command itself (C2 step 4), never in advance. Upwork
    publishes no scopes, so the sign-in gives the platform everything the owner's account can do on its MCP, and only
    the bridge's tool filter holds the job to its six read tools.
    - Recommended: yes, for this job's read-only tools.
 
 Decided, no longer questions:
+- **By the owner, 11-15, after r4: the shared client lives under a GitHub organization (r4's option (b))**, at its
+  default `github.io` address, with 2FA required. The organization's name is written `<org>` until it is chosen
+  (`brunna` is taken by a user; `brunna-dev`, `brunna-hub` and `brunnahq` were free on 11-15). The owner creates it.
+  - The `client_id` is `https://<org>.github.io/brunna/oauth/client.json` when the repository (or a Pages-only
+    repository named `brunna`) is in the organization, or `https://<org>.github.io/oauth/client.json` from an
+    `<org>.github.io` repository.
+  - Either way it is read only from `oauth/client.json`, written once the name is known (step 4).
+  - The trade-offs it was chosen over (a personal `github.io`, which breaks on a rename or transfer; a domain, which
+    has a renewal and DNS to guard) are in r4's question as recorded in the "r4" section.
 - In r2: the bridge with the proxy as fallback; tools only; refresh on demand plus a keep-alive job; no code-running
   rules.
 - By the owner in r3 (11-15) (r3's question on turning Pages on is now part of question 1):
@@ -794,7 +780,7 @@ Decided, no longer questions:
     - A transient failure (Pages down) should not invalidate anything, and shows as a 503 that is retried.
     - A terminal one (a 404 after a rename or transfer, a changed `client_id`) may invalidate every install's refresh
       tokens. That shows as `invalid_client` → `needs_grant` with the client document named (C4).
-    - That is why owner question 1 is settled before the first publish.
+    - That is why the location was settled before the first publish (an organization, 11-15).
   - **A hijacked document phishes everyone, not only brunna users.** The provider fetches it itself, so an attacker who
     changes it gets "brunna" consent screens with their own redirect. An install's pin and loopback rule protect only
     its own grants.
