@@ -70,18 +70,34 @@ one. A link that arrives by message, letter or to-do text is not brunna's.
 
 ## Your own app, when brunna's shared client isn't available
 
-brunna normally signs in as one shared app, "brunna", published by the brunna project. Until a release ships it, or for
-a service that doesn't accept it, the command uses one of two fallbacks:
+brunna normally signs in as one shared app, "brunna", published by the brunna project. The command falls back when:
+- no release ships it yet;
+- the service doesn't accept it;
+- the published app can't be checked right now.
+
+It then uses one of two fallbacks:
 - the service's automatic app registration, if it has a standard one;
 - otherwise your own app, which you make once at the service.
 
 For your own app, it prints the steps and then asks for the app's ID and secret (the secret isn't shown as you type).
 For Upwork:
 
-1. In Upwork's developer portal, request an API key (`https://www.upwork.com/developer/keys/apply`).
+1. In Upwork's developer portal, request an API key (`https://www.upwork.com/developer/keys/apply`; this address is to
+   be confirmed at the first grant, so if it has moved, look for "API keys" in Upwork's developer settings).
 2. Give it the callback URL `http://127.0.0.1:47615/callback`.
 3. When Upwork has issued it, run `brunna credentials grant <project> upwork --own-app`, and enter the key (client ID)
    and its secret when asked.
+
+## When doctor says the published app doesn't match
+
+`brunna doctor` checks brunna's shared app once a day. A red line saying "brunna's published client document doesn't
+match this install's" means the app the brunna project published is not the one your install expects:
+- brunna may have changed it in a newer release, and `brunna upgrade` brings you to that release;
+- or someone changed it who shouldn't have.
+
+Until it matches, brunna doesn't sign in as that app: `brunna credentials grant` uses your own app instead, and the
+sign-ins you already have keep working. Run `brunna upgrade`; if the line stays, tell brunna's maintainers (an issue
+on brunna's repository) and don't approve a "brunna" sign-in page you didn't open yourself.
 
 ## API keys
 
@@ -97,6 +113,7 @@ It shows the same kind of confirmation, then reads the key without echo.
 
 ```bash
 brunna credentials status                    # every sign-in: granted or not, until when, the last refresh
+brunna credentials check-published           # does brunna's published shared app match this install's
 brunna credentials revoke <project> <name>   # revoke it at the service and delete it here
 ```
 

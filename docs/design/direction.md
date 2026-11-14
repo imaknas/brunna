@@ -152,6 +152,7 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
    blind review. The shared client lives under the owner's organization `brunna-dev` (11-15). Steps 1–3 and C10 are
    built and merged (11-15). Step 4 on brunna's side (`oauth/client.json`, the Pages template, the tripwire) and the
    user guide `docs/credentials.md` are built too. Left, all the owner's:
+   - a brunna release with the shared client's document and without `oauth/published` (step 4's step 0);
    - step 4's setup in `brunna-dev` (numbered in the design), then the release that ships `oauth/published`;
    - the daily job's move, at the first grant (route c until the shared client is published).
 7. **A project's skills** (`skills-sync.md`, the owner's decision 11-15, built 11-15): a sandboxed project develops them

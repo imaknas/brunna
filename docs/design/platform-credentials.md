@@ -200,10 +200,12 @@ The owner to-do (C10) gives the exact line.
    - **(a) brunna's shared client** (a Client ID Metadata Document, C2a). Used only when three things hold:
      - the server says `client_id_metadata_document_supported`;
      - this release ships the shared client as published (`oauth/published`, C2a);
-     - doctor's daily tripwire last found the published document matching (C2a).
+     - doctor's daily tripwire last found the published document matching (C2a);
+     - and, checked again right before it is used, it still matches (the grant-time pin).
 
-     A fetch error, or a mismatch, while the state says "published" **stops the grant** with the reason. It never falls
-     through to another route.
+     When it can't be verified (unreachable, or a mismatch), the command says so and **falls through** to (b) or (c)
+     (as built, after the build's third review; r4 said it stopped the grant). The document's fault never leaves the
+     owner unable to grant, and route (a) stays off until the tripwire finds it matching again.
    - **(b) RFC 7591 dynamic registration**, whenever the server advertises a `registration_endpoint`, unless the
      provider notes say it isn't RFC 7591 (Upwork's points at what looks like its human sign-up page; its note says
      so).
@@ -334,9 +336,9 @@ spec of 2025-11-25 adopted it as the recommended way for a client to identify it
   - `localhost` is left out on purpose: RFC 8252 prefers the loopback IP.
   - It carries no `jwks`: it is a public client.
 - **What the pin protects, and what it doesn't.**
-  - **The pin.** At each grant the command fetches the published document and compares its **security fields** with
-    the installed copy: `client_id`, `redirect_uris`, `client_name`, `grant_types`, and the auth method fields. A
-    difference refuses the grant and says why. Other fields may differ.
+  - **The pin.** Right before route (a) is used, the command fetches the published document and compares it,
+    **whole**, with the installed copy (as built; r4 compared only the security fields). A difference turns route (a)
+    off for that grant and says why.
   - **What that protects:** this install's own grants. A changed document can't get this install's consent with other
     redirects. The loopback-only rule holds even if both copies were changed.
   - **What it doesn't:** the authorization server fetches the document itself. Whoever controls the published document
@@ -348,9 +350,14 @@ spec of 2025-11-25 adopted it as the recommended way for a client to identify it
     - every action in its `pages.yml` pinned by commit SHA;
     - two-factor authentication required by the organization (on since its creation), for every account that can merge
       there or change its Pages settings;
-    - **a daily tripwire in doctor.** It fetches the published document, compares its security fields with the
-      installed copy, alerts on a mismatch (the owner learns of a hijack within a day), and records the result that
-      route (a) reads.
+    - **a daily tripwire in doctor** (and the hourly job). It fetches the published document and compares it whole with
+      the installed copy.
+      - It alerts on a mismatch, so the owner learns of a hijack within a day.
+      - It records the result route (a) reads, tied to this install's pin (the `client_id` and a hash of the document),
+        so a different pin counts as never checked.
+      - An unreachable document (a network error, a 5xx, a 429) is not a mismatch. It is recorded as unverified,
+        checked again hourly, and alerts only after three days in a row; route (a) stays off meanwhile.
+      - While the last result isn't a match, the check runs hourly instead of daily.
 - **The "published" state.** `oauth/published` is a marker file shipped in a release, added in the first release after
   the document is live. Without it, route (a) isn't offered, even if a document happens to be reachable.
 - **An install's own document.**
@@ -794,12 +801,12 @@ The project hears about it with a `brunna send --type info` once it works (its s
   - `resource` in every token request, refreshes included;
   - the first of several authorization servers, said.
 - **The grant's choices:**
-  - route (a) only with CIMD supported, `oauth/published` shipped and the tripwire matching. A fetch error or a mismatch
-    then stops the grant, never falls through;
+  - route (a) only with CIMD supported, `oauth/published` shipped and the tripwire matching, checked again at the
+    grant. When it can't be verified it falls through to (b)/(c) (as built);
   - (b) whenever advertised, unless a provider note says it isn't RFC 7591. A non-RFC-7591 reply moves on to (c); a
     network error stops;
   - (c) with the provider's printed steps;
-  - a client document whose security fields differ from the installed copy refuses, while other fields may differ;
+  - a client document that differs from the installed copy, in any field, turns route (a) off;
   - an install's own document has its hash recorded at first use, and a changed hash refuses;
   - a non-loopback redirect URI is refused even when the document lists it;
   - port 47615 bound explicitly, and `EADDRINUSE` names the holder and falls back to a random port;
@@ -818,7 +825,8 @@ The project hears about it with a `brunna send --type info` once it works (its s
   - it has no field CIMD forbids for a public client;
   - the template `oauth/pages-repo/.github/workflows/pages.yml` stages exactly one regular file at `oauth/client.json`
     and no links, runs only on a push to `main`, and pins its actions by SHA;
-  - `brunna credentials check-published` against a local server: matching security fields pass, a difference fails;
+  - `brunna credentials check-published` against a local server: a matching document passes, any difference fails, an
+    unreachable one is "couldn't be checked" (no alert for three days);
   - the registry refuses `expose.local_port: 47615`;
   - `tests/test_personal_boundary.py` passes over `bin/` and `tests/`.
 - `check-secrets` rows come from status files only, with `backup: false` as the default. `bin/linux-test` runs the store
@@ -840,37 +848,50 @@ The project hears about it with a `brunna send --type info` once it works (its s
    - If the bridge fails there, the loopback proxy (M3) takes its place, with a design note first.
 4. **The shared client**, under `brunna-dev` (created 11-15). **Built 11-15** on brunna's side:
    - `oauth/client.json`, the document of C2a (the pin);
-   - `oauth/pages-repo/`, the template of the organization's repository: `.github/workflows/pages.yml` (runs on a push
-     to `main`; stages `_site/oauth/client.json` after checking the document, fails unless that is the one regular
-     file and there are no links; uploads `_site`; actions pinned by SHA; the `github-pages` environment) and a README
-     with the rules;
+   - `oauth/pages-repo/`, the template of the organization's repository: `.github/workflows/pages.yml` and a README with
+     the rules. The workflow:
+     - runs on a push to `main`;
+     - checks every published document (`oauth/client.json`, and `client-2.json`, … once a security field ever changes:
+       its own URL as `client_id`, a public client, loopback redirects only, by the same exact pattern as
+       `credentials.loopback`);
+     - stages only those files under `_site/oauth/`, failing unless they are regular files and there are no links;
+     - uploads `_site` through the `github-pages` environment, with its actions pinned by SHA;
    - `brunna credentials check-published`, and the daily tripwire (doctor and the hourly job, once `oauth/published`
      ships; an alert on a mismatch, route (a) off until it matches);
    - the release-checklist step in CONTRIBUTING.md;
    - tests (`tests/test_shared_client.py`: the document, the workflow and its staging step run for real, the tripwire).
 
    **The owner's setup, once** (no session creates a repository, pushes, or changes a GitHub setting):
-   1. In the `brunna-dev` organization, create the public repository `brunna-dev.github.io`.
-   2. Copy brunna's `oauth/pages-repo/` into it as it is (`.github/workflows/pages.yml` and `README.md`), and
-      `oauth/client.json` from the brunna release tag to `oauth/client.json` there. Commit and push to `main`.
-   3. In that repository's Settings → Pages, set the source to **GitHub Actions**.
-   4. In Settings → Branches (or Rules), protect `main`:
+   0. Release brunna with commit `ae6b991f` in it and **without** `oauth/published` (CONTRIBUTING.md, "Releasing").
+      Its `oauth/client.json` is what gets published.
+   1. Confirm the `brunna-dev` organization still requires two-factor authentication (Settings → Authentication
+      security). It was on at creation.
+   2. In `brunna-dev`, create the public repository `brunna-dev.github.io`, empty.
+   3. In that repository's Settings → Pages, set the source to **GitHub Actions**. This creates the `github-pages`
+      environment.
+   4. In Settings → Environments → `github-pages`, set deployment branches to **selected branches: `main`** only.
+   5. Push the content to `main`:
+      - brunna's `oauth/pages-repo/` as it is (`.github/workflows/pages.yml` and `README.md`);
+      - `oauth/client.json` copied from step 0's release tag to `oauth/client.json`.
+
+      The push runs the workflow. If that first run fails (a Pages setting that wasn't ready yet), open it in the
+      Actions tab and choose **Re-run failed jobs**; nothing needs to change.
+   6. In Settings → Branches (or Rules), protect `main`:
       - require a pull request before merging;
       - block force pushes;
-      - block deletion.
-   5. In Settings → Environments → `github-pages`, set deployment branches to **`main` only**. The first Pages run
-      creates this environment; if it isn't there yet, run the workflow once from step 2's push, then set it.
-   6. Confirm the organization still requires two-factor authentication (Settings → Authentication security). It was
-      on at creation.
-   7. Check that the workflow's run passed and `https://brunna-dev.github.io/oauth/client.json` serves the document.
-      Then, on the hub machine, run `brunna credentials check-published`. It must say "brunna's published client
-      document matches this install's".
+      - block deletion;
+      - **do not allow bypassing** the rules (administrators included).
+
+      From now on every change goes through a pull request you review.
+   7. Check that `https://brunna-dev.github.io/oauth/client.json` serves the document. Then, on the hub machine at
+      step 0's release, run `brunna credentials check-published`. It must say "brunna's published client document
+      matches this install's".
    8. Release brunna with `oauth/published` added (CONTRIBUTING.md, "Releasing", step 4). From that release on, route
       (a) is offered and the daily tripwire runs on every install.
 5. **`brunna credentials grant|set|revoke`**:
    - discovery as C2 step 2;
    - the route picked from the metadata;
-   - the pin of the security fields;
+   - the pin, the whole document checked again at the grant;
    - the callback on 47615 (reserved in the registry), loopback only;
    - the confirmation;
    - `oauth/providers.yaml` (Upwork's entry first, written from its developer docs at build time, with
@@ -1078,14 +1099,15 @@ sources were the CIMD drafts -00 and -03 and a probe of hubbus's keys. The key r
   (C2a).
 - **S2, the pin and publishing.**
   - Published only from release tags; a security-field change goes to a new file and a new `client_id`, never an edit.
-  - The pin compares only the security fields.
+  - The pin compares only the security fields (as built: the whole document, after the build's third review).
   - r3 overstated what the pin protects: the provider fetches the document itself, so a hijacked document phishes anyone
     with a "brunna" consent screen. The real controls are now named: the tag-restricted `github-pages` environment,
     actions pinned by SHA, 2FA, and doctor's daily tripwire (C2a, Risks).
 - **S3, the document going away.** Under draft -03 sections 6 and 6.1 that can end existing grants. `invalid_client`
   → `needs_grant` naming the client document, and a 503 is a retry (C4). The Risks text is corrected.
 - **S4, route (a)'s availability and failures.**
-  - Route (a) is used only with `oauth/published` shipped and the tripwire matching. A fetch error then stops the grant.
+  - Route (a) is used only with `oauth/published` shipped and the tripwire matching. A fetch error then stops the grant
+    (as built: it falls through to (b)/(c), after the build's third review).
   - The exact `http://127.0.0.1:47615/callback` comes first: draft -00 has no loopback-port exception, while -03 section
     4.2 cites RFC 9700 section 4.1.3.
   - A random port is used only when 47615 is busy, naming the holder.
