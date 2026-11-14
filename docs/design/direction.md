@@ -149,8 +149,9 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
    bridge it attaches (r2 after a blind review; a loopback proxy is the fallback). No job reads the Keychain (DV5
    stays). v1 is for unsandboxed projects. r3: a new user needs no setup. brunna's shared CIMD client is the default,
    the grant command picks the route itself, and an owner to-do carries the exact command. r4 comes after the third
-   blind review. Owner question: where the shared client's `client_id` lives for good (recommended: a GitHub
-   organization), decided before its first publish. Full rights at a service's first grant are asked by the command.
+   blind review. The shared client lives under the owner's organization `brunna-dev` (11-15). Steps 1–3 and C10 are
+   built (11-15, on a branch). Left: step 4, the shared client, which needs the owner's one-time setup in
+   `brunna-dev`; the user guide; and the daily job's move, which needs the owner's first grant (route c until then).
 7. **A project's skills** (`skills-sync.md`, the owner's decision 11-15, built 11-15): a sandboxed project develops them
    in `skills/`, and `brunna skills sync` installs them into the agents' skill folders only after the owner's typed
    yes (the platform reminds with an owner to-do per change set). Left: the migration of the project that tracks 44

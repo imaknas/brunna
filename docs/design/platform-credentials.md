@@ -1,7 +1,9 @@
 # Credentials for unattended jobs are the platform's own grants
 
 Status: design r4, 11-15: r2 after the first blind review, r3 with the owner's decisions so that a new user needs no
-setup, r4 after the third blind review (all listed at the end). Not built. Measured the same day (Claude Code 2.1.323 from the store, Codex 0.167.0). The
+setup, r4 after the third blind review (all listed at the end). **Steps 1–3 of the order of work and C10 built 11-15**
+(section "Built"), on a branch, not merged; step 4 (the shared client) waits on the owner's setup in `brunna-dev`, step 7
+on the owner's first grant. Measured the same day (Claude Code 2.1.323 and 2.1.325 from the store, Codex 0.167.0). The
 owner's open questions are near the end.
 
 ## The problem
@@ -598,6 +600,57 @@ Written in the build (Order of work, step 6), short, in the style of `docs/mcp.m
 7. **What it does not do.** No Keychain, no sharing with your own sign-in, nothing for sandboxed projects yet, no cloud
    backup of the sign-in (re-grant after a restore).
 8. **For your own install's client document** (advanced). `oauth_client.metadata_url`.
+
+## Built (11-15)
+
+Steps 1–3 and C10, in four commits on the branch:
+- **Registry** (`bin/registry.py`, the project schemas): `kind`, `server`, `broken`, the defaults, `credentials:` on jobs,
+  `credential_entries` and `credential_jobs` owner-only, the C6 refusals. Rule parsing goes through the runtime's new
+  `credential_tools` port (`tools_named`, `rules_tools_named`, `credential_rules_problems`, `sealed`; Claude's adapter
+  and the fake). Port 47615 is reserved.
+- **`bin/credentials.py`**:
+  - storage (`<secrets>/credentials/`, out of the backup; `credentials-kept/` for `backup: true`) and the status file
+    in `<state>/credentials/`;
+  - `fresh()`, `refresh` (the lock, `.new` validated, the lost answer, `invalid_client`, 503);
+  - `grant` (routes b and c; route a shown unavailable until `oauth/published` ships), `set`, `revoke`, `status`,
+    `check-published`;
+  - the hourly `brunna/credentials` job with C10's per-episode owner tasks;
+  - rename and purge hooks;
+  - rows for check-secrets, doctor and the status page.
+- **Provider notes**: `oauth/providers.yaml` (Upwork's entry, `checked_on` 2026-11-15). The design's earlier
+  `bin/credential_providers.yaml` moved there, beside the shared client's files.
+- **`bin/credential_bridge.py`**, attached by `llm.py` (`credentials_from_env` on `agent-job-confined`):
+  - `fresh()` before the launch;
+  - the bridge's status read after the run;
+  - no redirects; `-I`, with the proxy and CA variables ignored;
+  - redaction, capabilities stripped, the tool filter, run-file validation.
+- A conformance check, `credential-bridge` (`credential_tools`, safety).
+- Tests: `tests/test_platform_credentials.py` and `tests/test_credential_bridge.py`, against local servers
+  (`tests/mcp_fixture.py`).
+
+**Measured on the real tool (11-15, store copy 2.1.325)**, with a local MCP server in place of the remote one (SSE answers,
+a sampling request before each answer), the real bridge (the registry's https rule relaxed for the local http server,
+nothing else changed), a scratch instance, and one haiku run on the shared `~/.claude` (the headless token taken in
+memory by `runtime_claude.auth_env`, a logging refusing `security` first on PATH, `--restricted --strict-mcp-config
+--mcp-config`):
+- the run connected the bridge and listed exactly the job's two tools;
+- a third tool that `--allowedTools` allowed but the job's rules don't name was never offered;
+- both tools were called through the bridge, and one that echoes the Authorization header came back as
+  `Bearer [redacted]`;
+- `initialize` went upstream with empty capabilities;
+- every sampling request the server sent was answered upstream with an error and never reached the model;
+- `server/discover` was refused by the bridge, and Claude went on with `initialize`;
+- the token was in no stdout, transcript or MCP log file;
+- the Keychain calls were the shared dir's three login lookups, refused by the stub, and there was no `security -i`;
+- the bridge's status said initialized with 2 tools, and no auth failure.
+
+The conformance check passed on 2.1.325 without a model call.
+
+**Not measured, waiting on the owner's first grant**:
+- a real Upwork authorization (route c, the owner's own developer app, until the shared client is published);
+- Upwork's token lifetimes and refresh rotation;
+- whether a second grant coexists with the owner's interactive one;
+- the job's six tools through the bridge against `mcp.upwork.com`.
 
 ## Moving the daily job
 
