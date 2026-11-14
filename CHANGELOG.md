@@ -3,6 +3,22 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.18.0 (2026-11-14)
+
+### New
+
+- **registry:** Platform credentials and credentials: on agent jobs
+- **credentials:** The platform's own grants, kept fresh, with per-episode owner to-dos
+- **llm:** The platform's bridge gives a credentials job its server
+- **credentials:** Brunna's shared OAuth client, its Pages template and the daily tripwire
+
+### Fixed
+
+- **credentials:** A refused bridge's status is where llm.py reads it
+- **credentials:** --port=0, one send for a refused token, no registry refresh in the bridge
+- **credentials:** The review's hardening of the bridge, refresh, grant and revoke
+- **credentials:** The shared client's tripwire, grant-time pin and Pages checks, after review
+
 ## v0.17.0 (2026-11-14)
 
 ### New
