@@ -142,7 +142,9 @@ def covers(path: pathlib.Path) -> bool:
     import fnmatch
     path = path.expanduser().resolve()
     if {hubconf.session_addresses_dir().resolve(), (hubconf.secrets_dir() / "tmp").resolve(),
-            hubconf.runtimes_dir().resolve()} & {path, *path.parents}:   # never backed up (module header)
+            hubconf.runtimes_dir().resolve(), (hubconf.secrets_dir() / "credentials").resolve()} & {path, *path.parents}:
+        # never backed up (module header); credentials/: the platform's grants with backup: false, re-granted after a
+        # restore (docs/design/platform-credentials.md C3; credentials-kept/ holds those with backup: true)
         return False
     dbs = [hubconf.bus_db(), *(hubconf.path(d["path"]) for d in CFG.get("sqlite") or [])]
     if any(db and path == db.resolve() for db in dbs):  # SQLite is copied separately with the backup API
@@ -243,7 +245,8 @@ def cmd_run() -> int:
         if not any(STAGE.is_relative_to(pathlib.Path(x)) for x in paths):
             paths.insert(0, str(STAGE))
         args = ["backup", "--tag", "nightly", "--json", "--exclude", str(hubconf.session_addresses_dir()),
-                "--exclude", str(hubconf.secrets_dir() / "tmp"), "--exclude", str(hubconf.runtimes_dir())]
+                "--exclude", str(hubconf.secrets_dir() / "tmp"), "--exclude", str(hubconf.runtimes_dir()),
+                "--exclude", str(hubconf.secrets_dir() / "credentials")]
         for x in CFG.get("exclude") or []:
             args += ["--exclude", str(hubconf.path(x)) if x.startswith("~") else x]
         r = restic(*args, *paths, capture=True)

@@ -24,7 +24,7 @@ tests:
 - tier: lint
   run: bin/lint . && AGENT_HUB_CONFIG=. AGENT_HUB_STATE="$TMPDIR/config-check" bin/py bin/config-check --child
   when: [commit, merge, nightly]
-  paths: &platform ["bin/**", "tests/**", "contracts/**", "templates/**", "locales/**", "githooks/**", "launchd/**", "capabilities/**", "agent-jobs/**", "modules/**", "integrations/**", "projects/**", "hub.example.json", "ruff.toml"]
+  paths: &platform ["bin/**", "tests/**", "contracts/**", "templates/**", "locales/**", "githooks/**", "launchd/**", "capabilities/**", "agent-jobs/**", "modules/**", "integrations/**", "projects/**", "oauth/**", "hub.example.json", "ruff.toml"]
 # the checks that read every tracked file (personal names, CJK, hard-coded hub paths, runtime syntax): any change,
 # a README or docs one included, runs them; a few seconds
 - tier: static
@@ -166,6 +166,12 @@ jobs:
   every: 15m
   cwd: hub
   run: bin/py bin/registry.py apply-updates
+# the platform's own grants (secrets: with kind; docs/design/platform-credentials.md C4, C10): an owner to-do for one a
+# job waits on, refresh tokens kept alive (used about daily), statuses for check-secrets, doctor and the status page
+- name: credentials
+  every: 1h
+  cwd: hub
+  run: bin/py bin/credentials.py keepalive
 # the credentials declared in the registry (each project's secrets:): present, backed up, about to expire; values are
 # not read. Sends Discord on problems
 - name: secrets

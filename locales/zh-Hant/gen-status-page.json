@@ -216,5 +216,6 @@
  "Git config fence (report only, a best-effort check, scanned {at})": "Git config 圍欄(只回報,盡力而為的檢查,掃描於 {at})",
  "no known problem": "沒有已知問題",
  "problems found": "發現問題",
- "Cannot read which skills wait for review: {e}": "無法讀取哪些 skills 在等審:{e}"
+ "Cannot read which skills wait for review: {e}": "無法讀取哪些 skills 在等審:{e}",
+ "Cannot read the platform credentials' state: {e}": "讀不到平台憑證的狀態:{e}"
 }

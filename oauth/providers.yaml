@@ -1,0 +1,26 @@
+# What brunna knows about OAuth providers of remote MCP servers, keyed by issuer (docs/design/platform-credentials.md
+# C2 step 3). `brunna credentials grant` reads it to choose the client route and to word its question; what a grant
+# learns goes into the instance's own copy (<config>/oauth-providers.yaml), which overrides this one.
+#
+# Fields:
+#   label        the service's name shown to the owner (never the project's wording)
+#   rfc7591      false: its registration_endpoint is not RFC 7591 dynamic registration, so route (b) isn't tried
+#   any_port     false: it refuses a loopback redirect on a random port (only the fixed one works)
+#   scopes       {scope: [tool, …]} where the provider publishes scopes per tool (none known yet)
+#   app_steps    how to make your own app (route c), printed by the command
+#   checked_on   when this entry was last checked against the provider's own documents
+#   docs         where it was checked
+providers:
+  https://mcp.upwork.com:
+    label: Upwork
+    # The authorization server's metadata advertises https://www.upwork.com/register, which looks like its human sign-up
+    # page, not an RFC 7591 endpoint (seen 11-15; nothing was posted to it).
+    rfc7591: false
+    app_steps: |-
+      Upwork: request an API key in Upwork's developer portal (https://www.upwork.com/developer/keys/apply; to be
+      confirmed at the first grant), with the callback URL http://127.0.0.1:47615/callback. When Upwork has issued it,
+      enter its key (client ID) and secret here.
+    checked_on: "2026-11-15"
+    docs:
+    - https://mcp.upwork.com/.well-known/oauth-protected-resource
+    - https://mcp.upwork.com/.well-known/oauth-authorization-server

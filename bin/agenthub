@@ -76,6 +76,9 @@ scheduling:
 owner (you; not commands for project sessions):
   brunna owner list | done/drop/already-done <key> | answer <question id> "answer"
                         = bin/owner.py: the built-in owner side ({settings} owner_side: builtin; with an assistant, list only)
+  brunna credentials status | grant <project> <name> | set <project> <name> | revoke <project> <name>
+                        the platform's own grants for the remote MCP servers unattended jobs use (bin/credentials.py,
+                        docs/design/platform-credentials.md): a to-do tells you when one is needed, with the command
   brunna skills sync <project> [--adopt] [--yes=<code>] | status [<project>]
                         a project's skills, developed in its skills/ folder: what changed, shown as a diff, installed
                         into the folders its agents load skills from after you type yes, or with the approval code
@@ -1650,6 +1653,7 @@ def cmd_doctor(argv: list[str]) -> int:
     doctor_wake_misses(add)
     doctor_propose(add)
     doctor_memory_branches(add)
+    doctor_credentials(add)
     doctor_user_settings(add, installed)
     doctor_credential_homes(add, [n for n in dict.fromkeys([rname, *installed]) if n != "none"])
     doctor_throwaway_runtimes(add, rname)
@@ -1773,6 +1777,29 @@ def cmd_doctor(argv: list[str]) -> int:
 
 
 WAKE_MISS_REMIND = 2   # letters in hubbus' window (WAKE_MISS_DAYS) whose wake reached a session that didn't take them
+
+
+def doctor_credentials(add) -> None:
+    """The platform's own grants (docs/design/platform-credentials.md C8): each one declared but not granted, or needing
+    the owner again, with the command; and whether brunna's shared client (route a) is available."""
+    import credentials
+    try:
+        rows = credentials.rows({"projects": hubconf.projects()})
+    except Exception as e:   # doctor must not crash on it
+        add("warn", _("platform credentials: can't be read ({why})", why=e))
+        return
+    for row in rows:
+        if row["state"] == "granted":
+            add("ok", _("platform credential {project}/{name}: granted", project=row["project"], name=row["name"]))
+        elif row["jobs"] or row["state"] == "needs_grant":
+            add("warn", credentials.waiting_text(row), row["command"])
+        else:
+            add("info", _("platform credential {project}/{name}: declared, not granted, and no job lists it",
+                          project=row["project"], name=row["name"]))
+    if rows:
+        ok, why = credentials.shared_client_state()
+        add("ok" if ok else "info", _("brunna's shared client (route a): available") if ok else
+            _("brunna's shared client (route a): {why}; a grant uses dynamic registration or your own app", why=why))
 
 
 def doctor_memory_branches(add) -> None:
@@ -2318,6 +2345,7 @@ COMMANDS = {
     "owner": lambda argv: subprocess.run([*hubconf.launch(BIN / "owner.py"), *argv]).returncode,
     # the owner's review of a project's skills (docs/design/skills-sync.md); never a session command
     "skills": passthrough("skills_sync.py"),
+    "credentials": passthrough("credentials.py"),
     # after a merge of agent-hub, run by merge-branch from the merged tree (docs/design/test-waiting.md step 2.2;
     # step 2.3 adds the hook install): the registry index rebuilt by the code that just landed
     "land": cmd_land,

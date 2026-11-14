@@ -16,6 +16,9 @@ The registry holds only names, locations and expiry, **never values**; this scri
   - undeclared: files in each project's runtime / workspace (and the platform's .secrets/) whose names look like
     credentials but are not declared are only listed as a reminder (not a problem, content not read) -- either
     declare them or confirm they are not credentials
+  - platform credentials (an entry with kind; docs/design/platform-credentials.md C8): from their status files only
+    (bin/credentials.py rows): one a job lists that isn't granted, or that needs the owner again, is a problem, with
+    the command that grants it; its file's mode is checked, never its content
 On problems: the alert channels (once per set, once more on recovery), exit 1 (the scheduler records a failure, the
 status page turns red). No alert channel at all is printed as a reminder, not a problem.
 
@@ -63,6 +66,21 @@ def has_key(path: pathlib.Path, key: str) -> bool:
         if sep and k.strip() == key:
             return bool(v.strip().strip("'\""))
     return False
+
+
+def check_credential(row: dict) -> tuple[list[str], list[str]]:
+    """A platform credential's row (credentials.rows): (problems, notes)."""
+    import credentials
+    name = f"{row['project']}:{row['name']}"
+    if row["state"] != "granted":
+        if row["jobs"] or row["state"] == "needs_grant":
+            return [credentials.waiting_text(row)], []
+        return [], [_("{name}: not granted, and no job lists it", name=name)]
+    notes = [_("{name}: granted ({kind}); last refresh {last}", name=name, kind=row["kind"], last=row["last_refresh"] or "-")]
+    if row["mode"] is not None and row["mode"] & 0o077:
+        return [_("{name}: its file is readable by others ({mode}); the platform writes it 600", name=name,
+                  mode=oct(row["mode"]))], notes
+    return [], notes
 
 
 def check(project: str, doc: dict, sec: dict, today: datetime.date) -> tuple[list[str], list[str]]:
@@ -159,11 +177,21 @@ def main(argv: list[str]) -> int:
         if llm_keys or alert_keys:
             projects = {**projects, hub: {**projects[hub],
                                           "secrets": [*(projects[hub].get("secrets") or []), *alert_keys, *llm_keys]}}
+    import credentials
+    cred_rows = {(r["project"], r["name"]): r for r in credentials.rows(index)}
     for project in sorted(argv or [*projects, *modules]):
         doc = projects.get(project) or modules.get(project) or {}
         declared = set(module_paths) if project == hubconf.hub_project() else set()
         for sec in doc.get("secrets") or []:
             count += 1
+            if "kind" in sec:   # the platform's own grant: its status, never its file's content
+                row = cred_rows.get((project, sec.get("name")))
+                if row:
+                    probs, notes = check_credential(row)
+                    problems += probs
+                    for n in notes:
+                        print(n)
+                continue
             probs, notes = check(project, doc, sec, today)
             problems += probs
             for n in notes:

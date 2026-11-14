@@ -35,6 +35,7 @@ $ agenthub doctor    # launchd, problems
 ✓ sandbox 專案寫不到它的 session 載入 hook 跟設定的檔案:可以用
 ✓ 會寄信的排程 agent job(mail: true):可以用
 ✓ 專案自己的 agent 呼叫(brunna agent):可以用
+✓ 使用平台自有 MCP 授權的無人值守 job(credentials:):可以用
 ✗ runtime claude 不啟動任何平台執行:還沒有檢查過的 Claude Code:brunna runtimes install claude 會做一份(每晚的 brunna/update-runtimes 也會)
     → 這台電腦沒有 nvm 的 node 帶的 npm:平台用它安裝自己的 Claude Code。先裝 nvm 和一個 node 版本(nvm install --lts),再跑 brunna runtimes install claude
 ✗ agent 登入(headless token):沒有
@@ -86,6 +87,7 @@ $ agenthub doctor    # launchd, all fine
 ✓ sandbox 專案寫不到它的 session 載入 hook 跟設定的檔案:可以用
 ✓ 會寄信的排程 agent job(mail: true):可以用
 ✓ 專案自己的 agent 呼叫(brunna agent):可以用
+✓ 使用平台自有 MCP 授權的無人值守 job(credentials:):可以用
 ✓ runtime claude:store 裡有檢查過的 2.1.400
 ! 最近 7 天有 2 封信叫醒了 session,那個 session 卻沒接(最近一封:<ID>,給 beta);coding agent 處理叫醒的方式可能變了
     → 狀態頁的信箱區列出每封信怎麼走的;hub-event.log 記著每個等待程序怎麼結束
@@ -201,6 +203,8 @@ $ agenthub doctor    # two coding agents
     → 某個 runtime 關掉的功能,只是它自己的 session 沒有
 ! 專案自己的 agent 呼叫(brunna agent):claude 可以用;acp 關掉(沒有在平台拋棄式 worktree 以外跑 agent、受限執行(只照宣告的權限)、檢查受限執行自己的規則)
     → 某個 runtime 關掉的功能,只是它自己的 session 沒有
+! 使用平台自有 MCP 授權的無人值守 job(credentials:):claude 可以用;acp 關掉(沒有在平台拋棄式 worktree 以外跑 agent、受限執行(只照宣告的權限)、檢查受限執行自己的規則、判斷一次執行會載入哪些工具伺服器、給一次執行平台信件工具的方法、分辨憑證 job 的規則列出 server 哪些工具的方法)
+    → 某個 runtime 關掉的功能,只是它自己的 session 沒有
 ✓ claude:平台規則寫進 CLAUDE.local.md
 · acp:沒有規則檔;它的 session 從 MCP server 的 instructions(brunna mcp)或 session 開始的 hook 拿到平台規則
 · 執行環境 acp 沒有判斷 session 在忙、閒置或卡在對話框的方法、讀取 session 最後回覆結尾的方法:分派信件時把它的 session 當作閒置,也不讀它們說過的話
@@ -217,5 +221,5 @@ $ agenthub doctor    # two coding agents
 ! 排程器還沒 tick 過,這台也沒有服務管理員在跑它(看上面排程器那一行)
 ✓ 背景服務、專案設定:跟 config 一致
 
-1 個問題、14 個提醒
+1 個問題、15 個提醒
 --- stderr

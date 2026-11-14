@@ -566,6 +566,12 @@ def main() -> None:
             alerts.append(("notify", skills_sync.pending_text(proj, row)))
     except Exception as e:  # the status page must not crash because of this
         alerts.append(("bad", _("Cannot read which skills wait for review: {e}", e=e)))
+    try:   # the platform's grants waiting for the owner (bin/credentials.py; docs/design/platform-credentials.md C10)
+        import credentials
+        for row in credentials.waiting({"projects": hubconf.projects()}):
+            alerts.append(("notify", credentials.waiting_text(row)))
+    except Exception as e:  # the status page must not crash because of this
+        alerts.append(("bad", _("Cannot read the platform credentials' state: {e}", e=e)))
 
     for job in jobs:
         name = job["name"]
