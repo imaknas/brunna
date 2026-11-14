@@ -15,6 +15,10 @@
 - **The owner's to-dos, by an open protocol.** What only you can do (a `STATE.md` to-do line tagged with your name) is
   registered with your personal assistant or the built-in owner inbox and kept in step both ways, following
   [Principal Handoff](https://doi.org/10.5281/zenodo.23852711), a published spec with conformance tests.
+- **Sign-ins for unattended jobs.** A scheduled job that needs a service you sign in to (a remote MCP server, or an API
+  key) gets brunna's own grant for it, kept in the secrets folder and given only to that job's connection to that
+  service, never to the agent or your Keychain. A to-do tells you when to run `brunna credentials grant`
+  ([`docs/credentials.md`](credentials.md)).
 - **Sandboxed projects.** A project with `enforce.sandbox` gets a policy computed by the platform: its agents, services and
   jobs can write only its own folders, can't read other projects, credentials or the Keychain, listen only on a
   declared port, and mail only as themselves (Seatbelt on macOS, Landlock and seccomp on Linux; an OS without a working

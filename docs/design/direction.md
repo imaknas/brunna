@@ -150,8 +150,10 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
    stays). v1 is for unsandboxed projects. r3: a new user needs no setup. brunna's shared CIMD client is the default,
    the grant command picks the route itself, and an owner to-do carries the exact command. r4 comes after the third
    blind review. The shared client lives under the owner's organization `brunna-dev` (11-15). Steps 1–3 and C10 are
-   built (11-15, on a branch). Left: step 4, the shared client, which needs the owner's one-time setup in
-   `brunna-dev`; the user guide; and the daily job's move, which needs the owner's first grant (route c until then).
+   built and merged (11-15). Step 4 on brunna's side (`oauth/client.json`, the Pages template, the tripwire) and the
+   user guide `docs/credentials.md` are built too. Left, all the owner's:
+   - step 4's setup in `brunna-dev` (numbered in the design), then the release that ships `oauth/published`;
+   - the daily job's move, at the first grant (route c until the shared client is published).
 7. **A project's skills** (`skills-sync.md`, the owner's decision 11-15, built 11-15): a sandboxed project develops them
    in `skills/`, and `brunna skills sync` installs them into the agents' skill folders only after the owner's typed
    yes (the platform reminds with an owner to-do per change set). Left: the migration of the project that tracks 44

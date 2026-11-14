@@ -165,6 +165,7 @@ say it's done, then run the same command again.
 | Everyday commands | [docs/commands.md](docs/commands.md) |
 | Updating, and going back | [docs/upgrading.md](docs/upgrading.md) |
 | The mailbox for any agent (MCP) | [docs/mcp.md](docs/mcp.md) |
+| Sign-ins for unattended jobs (`brunna credentials`) | [docs/credentials.md](docs/credentials.md) |
 | Using it with herdr, and a status line for other tools (`brunna glance`) | [docs/herdr.md](docs/herdr.md) |
 | How each part is designed | [docs/design/](docs/design) |
 | Interfaces shared with other systems | [contracts/](contracts) |

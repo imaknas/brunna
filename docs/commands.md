@@ -9,6 +9,7 @@ brunna llm setup              # which provider/model the platform's judgment cal
 brunna jobs                   # all scheduled jobs; `brunna run <job>` runs one now
 brunna recover <project>      # new machine or lost folder (never re-onboard an onboarded project)
 brunna rename <old> <new>     # dry-run first, then --apply
+brunna credentials status     # unattended jobs' sign-ins; a to-do gives the `brunna credentials grant …` to run
 brunna --version              # the release this checkout is at
 brunna upgrade --check        # is there a newer release, and what changes; `brunna upgrade` installs it
 ```

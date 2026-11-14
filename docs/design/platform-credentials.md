@@ -1,9 +1,10 @@
 # Credentials for unattended jobs are the platform's own grants
 
 Status: design r4, 11-15: r2 after the first blind review, r3 with the owner's decisions so that a new user needs no
-setup, r4 after the third blind review (all listed at the end). **Steps 1–3 of the order of work and C10 built 11-15**
-(section "Built"), on a branch, not merged; step 4 (the shared client) waits on the owner's setup in `brunna-dev`, step 7
-on the owner's first grant. Measured the same day (Claude Code 2.1.323 and 2.1.325 from the store, Codex 0.167.0). The
+setup, r4 after the third blind review (all listed at the end). **Steps 1–3 of the order of work and C10 built and
+merged 11-15** (section "Built"). **Step 4 on brunna's side and step 6 (the user guide) built 11-15.** Left for the
+owner: step 4's setup in `brunna-dev` (numbered there), then the release that ships `oauth/published`; and step 7, the
+first grant. Measured the same day (Claude Code 2.1.323 and 2.1.325 from the store, Codex 0.167.0). The
 owner's open questions are near the end.
 
 ## The problem
@@ -305,8 +306,8 @@ spec of 2025-11-25 adopted it as the recommended way for a client to identify it
     - brunna's release checklist (CONTRIBUTING.md, "Releasing") then runs `brunna credentials check-published`, the
       tripwire below run once. A release isn't announced while the published document's security fields differ from the
       tag's.
-    - brunna's repository keeps the organization repository's workflow as a template, `oauth/pages.yml`, and tests it.
-      The owner copies it over once (step 4).
+    - brunna's repository keeps the organization repository's workflow and README as a template, `oauth/pages-repo/`,
+      and tests it. The owner copies it over once (step 4).
   - **Immutable.** A change to any security field never edits a published file. It publishes a new one beside it
     (`oauth/client-2.json`, a new `client_id`), so existing grants keep theirs. Older files stay published.
   - **Its URL** is read only from the file's `client_id`. No personal account name is written in `bin/` or `tests/`
@@ -815,8 +816,8 @@ The project hears about it with a `brunna send --type info` once it works (its s
   - its redirect URIs are loopback only, with 47615 first;
   - both auth method fields are present;
   - it has no field CIMD forbids for a public client;
-  - the template `oauth/pages.yml` stages exactly one regular file at `oauth/client.json` and no links, runs only on a
-    push to `main`, and pins its actions by SHA;
+  - the template `oauth/pages-repo/.github/workflows/pages.yml` stages exactly one regular file at `oauth/client.json`
+    and no links, runs only on a push to `main`, and pins its actions by SHA;
   - `brunna credentials check-published` against a local server: matching security fields pass, a difference fails;
   - the registry refuses `expose.local_port: 47615`;
   - `tests/test_personal_boundary.py` passes over `bin/` and `tests/`.
@@ -837,20 +838,35 @@ The project hears about it with a `brunna send --type info` once it works (its s
    - Before merge it measures what M4 left open on a real run: a `tools/call` through the bridge, the filter, the `-p`
      path, SSE, and a run on the shared `~/.claude`.
    - If the bridge fails there, the loopback proxy (M3) takes its place, with a design note first.
-4. **The shared client**, under `brunna-dev` (created 11-15).
-   - In brunna's repository:
-     - `oauth/client.json` (the pin) and `oauth/pages.yml` (the template), and their tests;
-     - doctor's tripwire and `brunna credentials check-published`;
-     - `oauth_client` in the schema;
-     - the step in CONTRIBUTING.md's release checklist.
-   - Then the owner's part, once, in the organization (no session creates a repository or changes a GitHub setting):
-     1. create `brunna-dev/brunna-dev.github.io` (public);
-     2. protect `main` (pull requests only, no force-push or deletion);
-     3. add `oauth/client.json` from the release tag, and `oauth/pages.yml` as `.github/workflows/pages.yml`, through a
-        pull request;
-     4. turn on Pages with GitHub Actions as its source, and restrict the `github-pages` environment to `main`.
-   - Then the next release's checklist confirms the published document matches, and that release ships
-     `oauth/published`.
+4. **The shared client**, under `brunna-dev` (created 11-15). **Built 11-15** on brunna's side:
+   - `oauth/client.json`, the document of C2a (the pin);
+   - `oauth/pages-repo/`, the template of the organization's repository: `.github/workflows/pages.yml` (runs on a push
+     to `main`; stages `_site/oauth/client.json` after checking the document, fails unless that is the one regular
+     file and there are no links; uploads `_site`; actions pinned by SHA; the `github-pages` environment) and a README
+     with the rules;
+   - `brunna credentials check-published`, and the daily tripwire (doctor and the hourly job, once `oauth/published`
+     ships; an alert on a mismatch, route (a) off until it matches);
+   - the release-checklist step in CONTRIBUTING.md;
+   - tests (`tests/test_shared_client.py`: the document, the workflow and its staging step run for real, the tripwire).
+
+   **The owner's setup, once** (no session creates a repository, pushes, or changes a GitHub setting):
+   1. In the `brunna-dev` organization, create the public repository `brunna-dev.github.io`.
+   2. Copy brunna's `oauth/pages-repo/` into it as it is (`.github/workflows/pages.yml` and `README.md`), and
+      `oauth/client.json` from the brunna release tag to `oauth/client.json` there. Commit and push to `main`.
+   3. In that repository's Settings → Pages, set the source to **GitHub Actions**.
+   4. In Settings → Branches (or Rules), protect `main`:
+      - require a pull request before merging;
+      - block force pushes;
+      - block deletion.
+   5. In Settings → Environments → `github-pages`, set deployment branches to **`main` only**. The first Pages run
+      creates this environment; if it isn't there yet, run the workflow once from step 2's push, then set it.
+   6. Confirm the organization still requires two-factor authentication (Settings → Authentication security). It was
+      on at creation.
+   7. Check that the workflow's run passed and `https://brunna-dev.github.io/oauth/client.json` serves the document.
+      Then, on the hub machine, run `brunna credentials check-published`. It must say "brunna's published client
+      document matches this install's".
+   8. Release brunna with `oauth/published` added (CONTRIBUTING.md, "Releasing", step 4). From that release on, route
+      (a) is offered and the daily tripwire runs on every install.
 5. **`brunna credentials grant|set|revoke`**:
    - discovery as C2 step 2;
    - the route picked from the metadata;
@@ -860,7 +876,8 @@ The project hears about it with a `brunna send --type info` once it works (its s
    - `oauth/providers.yaml` (Upwork's entry first, written from its developer docs at build time, with
      `checked_on` and links), and the instance's learned copy;
    - the to-do closing.
-6. **The user guide**, `docs/credentials.md` (C11), with a line in `docs/features.md` and `docs/commands.md`.
+6. **The user guide**, `docs/credentials.md` (C11), with a line in `docs/features.md`, `docs/commands.md` and the
+   README's table of guides. **Built 11-15.**
 7. **The daily job's move** (above), by the owner.
 
 Each step is merged on its own through `merge-branch`. Before step 3 is built, the design and then the code each get a
