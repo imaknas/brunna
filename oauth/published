@@ -1,0 +1,3 @@
+brunna's shared OAuth client is published: https://brunna-dev.github.io/oauth/client.json matched this release's
+oauth/client.json (brunna credentials check-published, 11-15). With this file in a release, route (a) is offered and the
+daily tripwire runs on every install (docs/design/platform-credentials.md, C2a).
