@@ -39,7 +39,7 @@ def unsupported(point: str) -> str | None:
     pin = ((hubconf.get("llm") or {}).get("points") or {}).get(point) or {}
     name = pin.get("runtime") or spec.get("runtime") or runtime_ports.default_name()
     if spec.get("shape") == "completion":
-        if completion.routed(point):
+        if completion.routed(point, spec):
             try:
                 impl = completion.resolve(point, spec).get("impl")
             except Exception:   # nowhere to go is the call's own failure, said when it runs
@@ -48,8 +48,7 @@ def unsupported(point: str) -> str | None:
             return runtime_ports.no_checked_copy(impl) if impl in runtime_ports.RUNTIMES else None
         if "completion" in runtime_ports.capabilities(name):
             return runtime_ports.no_checked_copy(name)
-        return _("runtime {name} has no completion interface, and {settings} has no llm section (set one up with "
-                 "brunna llm setup)", name=name)
+        return completion.nowhere(name, spec)
     try:
         mod = runtime_ports.load(name, ports=("agent",))
     except runtime_ports.Unsupported as e:

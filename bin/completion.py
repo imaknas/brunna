@@ -64,14 +64,42 @@ MAX_RATE_RETRIES = 3
 # Mask strings that look like credentials before sending to a model (originally in reflect_llm.py: in the first trial
 # run the model quoted the first few characters of a Finnhub API key pasted in a conversation into the report).
 # Tokens with known prefixes, and long enough mixed letter-digit strings, are all replaced by the mask text below.
-SECRET = re.compile(
-    r"(?:sk-[A-Za-z0-9_\-]{10,}|sk-ant-[A-Za-z0-9_\-]{10,}|AIza[0-9A-Za-z_\-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}"
-    r"|xox[abpr]-[A-Za-z0-9\-]{10,}|eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-.]+"
-    r"|(?=[A-Za-z0-9_\-]*\d)(?=[A-Za-z0-9_\-]*[A-Za-z])[A-Za-z0-9_\-]{20,})")
+PREFIXED = (r"sk-[A-Za-z0-9_\-]{10,}|sk-ant-[A-Za-z0-9_\-]{10,}|AIza[0-9A-Za-z_\-]{20,}|gh[pousr]_[A-Za-z0-9]{20,}"
+            r"|xox[abpr]-[A-Za-z0-9\-]{10,}|eyJ[A-Za-z0-9_\-]{20,}\.[A-Za-z0-9_\-.]+")
+# what is masked, as one pattern (the definition; reflect_llm imports it). Its last branch's lookaheads scan a run to its
+# end at every position, so on a long run without a digit it is quadratic: redact() masks the same matches in linear time
+SECRET = re.compile(r"(?:" + PREFIXED + r"|(?=[A-Za-z0-9_\-]*\d)(?=[A-Za-z0-9_\-]*[A-Za-z])[A-Za-z0-9_\-]{20,})")
+_PREFIXED = re.compile(r"(?:" + PREFIXED + r")")
+_SCAN = re.compile(r"(?:" + PREFIXED + r")|(?P<run>[A-Za-z0-9_\-]{20,})")
+_PREFIX_START = re.compile(r"sk-|AIza|gh[pousr]_|xox[abpr]-|eyJ")
+_DIGIT, _LETTER = re.compile(r"\d"), re.compile(r"[A-Za-z]")
 
 
 def redact(text: str) -> str:
-    return SECRET.sub("[redacted]", text)
+    """SECRET.sub("[redacted]", text), in linear time. A run of 20+ token characters found where no prefix matches is
+    masked whole when it holds a digit and a letter; when it doesn't, no later position in it can match that branch
+    either (a suffix of the run lacks what the run lacks), so only a prefix starting inside it can, and only those
+    starts are tried."""
+    out, pos, n = [], 0, len(text)
+    while pos <= n:
+        m = _SCAN.search(text, pos)
+        if not m:
+            break
+        if m.group("run") is not None and not (_DIGIT.search(m.group()) and _LETTER.search(m.group())):
+            inner, p = None, m.start() + 1
+            while (c := _PREFIX_START.search(text, p, m.end())):
+                if (inner := _PREFIXED.match(text, c.start())):
+                    break
+                p = c.start() + 1
+            if inner is None:
+                out.append(text[pos:m.end()])
+                pos = m.end()
+                continue
+            m = inner
+        out.append(text[pos:m.start()] + "[redacted]")
+        pos = m.end()
+    out.append(text[pos:])
+    return "".join(out)
 
 
 class Refused(Exception):
@@ -116,14 +144,29 @@ def read_key(conf: dict) -> str | None:
                     var=_("variable name")))
 
 
-def routed(point: str) -> bool:
+def routed(point: str, spec: dict | None = None) -> bool:
     """Whether llm.providers serves this completion point (resolve) rather than runtime.default's completion interface:
-    the point is pinned to a provider, or llm.use is set. Providers without use serve only the points pinned to them."""
+    the point is pinned to a provider, or llm.use names its group (spec's model_group). Every other point, the groups
+    use leaves out included, stays on the runtime as without llm.providers."""
     s = settings()
     if not s:
         return False
     pin = (s.get("points") or {}).get(point)
-    return bool((isinstance(pin, dict) and pin.get("provider")) or s.get("use"))
+    if isinstance(pin, dict) and pin.get("provider"):
+        return True
+    use = s.get("use") or {}
+    return bool(use.get((spec or {}).get("model_group") or DEFAULT_GROUP))
+
+
+def nowhere(runtime: str, spec: dict | None = None) -> str:
+    """Why a completion point the providers don't serve (routed) has nowhere to go: the runtime has no completion
+    interface, and either there are no llm.providers or they don't take this point."""
+    if settings():
+        return _("runtime {name} has no completion interface, and llm.providers take only the points pinned to them and the "
+                 "groups llm.use names (not {group}); set llm.use, or pin this point (brunna llm setup sets use)",
+                 name=runtime, group=(spec or {}).get("model_group") or DEFAULT_GROUP)
+    return _("runtime {name} has no completion interface, and {settings} has no llm section (set one up with brunna llm "
+             "setup)", name=runtime)
 
 
 def resolve(point: str, spec: dict) -> dict:
@@ -145,17 +188,35 @@ def resolve(point: str, spec: dict) -> dict:
     entry = pin.get("model") or models.get(group)
     if not entry:
         raise Refused(_("llm.providers.{name}.models has no {group}", name=name, group=group))
-    if isinstance(entry, str):   # a pinned name the provider lists keeps what is written there
-        entry = next((m for m in models.values() if isinstance(m, dict) and m.get("name") == entry), entry)
+    if isinstance(entry, str):
+        # a pinned name the provider lists keeps what is written there: the entry of the point's own group when it is
+        # that model, else the first group (fast, standard, strong) listing it
+        listed = [models.get(g) for g in (group, *GROUPS)]
+        entry = next((m for m in listed if isinstance(m, dict) and m.get("name") == entry), entry)
     m = entry if isinstance(entry, dict) else {"name": entry}
     return {"provider": name, "impl": conf.get("impl"), "conf": conf, "group": group, "model": m.get("name"),
             "context": m.get("context"), "price": m.get("price"), "location": conf.get("location", "cloud")}
 
 
+_DIGITS = re.compile(r"[0-9]")
+
+
 def estimate_tokens(text: str) -> int:
     """Rather overestimate: UTF-8 bytes / 3 (a Chinese character is about one token, English about 4 characters a
-    token, so both come out high)."""
-    return len(text.encode()) // 3 + 1
+    token, so both come out high), but an ASCII digit is a token of its own (Qwen's and Llama 3's tokenizers split
+    numbers into digits: digit-heavy text came out about 3x under, measured 11-15)."""
+    digits = len(_DIGITS.findall(text))
+    return (len(text.encode()) - digits) // 3 + digits + 1
+
+
+SCHEMA_PROMPT_CHARS = 300   # provider_http.schema_in_prompt's own words around the schema
+
+
+def request_tokens(prompt: str, schema: dict | None, max_tokens: int, system: str = "") -> int:
+    """What one request needs of the context: the prompt, the system prompt, the schema (sent as a grammar or, when the
+    provider can't, written into the prompt), and the room for the answer."""
+    extra = json.dumps(schema, ensure_ascii=False) + " " * SCHEMA_PROMPT_CHARS if schema is not None else ""
+    return estimate_tokens(system + prompt + extra) + max_tokens
 
 
 def today_cost() -> float:
@@ -244,14 +305,21 @@ def _append(row: dict, project: str | None) -> None:
         pass
 
 
-THINK = re.compile(r"<think>.*?</think>", re.S)
+def strip_think(text: str) -> str:
+    """A reasoning model's leading <think>…</think> block taken off (also one with only the closing tag, which some
+    models print). Only a block before the answer: never anything inside it (a JSON string may say "</think>")."""
+    t = text.lstrip()
+    if t.startswith("<think>"):
+        end = t.find("</think>")
+        return t[end + len("</think>"):] if end != -1 else t
+    end = t.find("</think>")
+    if end != -1 and not t.startswith(("{", "[", "```")):   # no opening tag, and the text isn't an answer already
+        return t[end + len("</think>"):]
+    return text
 
 
 def parse_json(text: str):
-    t = THINK.sub("", text)
-    if "</think>" in t:            # no opening tag (some models print only the closing one)
-        t = t.split("</think>", 1)[1]
-    t = t.strip()
+    t = strip_think(text).strip()
     fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", t, re.S)
     if fence:
         t = fence.group(1)
@@ -271,11 +339,18 @@ def runtime_target(name: str, model: str | None, auth: str) -> dict:
             "context": None, "price": None, "location": "cloud"}
 
 
+MIN_REQUEST_S = 5   # less time than this left of the call's timeout_s: no further request is started
+
+
 def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sleep, target: dict | None = None,
-        project: str | None = None) -> dict:
+        project: str | None = None, clock=time.monotonic) -> dict:
     """Run one completion. Returns the same shape llm.py gives its callers; raises Refused(reason) on failure.
-    target not given = decided by hub.json's llm; given (runtime_target) = handed to that runtime."""
+    target not given = decided by hub.json's llm; given (runtime_target) = handed to that runtime.
+    spec's timeout_s (default 600) bounds the whole call, retries and backoff included: each request gets what is left,
+    so a caller with a hard deadline (cap-runner's, for a project's call) sees this one's refusal first."""
     import runtime_ports
+    total = int(spec.get("timeout_s") or 600)
+    deadline = clock() + total
     target = target or resolve(point, spec)
     conf = dict(target["conf"])
     conf["_key"] = read_key(conf)
@@ -295,12 +370,27 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
         # the settings don't say: a provider that can ask the model (a local Ollama's /api/show) does, so the check
         # below still holds and the provider sizes its window from it
         context = conf["_context"] = impl.model_context(conf, target["model"])
-    if context and estimate_tokens(prompt) + max_tokens > int(context):
-        raise Refused(_("prompt too long: about {tokens} tokens plus {max_tokens} of output exceed "
-                        "{provider}/{model}'s {context}-token context", tokens=estimate_tokens(prompt), max_tokens=max_tokens,
-                        provider=target["provider"], model=target["model"], context=context))
+
+    def fits(text: str) -> None:
+        """Every request is measured before it is sent, the retry's appended errors included (with the schema, which may
+        end up in the prompt): over the context → not sent."""
+        need = request_tokens(text, schema, max_tokens)
+        if context and need > int(context):
+            raise Refused(_("prompt too long: about {tokens} tokens plus {max_tokens} of output exceed "
+                            "{provider}/{model}'s {context}-token context", tokens=need - max_tokens,
+                            max_tokens=max_tokens, provider=target["provider"], model=target["model"], context=context))
+
+    def time_left() -> int:
+        left_s = deadline - clock()
+        if left_s < MIN_REQUEST_S:
+            raise Refused(_("out of time: {point} may take {total} s in all, and too little is left for another request "
+                            "to {provider}/{model}", point=point, total=total, provider=target["provider"],
+                            model=target["model"]))
+        return int(left_s)
+
+    fits(prompt)
     req = runtime_ports.CompletionRequest(point=point, prompt=prompt, model=target["model"], schema=schema,
-                                          max_tokens=max_tokens, timeout_s=int(spec.get("timeout_s") or 600))
+                                          max_tokens=max_tokens, timeout_s=total)
     cost_total, last_errs = 0.0, None
     # max_attempts: the most requests one call may make, retries of both kinds included (a point anyone's text reaches, so a
     # crafted input can't make it cost more than one); unset = the retries above
@@ -308,13 +398,14 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
     for attempt in range(2):   # the second = ask again with the errors attached when the output was invalid
         rate_tries = 0
         while True:
+            req = req._replace(timeout_s=time_left())
             res = impl.complete(req, conf)
             cost_total += record(point, target, res, project) or 0
             left = left - 1 if left is not None else None
             if res.stop != "rate_limited" or rate_tries >= MAX_RATE_RETRIES or left == 0:
                 break
             rate_tries += 1
-            sleep(min(res.retry_after_s or 5 * 2 ** rate_tries, 60))
+            sleep(min(res.retry_after_s or 5 * 2 ** rate_tries, 60, max(deadline - clock() - MIN_REQUEST_S, 0)))
         if not res.ok:
             if res.stop == "length":
                 raise Refused(_("output cut off at the length limit ({provider}/{model}, max_tokens {max_tokens}); not "
@@ -331,8 +422,10 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
             return _out(point, target, res.text, obj, cost_total, res)
         if left == 0:
             break
-        req = req._replace(prompt=prompt + "\n\n---\nThe previous answer was not valid (" + "; ".join(last_errs[:5])
-                           + "). This time reply with one valid JSON only, no other text.")
+        again = (prompt + "\n\n---\nThe previous answer was not valid (" + "; ".join(last_errs[:5])
+                 + "). This time reply with one valid JSON only, no other text.")
+        fits(again)
+        req = req._replace(prompt=again)
     if left == 0 and attempt == 0:
         raise Refused(_("output does not match the schema: {errors}", errors="; ".join(last_errs[:3])))
     raise Refused(_("output does not match the schema (after one retry): {errors}", errors="; ".join(last_errs[:3])))
@@ -385,7 +478,10 @@ def _strings(o, path=""):
         yield path, o
 
 
-def config_errors(llm: dict) -> list[str]:
+def config_errors(llm: dict, projects: dict | None = None, runtime: str | None = None) -> list[str]:
+    """The llm block's problems. projects (the registry being checked, config-check passes it) and runtime
+    (runtime.default) add one cross-check: a provider pinned on a project's agent call (registry agents:), which would be
+    ignored (an agent call runs on the runtime)."""
     import urllib.parse
     import runtime_ports
     errs = []
@@ -421,6 +517,10 @@ def config_errors(llm: dict) -> list[str]:
                           name=name))
         if p.get("location", "cloud") not in ("cloud", "local"):
             errs.append(_("providers.{name}.location can only be cloud / local", name=name))
+        if p.get("location") == "local" and p.get("key"):
+            # local is never metered (completion.metered): a provider reached with a key is someone's paid service
+            errs.append(_("providers.{name}: location local can't have a key (a provider reached with a key is billed "
+                          "per use, and local ones are counted as free)", name=name))
         if p.get("location") == "local":
             host = urllib.parse.urlparse(p.get("base_url") or "").hostname or ""
             if not (p.get("base_url") and PRIVATE.match(host)):
@@ -448,18 +548,25 @@ def config_errors(llm: dict) -> list[str]:
         known, declared = None, {}
     import runtime_ports
     for pt, pin in (llm.get("points") or {}).items():
-        # <project>/<name>: a project's declared call (registry models: or agents:). Only its form is checked here: a
-        # project's own manifest.update must never break the owner's config check; doctor and schedulectl models say
-        # when the project no longer declares it
+        # <project>/<name>: a project's declared call (registry models: or agents:). Whether the project still declares it
+        # is not an error (a project's own manifest.update shouldn't break the owner's config check; doctor and
+        # schedulectl models say so); a provider on one it declares as an agent call is: that pin would be ignored
         project_call = isinstance(pt, str) and "/" in pt
+        proj, _sep, call = pt.partition("/") if project_call else ("", "", "")
+        agent_call = project_call and projects is not None and \
+            call in ((projects.get(proj) or {}).get("agents") or {}) and call not in ((projects.get(proj) or {}).get("models") or {})
         if project_call and not PROJECT_CALL.match(pt):
             errs.append(_("points.{point}: a project's call is pinned as <project>/<name>, the name as its registry "
                           "models: or agents: declares it", point=pt))
         elif not project_call and known is not None and pt not in known:
             errs.append(_("points.{point}: not a declared judgment point", point=pt))
         if project_call and isinstance(pin, dict) and pin.get("runtime") is not None:
-            errs.append(_("points.{point}.runtime: a project's call runs where its judgment point runs; pin a provider "
-                          "or a model", point=pt))
+            errs.append(_("points.{point}.runtime: a project's call runs on its judgment point's runtime; pin a model "
+                          "(and, for a model call, a provider)", point=pt))
+        elif agent_call and isinstance(pin, dict) and pin.get("provider") not in (None, runtime):
+            errs.append(_("points.{point}.provider: {point} is an agent call (registry agents:), which runs on the "
+                          "runtime {runtime}; a provider pin there would be ignored, so it is refused (pin only a model)",
+                          point=pt, runtime=runtime))
         elif not isinstance(pin, dict):
             errs.append(_("points.{point} must be an object ({{model}} or {{provider, model?}})", point=pt))
         elif pin.get("provider") is not None and pin["provider"] not in providers:

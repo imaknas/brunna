@@ -15,7 +15,7 @@ llm.providers has no zz
 === resolve: no model
 llm.providers.k.models has no fast
 === run: too long
-prompt too long: about 1334 tokens plus 100 of output exceed f/m1's 1000-token context
+prompt too long: about 1463 tokens plus 100 of output exceed f/m1's 1000-token context
 === run: truncated
 output cut off at the length limit (f/m1, max_tokens 100); not retried
 === run: error
@@ -43,6 +43,7 @@ providers.b.key.secret is a file name only (it lives in the platform's secrets d
 providers.b.location can only be cloud / local
 providers.c.impl `nope` is not known (have: anthropic, openai, ollama, claude, fake, none, command, acp, codex)
 providers.c.key must be {"secret": file name} or {"env": variable name} (only one of them)
+providers.c: location local can't have a key (a provider reached with a key is billed per use, and local ones are counted as free)
 providers.c: location local only allows a base_url on this machine, a private network or the tailnet (now 'https://api.example.com')
 providers.d must be an object
 use.strong → a, but providers.a.models has no strong

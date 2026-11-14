@@ -54,8 +54,9 @@ class RuntimeNone(unittest.TestCase):
         self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
         out = json.loads(r.stdout)
         self.assertTrue(out["is_error"])
-        self.assertIn(i18n.translate("llm", "runtime {name} has no completion interface, and {settings} has no llm section "
-                                     "(set up an LLM provider)", {"name": "none", "settings": "hub.json"}, "zh-Hant"), out["llm_error"])
+        self.assertIn(i18n.translate("completion", "runtime {name} has no completion interface, and {settings} has no llm "
+                                     "section (set one up with brunna llm setup)", {"name": "none", "settings": "hub.json"},
+                                     "zh-Hant"), out["llm_error"])
 
     def test_memory_gaps_says_it_did_not_check(self):
         r = self.run_(BIN / "check-memory-gaps.py", env={"AGENT_HUB_LANG_UI": "zh-Hant"})   # the message asserted is the zh-Hant one

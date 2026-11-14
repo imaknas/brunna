@@ -69,7 +69,7 @@ llm.py:lease-session 這個執行環境不支援長駐的串流 session
 $ llm.py run reflect-week    # no completion
 [exit 1]
 --- stdout
-{"type": "result", "is_error": true, "structured_output": null, "llm_point": "reflect-week", "llm_error": "執行環境 none 沒有 completion 介面,brunna.json 也沒有 llm 區塊(設一家 LLM provider)"}
+{"type": "result", "is_error": true, "structured_output": null, "llm_point": "reflect-week", "llm_error": "執行環境 none 沒有 completion 介面,brunna.json 也沒有 llm 區塊(用 brunna llm setup 設一家)"}
 --- stderr
 
 $ llm.py run agent-job    # no agent

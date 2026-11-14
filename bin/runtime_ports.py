@@ -352,11 +352,13 @@ def port_labels() -> dict[str, str]:
 
 
 def _feature_settings() -> tuple[bool, bool]:
-    """(llm.providers is set, mailbox.handler is propose): what changes which ports two of the features need."""
+    """(llm.providers serve the judgment points, mailbox.handler is propose): what changes which ports two of the features
+    need. Providers serve them only with llm.use (completion.routed); without it they take only the points pinned to them,
+    and the judgment points stay on the runtime's completion interface."""
     try:
         import hubconf
         llm, mailbox = hubconf.get("llm") or {}, hubconf.get("mailbox") or {}
-        return (isinstance(llm, dict) and bool(llm.get("providers")),
+        return (isinstance(llm, dict) and bool(llm.get("providers")) and bool(llm.get("use")),
                 isinstance(mailbox, dict) and mailbox.get("handler") == "propose")
     except Exception:
         return False, False

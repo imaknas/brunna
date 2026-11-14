@@ -140,8 +140,11 @@ vendors):
   platform, models are chosen only in `llm.model_for` (landed 10-29, `models.env` removed).
 - **`llm.providers` without `use`** (11-15) = the providers serve only the points pinned to them
   (`llm.points.<point>.provider`); every other point stays on `runtime.default` exactly as with no `llm.providers`
-  (`completion.routed`). Adding a provider for one point never moves the others. With `use`, every completion point goes
-  by its group as before (a group `use` leaves out is refused, as before).
+  (`completion.routed`). Adding a provider for one point never moves the others. With `use`, the completion points of
+  the groups it names go by their group as before; a group it leaves out stays on `runtime.default` too (before 11-15 it
+  was refused). Doctor's feature table counts the providers as serving the judgment points only with `use`.
+- A provider with `location: local` can't have a `key` (config check): local providers are never metered, and one
+  reached with a key is a paid service.
 - `schedulectl set-model` rewrites `points` in `hub.json`.
 
 ### 3. API keys
@@ -343,33 +346,51 @@ the config check; doctor's "model groups" line shows only when `use` is set.
 
 ### What the config check, doctor and `schedulectl models` say
 
-- Config check: `<project>/<name>` keys are checked for form only (`<project>/<lowercase-name>`), the provider must be
-  one of `llm.providers`, and `runtime:` is refused on them (a project's call runs where its judgment point runs). It
-  doesn't check the project declares the call: a project's own manifest.update must never break the owner's config
-  check.
+- Config check: `<project>/<name>` keys are checked for form (`<project>/<lowercase-name>`), the provider must be one of
+  `llm.providers`, and `runtime:` is refused on them (a project's call runs on its judgment point's runtime). A pin
+  naming a call the project no longer declares is not an error (a project's own manifest.update shouldn't break the
+  owner's config check). A **provider** pinned on a call the registry declares as an **agent call** (`agents:`) is: an
+  agent call runs on the runtime, so the pin would be ignored and the content would go where the owner pinned it away
+  from (cold review, 11-15). `llm.py`'s `project_agent` refuses such a call too.
 - `schedulectl models` lists every project's declared call with the provider and model it goes to (or the runtime and
-  tier), and pins naming a call the project no longer declares.
-- `brunna doctor`: one line per call served by a provider, a red line for a call with nowhere to go, a warning for a
-  stale pin.
+  tier), pins naming a call the project no longer declares, and provider pins on agent calls.
+- `brunna doctor`: one line per call served by a provider, a red line for a call with nowhere to go or a provider pin on
+  an agent call, a warning for a stale pin.
+- A pinned model name the provider lists in more than one group takes the entry of the point's own group, else the
+  first of fast, standard, strong.
 
 ### Ollama specifics
 
 - **Context.** A model named in the provider's `models` with `{name, context}` keeps that context when a pin names it.
   Otherwise the provider asks Ollama (`/api/show`, `model_info.<family>.context_length`, optional `model_context` of the
   completion interface) and `completion.run`'s length check uses it: a prompt that doesn't fit is refused before
-  sending, never truncated by Ollama.
-- **num_ctx** is always sent, sized to the request: the prompt's estimate plus `max_tokens` (8192 for projects' calls),
-  rounded up to a power of two, at least 8192, never above the context. Ollama's default is a few thousand tokens
-  (silent truncation), and the model's whole context (262144 for the qwen3.6 and gemma4 builds) would make it reserve
-  memory for a window the call never uses. Powers of two keep the number of distinct sizes, and so model reloads, small.
+  sending. Every request is measured (`completion.request_tokens`: prompt, system prompt and schema, which may be
+  written into the prompt), the retry with the errors appended included.
+- **The estimate counts an ASCII digit as a token.** Qwen's (and Llama 3's) tokenizers split numbers into digits:
+  measured 11-15, 3361 characters of mostly 7-digit numbers were 3254 tokens on qwen3.6, against 1120 for bytes / 3.
+- **`truncate: false`, `shift: false`** are sent. Measured 11-15 on Ollama 0.34.2 with num_ctx 1024 and a prompt of
+  about 3300 tokens whose first line held a word to recall: a llama.cpp (GGUF) model, `qwen2.5:7b`, by default cut the
+  prompt from the front and answered "UNKNOWN" with HTTP 200 (`prompt_eval_count` 514); with `truncate: false` it
+  answered HTTP 400 "request (3271 tokens) exceeds the available context size (1024 tokens)". The MLX backend
+  (`qwen3.6:35b-mlx`) doesn't cut at all: it read the whole prompt and recalled the word whatever num_ctx said, with or
+  without the flags, which it accepts. So the length check is the guard for MLX models, and the flags for GGUF ones.
+- **num_ctx** is always sent, sized to the request: what the request needs plus `max_tokens` (8192 for projects'
+  calls), rounded up to a power of two, at least 8192, never above the context. Ollama's default is a few thousand
+  tokens, and the model's whole context (262144 for the qwen3.6 and gemma4 builds) would make it reserve memory for a
+  window the call never uses. Powers of two keep the number of distinct sizes, and so model reloads, small.
 - **Thinking.** `think: false` for a model `/api/show` lists as thinking (and when that can't be read); none for one that
-  isn't. `<think>…</think>` left in the answer is stripped for text answers too; an empty answer is an error.
+  isn't. A leading `<think>…</think>` (or text up to a lone `</think>`) is taken off, for text answers too; never
+  anything inside an answer that already started (a JSON string may hold `</think>`). An empty answer is an error.
 - **Structured output.** `format: <schema>` first; the MLX backend answers 501, and the schema goes into the prompt
   (unchanged). minischema validates either way.
-- **Time.** A project's call has the platform's 600 s (cap-runner's deadline and each request's timeout). A large local
-  model on a long prompt can need more; a per-point time limit is in direction.md's backlog.
-- **Failures** are said with Ollama's reason (not reachable, model not pulled, empty answer) and published as
-  `job.failed`; nothing else is tried.
+- **Time.** `completion.run` holds a whole call to its `timeout_s`, retries and backoff included: each request gets
+  what is left, and none starts with under 5 s left (`out of time`). A project's call gets cap-runner's timeout less 30 s
+  (`llm.PROJECT_CALL_MARGIN_S`), because cap-runner kills a `complete` job at its timeout with no grace: the call's
+  refusal, its `job.failed` and its usage row are written before that. A large local model on a long prompt can need
+  more than 600 s; a per-point time limit is in direction.md's backlog.
+- **Failures** are said with Ollama's reason (not reachable, model not pulled, over the context, empty answer; a read
+  timeout as "had not finished after N s (slow generation, timed out)") and published as `job.failed`; nothing else is
+  tried. `/api/show`'s answer is kept for the process; a failed one is asked again.
 - **Usage**: one row per call in `llm-usage.jsonl` with the project, `billing: local` (the provider's
   `location: local`, which needs a `base_url` on this machine or a private network), shown on the status page's
   "model calls by project" with no cost.

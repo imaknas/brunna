@@ -1,5 +1,6 @@
 {
  "models not on this machine: {models} (ollama pull <name>)": "本機沒有模型:{models}(ollama pull <名稱>)",
  "Ollama at {base} could not be reached: {error}": "連不到 {base} 的 Ollama:{error}",
- "the model gave an empty answer": "模型回了空的答案"
+ "the model gave an empty answer": "模型回了空的答案",
+ "{model} at {base} had not finished after {seconds} s (slow generation, timed out)": "{base} 上的 {model} 過了 {seconds} 秒還沒生成完(生成太慢,逾時)"
 }

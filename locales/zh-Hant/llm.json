@@ -1,5 +1,4 @@
 {
- "runtime {name} has no completion interface, and {settings} has no llm section (set up an LLM provider)": "執行環境 {name} 沒有 completion 介面,{settings} 也沒有 llm 區塊(設一家 LLM provider)",
  "llm.py: {point} is not a declared judgment point (contracts/llm-points.yaml)": "llm.py:{point} 不是宣告過的判斷點(contracts/llm-points.yaml)",
  "llm.py: {point} does not declare stream: true, so it cannot run under exec": "llm.py:{point} 沒有宣告 stream: true,不能 exec",
  "llm.py: {point}: this runtime does not support long-running streaming sessions": "llm.py:{point} 這個執行環境不支援長駐的串流 session",
@@ -55,5 +54,6 @@
  "{point} did not start: its prompt isn't the one the registry gives {project}/{job}": "{point} 沒有啟動:它的提示不是登錄給 {project}/{job} 的那個",
  "{point} did not start: its folder isn't the one the registry gives {project}/{job}": "{point} 沒有啟動:它的資料夾不是登錄給 {project}/{job} 的那個",
  "the platform's bridge to {server} crashed: {why}": "平台到 {server} 的 bridge 當掉了:{why}",
- "the server {server} refused a call the job needs: {why}": "server {server} 拒絕了 job 需要的呼叫:{why}"
+ "the server {server} refused a call the job needs: {why}": "server {server} 拒絕了 job 需要的呼叫:{why}",
+ "llm.points.{key} pins the provider {provider}, but {key} is an agent call, which runs on the runtime {runtime}; not run (pin only a model, or make it a model call)": "llm.points.{key} 指定了 provider {provider},但 {key} 是 agent 呼叫,在執行環境 {runtime} 上跑;不執行(只能指定模型,或改成模型呼叫)"
 }

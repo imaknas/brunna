@@ -1825,10 +1825,11 @@ def doctor_credentials(add) -> None:
 def doctor_project_calls(add) -> None:
     """Projects' declared model calls (registry models:): one line for each a provider serves (an owner's pin,
     llm.points.<project>/<point>, or llm.use), red for one with nowhere to go, a warning for a pin on a call the project
-    no longer declares. Calls on the runtime are covered by the judgment points' line."""
+    no longer declares, red for a provider pinned on an agent call (refused when it runs). Calls on the runtime are covered
+    by the judgment points' line."""
     try:
         import llm
-        calls, stale = llm.project_calls()
+        calls, stale, agent_pins = llm.project_calls()
     except Exception as e:   # what can't be told is said, never skipped
         add("warn", _("cannot tell where projects' model calls go: {error}", error=e), "schedulectl models")
         return
@@ -1841,6 +1842,9 @@ def doctor_project_calls(add) -> None:
     for key in stale:
         add("warn", _("llm.points.{key} pins a call {project} does not declare (registry models: / agents:)", key=key,
                       project=key.split("/", 1)[0]), _("remove the pin, or have the project declare it"))
+    for key in agent_pins:
+        add("bad", _("llm.points.{key} pins a provider on an agent call (registry agents:), which runs on the runtime: "
+                     "the call is refused", key=key), _("pin only a model there, or make it a model call (models:)"))
 
 
 def doctor_memory_branches(add) -> None:
@@ -2120,6 +2124,9 @@ def llm_setup(args: dict) -> int:
             d.pop("llm", None)
         write_hub_json(d)
         hubconf._cfg = None
+        if kept:
+            print(_("kept llm.providers {providers}: a pin in llm.points names them, and they now serve only those points",
+                    providers=", ".join(sorted(kept))))
         if choice == "none":
             print(_("brunna's decisions stay off for now: whatever needs one fails plainly and says why. Run brunna "
                     "llm setup later"))

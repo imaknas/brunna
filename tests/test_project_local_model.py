@@ -41,7 +41,8 @@ def load(name, file):
 llm = load("llm_plm", "llm.py")
 llm_ready = load("llm_ready_plm", "llm_ready.py")
 
-PROJECTS = {"proj": {"name": "proj", "models": {"reviewer": {"tier": "strong"}, "classify": {"tier": "fast"}}},
+PROJECTS = {"proj": {"name": "proj", "models": {"reviewer": {"tier": "strong"}, "classify": {"tier": "fast"}},
+                     "agents": {"fixer": {"tier": "standard", "allow": ["Read"]}}},
             "other": {"name": "other", "models": {"summarize": {"tier": "standard"}}}}
 
 
@@ -68,12 +69,12 @@ class Base(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         self.config({})
-        provider_ollama._show.cache_clear()
-        self.addCleanup(provider_ollama._show.cache_clear)
+        provider_ollama._shown.clear()
+        self.addCleanup(provider_ollama._shown.clear)
 
-    def config(self, llm_block):
-        """The instance's settings: runtime.default claude, and this llm block (None = none at all)."""
-        cfg = {"runtime": {"default": "claude"}, **({"llm": llm_block} if llm_block is not None else {})}
+    def config(self, llm_block, **more):
+        """The instance's settings: runtime.default claude, this llm block (None = none at all), and more."""
+        cfg = {"runtime": {"default": "claude"}, **({"llm": llm_block} if llm_block is not None else {}), **more}
         p = mock.patch.object(hubconf, "_cfg", cfg)
         p.start()
         self.addCleanup(p.stop)
@@ -119,6 +120,34 @@ class NothingElseMoves(Base):
         for bad in ({"proj/reviewer": {"runtime": "claude"}}, {"proj/Bad Name": {"provider": "local"}},
                     {"proj/reviewer": {"provider": "cloud"}}):
             self.assertTrue(completion.config_errors({**ok, "points": bad}), bad)
+        keyed = json.loads(json.dumps(ok))
+        keyed["providers"]["local"]["key"] = {"env": "X"}
+        self.assertTrue(any("location local" in e for e in completion.config_errors(keyed)), "local and a key: refused")
+
+    def test_a_provider_pin_on_an_agent_call_is_flagged(self):
+        """an agent call runs on the runtime: a provider pin there would be ignored (config check, doctor, schedulectl
+        say so; llm.py refuses the call, tests/test_project_agent.py)"""
+        pins = {"providers": {"local": local()}, "points": {"proj/fixer": {"provider": "local"}}}
+        self.assertEqual(completion.config_errors(pins), [], "without the registry only the form is checked")
+        [err] = completion.config_errors(pins, PROJECTS, "claude")
+        self.assertIn("proj/fixer", err)
+        self.assertEqual(completion.config_errors({**pins, "points": {"proj/fixer": {"model": "m"}}}, PROJECTS, "claude"),
+                         [], "a model pin on an agent call is fine")
+        self.config(pins)
+        self.assertEqual(llm.project_calls()[2], ["proj/fixer"])
+
+    def test_the_feature_table_counts_providers_only_with_use(self):
+        import runtime_ports
+        self.config({"providers": {"local": local()}})
+        self.assertEqual(runtime_ports._feature_settings()[0], False, "providers without use serve no judgment point")
+        self.config({"providers": {"local": local(fast="s")}, "use": {"fast": "local"}})
+        self.assertEqual(runtime_ports._feature_settings()[0], True)
+
+    def test_why_a_point_has_nowhere_to_go_names_use(self):
+        self.config({"providers": {"local": local()}})
+        self.assertIn("llm.use", completion.nowhere("none", {"model_group": "fast"}))
+        self.config(None)
+        self.assertNotIn("llm.use", completion.nowhere("none"))
 
     def test_a_pinned_name_the_provider_lists_keeps_its_context(self):
         self.config({"providers": {"local": local()}, "points": {"proj/reviewer": {"provider": "local", "model": "big:35b"}}})
@@ -128,7 +157,7 @@ class NothingElseMoves(Base):
     def test_doctor_and_schedulectl_see_where_each_call_goes(self):
         self.config({"providers": {"local": local()},
                      "points": {"proj/reviewer": {"provider": "local"}, "proj/gone": {"provider": "local"}}})
-        calls, stale = llm.project_calls()
+        calls, stale, _agent_pins = llm.project_calls()
         got = {key: (t["provider"], t["group"]) for key, _tier, t, _why in calls}
         self.assertEqual(got["proj/reviewer"], ("local", "strong"))
         self.assertIsNone(got["other/summarize"][1], "the runtime's own completion interface")
@@ -208,8 +237,7 @@ class Ollama(Base):
         self.config({"providers": {"local": {**local(s.url), "models": {}}},
                      "points": {"proj/reviewer": {"provider": "local", "model": "qwen:35b"}}})
         req = self.tmp / "req.json"
-        # words, not one 900k-character run: redact's lookahead scans a run to its end at each position
-        req.write_text(json.dumps({"prompt": "word " * 180_000}))
+        req.write_text(json.dumps({"prompt": "x" * 900_000}))   # one run: redact is linear
         with redirect_stdout(io.StringIO()) as out:
             rc = llm.project_call("proj", "reviewer", req)
         self.assertEqual(rc, 1)
@@ -238,6 +266,60 @@ class Ollama(Base):
         self.assertIn("127.0.0.1:9", out["llm_error"])
         self.assertEqual({r["provider"] for r in self.rows()}, {"local"}, "never another provider")
         self.assertEqual(len(self.failed), 2, "each failure is published (job.failed)")
+
+    def test_digit_heavy_text_gets_a_window_that_holds_it(self):
+        """a token per digit: 30k digits need a 64k window (bytes / 3 said 16k, and Ollama cut the prompt and answered)"""
+        s = self.serve()
+        self.config({"providers": {"local": {**local(s.url), "models": {}}},
+                     "points": {"proj/reviewer": {"provider": "local", "model": "qwen:35b"}}})
+        req = self.tmp / "req.json"
+        req.write_text(json.dumps({"prompt": " ".join(str(10 ** 9 + i) for i in range(3000))}))   # 30k digits
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(llm.project_call("proj", "reviewer", req), 0)
+        [chat] = self.chats(s)
+        self.assertEqual(chat["options"]["num_ctx"], 65536)
+        self.assertEqual((chat["truncate"], chat["shift"]), (False, False))
+
+    def test_a_metered_provider_pinned_still_needs_the_owners_opt_in(self):
+        self.config({"providers": {"paid": {"impl": "openai", "base_url": "http://127.0.0.1:9", "key": {"env": "PLM_KEY"},
+                                            "models": {"strong": "big"}}},
+                     "points": {"proj/reviewer": {"provider": "paid"}}})
+        with mock.patch.dict(os.environ, {"PLM_KEY": "k"}):
+            rc, out = self.call()
+        self.assertEqual(rc, 1)
+        self.assertIn("metered_models", out["llm_error"])
+        self.assertEqual(self.rows(), [], "refused before anything was sent")
+
+    def test_the_call_ends_before_cap_runners_deadline(self):
+        seen = []
+        self.config({"providers": {"local": local()}, "points": {"proj/reviewer": {"provider": "local"}}},
+                    cap_runner={"timeout_s": 300})
+        with mock.patch.object(completion, "run", lambda point, spec, *a, **k: seen.append(spec["timeout_s"]) or {}):
+            self.call()
+        self.assertEqual(seen, [300 - llm.PROJECT_CALL_MARGIN_S])
+
+    def test_a_slow_answer_is_said_to_be_slow_and_a_failed_show_is_asked_again(self):
+        import threading
+        import time as _time
+        from runtime_ports import CompletionRequest
+        shows = []
+
+        def h(method, path, body):
+            if path == "/api/show":
+                shows.append(1)
+                return 500, {"error": "busy"}
+            _time.sleep(2)
+            return 200, {"message": {"content": "late"}, "done_reason": "stop"}
+        s = FakeServer(h)
+        self.addCleanup(s.close)
+        req = CompletionRequest(point="p", prompt="hi", model="m", schema=None, max_tokens=10, timeout_s=1)
+        self.assertIsNone(provider_ollama.model_context({"base_url": s.url}, "m"))
+        r = provider_ollama.complete(req, {"base_url": s.url})
+        self.assertFalse(r.ok)
+        self.assertIn("timed out", r.error)
+        self.assertNotIn("could not be reached", r.error)
+        self.assertGreaterEqual(len(shows), 2, "a failed /api/show isn't kept")
+        threading.Event().wait(1.5)   # let the stub finish its sleeping request before it is shut down
 
 
 if __name__ == "__main__":

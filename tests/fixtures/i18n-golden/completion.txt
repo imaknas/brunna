@@ -15,7 +15,7 @@ llm.providers 沒有 zz
 === resolve: no model
 llm.providers.k.models 沒有 fast
 === run: too long
-prompt 太長:估計 1334 token + 輸出 100 超過 f/m1 的 context 1000
+prompt 太長:估計 1463 token + 輸出 100 超過 f/m1 的 context 1000
 === run: truncated
 輸出被長度截斷(f/m1,max_tokens 100);不重試
 === run: error
@@ -43,6 +43,7 @@ providers.b.key.secret 只寫檔名(放在平台的 secrets 目錄裡)
 providers.b.location 只能是 cloud / local
 providers.c.impl `nope` 不認得(有:anthropic, openai, ollama, claude, fake, none, command, acp, codex)
 providers.c.key 要寫成 {"secret": 檔名} 或 {"env": 變數名}(只能一種)
+providers.c:location local 不能有 key(要用 key 連的 provider 是按用量計費的,local 的一律算免費)
 providers.c:location local 只准本機、私有網段、tailnet 的 base_url(現在是 'https://api.example.com')
 providers.d 要是物件
 use.strong → a,但 providers.a.models 沒有 strong

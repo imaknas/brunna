@@ -113,7 +113,7 @@ class FeatureNeeds(unittest.TestCase):
 
     def test_settings_decide_when_not_given(self):
         import hubconf
-        conf = {"llm": {"providers": {"x": {}}}, "mailbox": {"handler": "propose"}}
+        conf = {"llm": {"providers": {"x": {}}, "use": {"standard": "x"}}, "mailbox": {"handler": "propose"}}
         with mock.patch.object(hubconf, "get", lambda k, d=None: conf.get(k, d)):
             table = runtime_ports.features()
         self.assertEqual((set(table[0][1]), set(table[2][1])), (set(), {"agent", "sessions"}))
@@ -145,7 +145,7 @@ class ThrowawayOnlyRuntimes(unittest.TestCase):
         """With llm.providers set, the librarian falls back to its -edits points where no agent can run (here: none, and a
         throwaway-only runtime), so its row is on; consolidate, with no fallback, stays off."""
         import hubconf
-        conf = {"llm": {"providers": {"x": {}}}}
+        conf = {"llm": {"providers": {"x": {}}, "use": {"standard": "x"}}}   # providers serve the points only with use
         with mock.patch.object(hubconf, "get", lambda k, d=None: conf.get(k, d)):
             for name in ("none", "command"):
                 with self.subTest(name):

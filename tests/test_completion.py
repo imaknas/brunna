@@ -127,6 +127,13 @@ class Pipeline(Base):
             completion.run("p", {**SPEC, "max_attempts": 2}, "hi", SCHEMA, sleep=lambda s: None)
         self.assertEqual(len(runtime_fake._asked), 2)
 
+    def test_think_is_taken_off_only_before_the_answer(self):
+        self.assertEqual(completion.strip_think('<think>a</think>{"x": 1}'), '{"x": 1}')
+        self.assertEqual(completion.strip_think('reasoning</think>{"x": 1}'), '{"x": 1}')
+        inside = '{"why": "the tag <think>x</think> stays", "end": "</think>"}'
+        self.assertEqual(completion.strip_think(inside), inside)
+        self.assertEqual(completion.parse_json(inside)["end"], "</think>")
+
     def test_think_and_fences_are_stripped(self):
         runtime_fake.set_completions("p", CompletionResult(True, text='<think>hmm {"x":1}</think>\n```json\n{"answer": "b"}\n```',
                                                            stop="end"))
@@ -144,6 +151,66 @@ class Pipeline(Base):
         self.assertIn(zh("prompt too long: about {tokens} tokens plus {max_tokens} of output exceed {provider}/{model}'s "
                          "{context}-token context"), str(cm.exception))
         self.assertEqual(runtime_fake._asked, [])
+
+    def test_digits_count_a_token_each(self):
+        """digit-heavy text: a token per digit (Qwen's, Llama 3's tokenizers), not bytes / 3, or the length check passes
+        what overflows (11-15: Ollama then cut it and answered)"""
+        self.assertEqual(completion.estimate_tokens("1234567890" * 100), 1001)
+        self.assertEqual(completion.estimate_tokens("abc" * 100), 101)
+        digits = " ".join(str(10 ** 6 + i) for i in range(130))   # 1039 characters, 910 of them digits
+        self.assertLess(len(digits.encode()) // 3 + 100, 1000, "bytes / 3 alone would let it through")
+        with self.assertRaises(completion.Refused):
+            self.run_(prompt=digits)
+        self.assertEqual(runtime_fake._asked, [])
+
+    def test_the_retry_is_measured_too(self):
+        """the retry appends the errors: it is measured again before it is sent"""
+        runtime_fake.set_completions("p", CompletionResult(True, text='{"wrong": 1}', stop="end"))
+        prompt = "a" * 2250   # fits once (about 980 of 1000 with the schema), not with the errors appended
+        with self.assertRaises(completion.Refused) as cm:
+            self.run_(prompt=prompt)
+        self.assertIn(zh("prompt too long: about {tokens} tokens plus {max_tokens} of output exceed {provider}/{model}'s "
+                         "{context}-token context"), str(cm.exception))
+        self.assertEqual(len(runtime_fake._asked), 1)
+
+    def test_the_whole_call_stays_within_its_timeout(self):
+        """timeout_s bounds the call, retries included: each request gets what is left, and none starts with too little
+        (a caller with a hard deadline, cap-runner, then sees this refusal rather than a kill)"""
+        t = [0.0]
+
+        class Slow:
+            def __init__(self):
+                self.timeouts = []
+
+            def complete(self, req, conf):
+                self.timeouts.append(req.timeout_s)
+                t[0] += 70
+                return CompletionResult(True, text='{"wrong": 1}', stop="end")
+        slow = Slow()
+        with mock.patch.object(runtime_ports, "load_completion", lambda impl: slow):
+            with self.assertRaises(completion.Refused):
+                self.run_(spec={**SPEC, "timeout_s": 100}, clock=lambda: t[0])
+            self.assertEqual(slow.timeouts, [100, 30], "the retry gets only what is left")
+            t[0], slow.timeouts = 0.0, []
+            with self.assertRaises(completion.Refused) as cm:
+                self.run_(spec={**SPEC, "timeout_s": 72}, clock=lambda: t[0])
+        self.assertEqual(slow.timeouts, [72], "no request starts with under MIN_REQUEST_S left")
+        self.assertIn(zh("out of time: {point} may take {total} s in all, and too little is left for another request to "
+                         "{provider}/{model}", point="p", total=72, provider="f", model="m1"), str(cm.exception))
+
+    def test_partial_use_leaves_the_other_groups_on_the_runtime(self):
+        self.llm["use"] = {"fast": "f"}
+        self.assertTrue(completion.routed("p", {"model_group": "fast"}))
+        self.assertFalse(completion.routed("p", {"model_group": "strong"}))
+        self.llm["points"] = {"p": {"provider": "f"}}
+        self.assertTrue(completion.routed("p", {"model_group": "strong"}), "a pin moves it whatever its group")
+
+    def test_a_pinned_name_takes_its_own_groups_entry_first(self):
+        self.llm["providers"]["f"]["models"] = {"fast": {"name": "same", "context": 1000},
+                                                "strong": {"name": "same", "context": 9000}}
+        self.llm["points"] = {"p": {"provider": "f", "model": "same"}}
+        self.assertEqual(completion.resolve("p", {"model_group": "strong"})["context"], 9000)
+        self.assertEqual(completion.resolve("p", {"model_group": "standard"})["context"], 1000, "else fast, standard, strong")
 
     def test_secrets_are_masked_before_sending(self):
         runtime_fake.set_completions("p", CompletionResult(True, text='{"answer": "a"}', stop="end"))
@@ -172,6 +239,31 @@ class Pipeline(Base):
         self.assertEqual(completion.resolve("q", {"model_group": "standard"})["model"], "m2")
         with self.assertRaises(completion.Refused):
             completion.resolve("q", {"model_group": "strong"})
+
+
+class Redact(unittest.TestCase):
+    """completion.redact masks exactly what SECRET (the pattern) matches, in linear time: SECRET's lookaheads scan a run
+    to its end at every position, so a long run without a digit took minutes."""
+
+    def test_same_as_the_pattern(self):
+        import random
+        rng = random.Random(1115)
+        pieces = ["sk-", "sk-ant-", "AIza", "ghp_", "gho_", "xoxb-", "eyJ", ".", "-", "_", " ", "\n", "é", "a", "Z", "7",
+                  "0123456789", "abcdefghij", "ABCDEFGHIJKLMNOPQRST", "x" * 25, "9" * 25, "ab12" * 6]
+        for _ in range(4000):
+            text = "".join(rng.choice(pieces) for _ in range(rng.randint(0, 40)))
+            self.assertEqual(completion.redact(text), completion.SECRET.sub("[redacted]", text), text)
+        for text in ("key sk-ant-abcdefghijklmnop end", "x" * 30 + "sk-abcdefghijkl", "y" * 30 + "ghp_" + "a1" * 12 + "_tail",
+                     "z" * 25 + "eyJ" + "a" * 25 + ".sig.more", "plainwordsonlyhereandnothingelse", "abc123" * 5,
+                     "AIza" + "b" * 25, "xoxb-" + "c" * 12 + "_" + "d1" * 12):
+            self.assertEqual(completion.redact(text), completion.SECRET.sub("[redacted]", text), text)
+
+    def test_linear(self):
+        import time as _time
+        for text in ("x" * 1_000_000, "ab_-" * 250_000, ("word " * 200_000)):
+            t = _time.monotonic()
+            completion.redact(text)
+            self.assertLess(_time.monotonic() - t, 0.5, text[:20])
 
 
 class Keys(Base):
@@ -340,8 +432,8 @@ class Providers(unittest.TestCase):
 
     def test_ollama_native_api_context_and_schema_fallback(self):
         import provider_ollama
-        provider_ollama._show.cache_clear()
-        self.addCleanup(provider_ollama._show.cache_clear)
+        provider_ollama._shown.clear()
+        self.addCleanup(provider_ollama._shown.clear)
         def h(m, p, b):
             if p == "/api/show":
                 return 200, {"capabilities": ["completion", "thinking"], "model_info": {"x.context_length": 40960}}
@@ -356,8 +448,9 @@ class Providers(unittest.TestCase):
         first, second = [b for _m, p, _h, b in s.requests if p == "/api/chat"]
         # the window is sized to the request (at least 8192), never the whole context
         self.assertEqual(first["options"]["num_ctx"], 8192)
-        self.assertEqual(provider_ollama.num_ctx("x" * 90_000, 8192, 32768), 32768)
-        self.assertEqual(provider_ollama.num_ctx("x" * 30_000, 8192, None), 32768)
+        self.assertEqual(provider_ollama.num_ctx(38_000, 32768), 32768)
+        self.assertEqual(provider_ollama.num_ctx(18_000, None), 32768)
+        self.assertEqual((first["truncate"], first["shift"]), (False, False), "an overflow is Ollama's error, never cut")
         self.assertFalse(first["think"])
         self.assertNotIn("format", second)
         self.assertIn("JSON schema", second["messages"][-1]["content"])

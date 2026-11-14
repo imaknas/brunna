@@ -139,21 +139,22 @@ def completion_target(point: str, spec: dict, model: str | None = None) -> dict:
     with no completion interface)."""
     import completion
     import runtime_ports
-    if completion.routed(point):
+    if completion.routed(point, spec):
         return completion.resolve(point, spec)
     name = point_runtime(point, spec) or runtime_ports.default_name()
     if "completion" not in runtime_ports.capabilities(name):
-        raise completion.Refused(_("runtime {name} has no completion interface, and {settings} has no llm section "
-                                   "(set up an LLM provider)", name=name))
+        raise completion.Refused(completion.nowhere(name, spec))
     return completion.runtime_target(name, model if model is not None else model_for(point, spec, runtime=name),
                                      auth_mode(spec))
 
 
-def project_calls() -> tuple[list[tuple[str, str, dict | None, str | None]], list[str]]:
+def project_calls() -> tuple[list[tuple[str, str, dict | None, str | None]], list[str], list[str]]:
     """For doctor and schedulectl models: every project's declared model call as (<project>/<point>, tier, the target
-    it goes to or None, why it has nowhere to go or None), and the owner's pins (llm.points.<project>/<name>) naming a
-    call the project no longer declares (in models: or agents:)."""
+    it goes to or None, why it has nowhere to go or None); the owner's pins (llm.points.<project>/<name>) naming a call
+    the project no longer declares (in models: or agents:); and those pinning a provider on an agent call (refused when
+    it runs: an agent call runs on the runtime)."""
     import completion
+    import runtime_ports
     projects = hubconf.projects()
     calls = []
     for proj, doc in sorted(projects.items()):
@@ -165,13 +166,17 @@ def project_calls() -> tuple[list[tuple[str, str, dict | None, str | None]], lis
             except completion.Refused as e:
                 calls.append((key, spec["model_group"], None, str(e)))
     pins = (hubconf.get("llm") or {}).get("points") or {}
-    stale = []
+    stale, agent_pins = [], []
+    rt = point_runtime(AGENT_POINT, points()["points"].get(AGENT_POINT) or {}) or runtime_ports.default_name()
     for key in sorted(k for k in pins if isinstance(k, str) and "/" in k):
         proj, _sep, name = key.partition("/")
         doc = projects.get(proj) or {}
         if name not in (doc.get("models") or {}) and name not in (doc.get("agents") or {}):
             stale.append(key)
-    return calls, stale
+        elif name not in (doc.get("models") or {}) and isinstance(pins[key], dict) \
+                and pins[key].get("provider") not in (None, rt):
+            agent_pins.append(key)
+    return calls, stale, agent_pins
 
 
 def run_completion(a, spec: dict, prompt: str, model: str | None) -> int:
@@ -204,6 +209,9 @@ def answer(point: str, prompt: str):
     return out.get("structured_output") if isinstance(out, dict) else None
 
 
+PROJECT_CALL_MARGIN_S = 30   # of cap-runner's timeout, kept for the refusal's job.failed and the usage row
+
+
 def project_call(project: str, point: str, request: pathlib.Path) -> int:
     """A project's own model call (agenthub complete → cap-runner → here, outside the project's sandbox): request is
     {"prompt", "schema"?} written by cap-runner in platform state (never read from the project's folder). Checked
@@ -214,7 +222,11 @@ def project_call(project: str, point: str, request: pathlib.Path) -> int:
     {provider, model?}), e.g. a local model as an independent reviewer. Nothing a project writes picks a provider."""
     import completion
     name = f"{project}/{point}"
-    spec = {"shape": "completion", "model_group": "standard"}
+    # cap-runner kills the job at its timeout with no grace: the call itself ends earlier, so its refusal, job.failed
+    # and the usage row are written before that
+    runner = int(hubconf.get("cap_runner.timeout_s", 600))
+    spec = {"shape": "completion", "model_group": "standard",
+            "timeout_s": max(runner - PROJECT_CALL_MARGIN_S, completion.MIN_REQUEST_S)}
     doc = hubconf.projects().get(project)
     if not doc:
         return fail(name, spec, _("{project} is not in the registry", project=project))
@@ -273,6 +285,15 @@ def project_agent(project: str, name: str, request: pathlib.Path, cwd: str) -> i
         return fail(key, spec, _("cannot read the request: {err}", err=e))
     if not isinstance(prompt, str) or not prompt.strip() or (schema is not None and not isinstance(schema, dict)):
         return fail(key, spec, _("the request needs a prompt, and a schema that is a JSON object if any"))
+    import runtime_ports
+    pin = ((hubconf.get("llm") or {}).get("points") or {}).get(key) or {}
+    rt_name = point_runtime(AGENT_POINT, spec) or runtime_ports.default_name()
+    if isinstance(pin, dict) and pin.get("provider") not in (None, rt_name):
+        # an agent call runs on the runtime: a provider pin (e.g. a local model) can't take it, and running it on the runtime
+        # anyway would send the content where the owner pinned it away from
+        return fail(key, spec, _("llm.points.{key} pins the provider {provider}, but {key} is an agent call, which runs on "
+                                 "the runtime {runtime}; not run (pin only a model, or make it a model call)", key=key,
+                                 provider=pin["provider"], runtime=rt_name))
     if decl.get("tier") not in registry.TIERS:   # every call runs at its tier, behind the billing gate
         return fail(key, spec, _("{key} declares no tier (one of {tiers})", key=key, tiers=", ".join(registry.TIERS)))
     timeout = registry.agent_timeout_s(decl)

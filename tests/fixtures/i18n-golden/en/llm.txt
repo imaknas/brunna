@@ -71,7 +71,7 @@ llm.py: lease-session: this runtime does not support long-running streaming sess
 $ llm.py run reflect-week    # no completion
 [exit 1]
 --- stdout
-{"type": "result", "is_error": true, "structured_output": null, "llm_point": "reflect-week", "llm_error": "runtime none has no completion interface, and brunna.json has no llm section (set up an LLM provider)"}
+{"type": "result", "is_error": true, "structured_output": null, "llm_point": "reflect-week", "llm_error": "runtime none has no completion interface, and brunna.json has no llm section (set one up with brunna llm setup)"}
 --- stderr
 
 $ llm.py run agent-job    # no agent

@@ -77,5 +77,6 @@
  "tier {tier}": "強度 {tier}",
  "\nProjects' model calls (registry models:; the owner pins one to a provider in llm.points.<project>/<point>):": "\n專案的模型呼叫(登記表 models:;擁有者在 llm.points.<專案>/<點> 把某一個指定給 provider):",
  "runtime {name}, tier {tier}": "執行環境 {name},強度 {tier}",
- "{key:24} ⚠️ llm.points pins a call {project} does not declare (registry models: / agents:)": "{key:24} ⚠️ llm.points 指定了 {project} 沒宣告的呼叫(登記表 models: / agents:)"
+ "{key:24} ⚠️ llm.points pins a call {project} does not declare (registry models: / agents:)": "{key:24} ⚠️ llm.points 指定了 {project} 沒宣告的呼叫(登記表 models: / agents:)",
+ "{key:24} ⚠️ llm.points pins a provider on an agent call (registry agents:): the call is refused": "{key:24} ⚠️ llm.points 在 agent 呼叫(登記表 agents:)上指定了 provider:這個呼叫會被拒絕"
 }

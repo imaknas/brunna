@@ -169,6 +169,15 @@ class Call(unittest.TestCase):
         f = self.completion.USAGE
         return [json.loads(x) for x in f.read_text().splitlines()] if f.exists() else []
 
+    def test_a_provider_pin_on_an_agent_call_is_refused_not_ignored(self):
+        """llm.points.<project>/<agent> naming a provider (a local model, say): an agent call runs on the runtime, so it
+        would go where the owner pinned it away from. It doesn't run"""
+        rc, out = self.call({"prompt": "look"}, conf={"llm": {"points": {"p/research": {"provider": "local"}}}})
+        self.assertEqual(rc, 1)
+        self.assertIn("local", out["llm_error"])
+        self.assertEqual(self.fake._ran, [], "nothing ran")
+        self.assertEqual(self.rows(), [])
+
     def test_it_runs_what_the_registry_declares(self):
         schema = {"type": "object"}
         rc, out = self.call({"prompt": "look", "schema": schema, "allow": ["Bash"], "timeout": "1h"})

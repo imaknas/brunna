@@ -39,5 +39,10 @@
  "points.{point}.runtime: {runtime} runs only in the platform's throwaway worktree, and {point} does not run in one (those that do: {points})": "points.{point}.runtime:{runtime} 只在平台的拋棄式 worktree 裡跑,{point} 不是在那裡跑的(是的有:{points})",
  "points.{point}.runtime: {point} is resumed or streamed with the default runtime's own arguments, so it cannot run on another one": "points.{point}.runtime:{point} 是用預設 runtime 自己的參數接續或串流的,不能換到別的 runtime 跑",
  "points.{point}: a project's call is pinned as <project>/<name>, the name as its registry models: or agents: declares it": "points.{point}:專案的呼叫寫成 <專案>/<名稱>,名稱照它登記表 models: 或 agents: 宣告的",
- "points.{point}.runtime: a project's call runs where its judgment point runs; pin a provider or a model": "points.{point}.runtime:專案的呼叫跟著它的判斷點跑;要指定就指定 provider 或模型"
+ "runtime {name} has no completion interface, and {settings} has no llm section (set one up with brunna llm setup)": "執行環境 {name} 沒有 completion 介面,{settings} 也沒有 llm 區塊(用 brunna llm setup 設一家)",
+ "runtime {name} has no completion interface, and llm.providers take only the points pinned to them and the groups llm.use names (not {group}); set llm.use, or pin this point (brunna llm setup sets use)": "執行環境 {name} 沒有 completion 介面,而 llm.providers 只接指定給它的點和 llm.use 寫到的組別(沒有 {group});設 llm.use,或指定這個點(brunna llm setup 會設 use)",
+ "out of time: {point} may take {total} s in all, and too little is left for another request to {provider}/{model}": "時間用完了:{point} 總共只能用 {total} 秒,剩下的不夠再送一次給 {provider}/{model}",
+ "providers.{name}: location local can't have a key (a provider reached with a key is billed per use, and local ones are counted as free)": "providers.{name}:location local 不能有 key(要用 key 連的 provider 是按用量計費的,local 的一律算免費)",
+ "points.{point}.runtime: a project's call runs on its judgment point's runtime; pin a model (and, for a model call, a provider)": "points.{point}.runtime:專案的呼叫在它判斷點的執行環境上跑;要指定就指定模型(模型呼叫還可以指定 provider)",
+ "points.{point}.provider: {point} is an agent call (registry agents:), which runs on the runtime {runtime}; a provider pin there would be ignored, so it is refused (pin only a model)": "points.{point}.provider:{point} 是 agent 呼叫(登記表 agents:),在執行環境 {runtime} 上跑;在那裡指定 provider 會被忽略,所以不接受(只能指定模型)"
 }
