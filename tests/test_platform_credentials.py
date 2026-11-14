@@ -461,10 +461,19 @@ class Store(unittest.TestCase):
         self.assertEqual((c["route"], c["client_id"], c["auth_method"]), ("b", "dyn-1", "none"))
 
     def test_route_a_is_unavailable_until_published(self):
-        ok, why = credentials.shared_client_state()
-        self.assertFalse(ok)
-        self.assertIn("oauth/published", why)
-        self.assertFalse((ROOT / "oauth" / "published").exists())
+        """Whatever this checkout ships: an oauth folder of the test's own, without the flag, then with it."""
+        oauth = self.tmp / "oauth"
+        oauth.mkdir()
+        shutil.copy(ROOT / "oauth" / "client.json", oauth / "client.json")
+        with mock.patch.object(credentials, "OAUTH", oauth), \
+                mock.patch.object(credentials.hubconf, "STATE", self.tmp / "state-root"):
+            ok, why = credentials.shared_client_state()
+            self.assertFalse(ok)
+            self.assertIn("oauth/published", why)
+            (oauth / "published").write_text("")
+            ok, why = credentials.shared_client_state()
+            self.assertFalse(ok, "shipped, but not checked yet")
+            self.assertIn("couldn't be checked", why)
 
     def test_the_tripwire_compares_the_whole_document(self):
         doc = {"client_id": self.srv.base + "/c.json", "client_name": "brunna", "redirect_uris": ["http://127.0.0.1:47615/callback"],

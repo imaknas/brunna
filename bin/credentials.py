@@ -695,7 +695,8 @@ def shared_client_state() -> tuple[bool, str]:
     st = _tripwire_status()
     if st.get("ok") is not True:
         why = st.get("why") or _("not checked yet")
-        return False, _("the published client document couldn't be checked ({why})", why=why) if st.get("unreachable") \
+        unverified = st.get("unreachable") or not st   # unreachable, or never checked for this pin
+        return False, _("the published client document couldn't be checked ({why})", why=why) if unverified \
             else _("the published client document didn't match this install's at the last check ({why})", why=why)
     return True, ""
 

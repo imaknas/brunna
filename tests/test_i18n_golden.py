@@ -449,6 +449,8 @@ sys.path.insert(0, str(BIN))
 import hubconf
 if "sm" in sc:
     hubconf._SERVICE_MANAGER[:] = [sc["sm"]]
+import credentials   # the shared client's flag and pin: the scenario's (none by default), never this checkout's
+credentials.OAUTH = pathlib.Path(sc.get("oauth", "/nonexistent-oauth"))
 import isolation   # the sandbox adapter: the scenario's, not this machine's
 isolation.adapter = lambda: (sc.get("adapter", "seatbelt"), None)
 isolation.can_sandbox = lambda: sc.get("no_sandbox")

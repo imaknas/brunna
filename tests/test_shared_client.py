@@ -54,10 +54,20 @@ class Document(unittest.TestCase):
         for k in credentials.SECURITY_FIELDS:
             self.assertIn(k, self.doc)
 
-    def test_the_flag_isnt_shipped_until_the_owner_has_published(self):
-        self.assertFalse((ROOT / "oauth" / "published").exists())
-        self.assertFalse(credentials.shipped())
-        self.assertFalse(credentials.shared_client_state()[0])
+    def test_shipped_follows_the_flag_whatever_this_checkout_has(self):
+        tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(CLIENT, tmp / "client.json")
+        with mock.patch.object(credentials, "OAUTH", tmp):
+            self.assertFalse(credentials.shipped())
+            self.assertIsNone(credentials.tripwire()[0], "no flag: nothing is checked unless asked")
+            (tmp / "published").write_text("")
+            self.assertTrue(credentials.shipped())
+
+    def test_the_flag_is_an_empty_marker_if_present(self):
+        flag = ROOT / "oauth" / "published"
+        if flag.exists():   # a release that ships it: a plain file, nothing in it is read
+            self.assertTrue(flag.is_file() and not flag.is_symlink())
 
     def test_the_release_checklist_says_so(self):
         text = (ROOT / "CONTRIBUTING.md").read_text()
@@ -289,6 +299,47 @@ class Tripwire(unittest.TestCase):
         with mock.patch("sys.stdout") as out:
             self.assertEqual(credentials.main(["check-published"]), 0)
         self.assertIn("matches", "".join(str(c.args[0]) for c in out.write.call_args_list))
+
+
+class Doctor(unittest.TestCase):
+    """doctor's rows for the shared client, in both states of the flag, with the tripwire's answer given (no network)."""
+
+    def rows(self, shipped: bool, answer=None) -> list:
+        import importlib.machinery
+        import importlib.util
+        tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        shutil.copy(CLIENT, tmp / "client.json")
+        if shipped:
+            (tmp / "published").write_text("")
+        loader = importlib.machinery.SourceFileLoader("agenthub_doctor_t", str(ROOT / "bin" / "agenthub"))
+        ah = importlib.util.module_from_spec(importlib.util.spec_from_loader("agenthub_doctor_t", loader))
+        loader.exec_module(ah)
+        out = []
+        calls = []
+
+        def tripwire(force=False, op=None):
+            calls.append(force)
+            return answer
+        with mock.patch.object(credentials, "OAUTH", tmp), mock.patch.object(credentials, "tripwire", tripwire), \
+                mock.patch.object(credentials, "rows", lambda idx=None: []), \
+                mock.patch.object(credentials, "shared_client_state",
+                                  lambda: (answer is not None and answer[0] is True, (answer or (None, "not shipped"))[1])):
+            ah.doctor_credentials(lambda level, what, fix="": out.append((level, what)))
+        return out, calls
+
+    def test_without_the_flag_doctor_says_nothing_and_fetches_nothing(self):
+        self.assertEqual(self.rows(False), ([], []))
+
+    def test_with_the_flag_one_row_whatever_the_answer(self):
+        rows, calls = self.rows(True, (True, ""))
+        self.assertEqual(calls, [False], "the daily check, not forced")
+        self.assertEqual([r[0] for r in rows], ["ok"])
+        rows, _calls = self.rows(True, (False, "its redirect_uris differ from this install's"))
+        self.assertEqual([r[0] for r in rows], ["bad"])
+        self.assertIn("redirect_uris", rows[0][1])
+        rows, _calls = self.rows(True, (None, "connection refused"))
+        self.assertEqual([r[0] for r in rows], ["info"], "unverified: not red")
 
 
 class Boundary(unittest.TestCase):
