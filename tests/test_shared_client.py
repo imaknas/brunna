@@ -88,7 +88,7 @@ class Template(unittest.TestCase):
     def stage(self, setup) -> tuple[int, pathlib.Path]:
         """The workflow's staging step, run as it is in a copy of the organization repository's layout."""
         [job] = self.wf["jobs"].values()
-        script = next(s["run"] for s in job["steps"] if s.get("name") == "Stage only the client document")
+        script = next(s["run"] for s in job["steps"] if s.get("name") == "Stage only the client documents")
         repo = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, repo, True)
         (repo / "oauth").mkdir()
@@ -126,9 +126,47 @@ class Template(unittest.TestCase):
             d = json.loads(CLIENT.read_text())
             d["client_secret"] = "x"
             (r / "oauth" / "client.json").write_text(json.dumps(d))
-        for setup in (link, evil, moved, secret):
+
+        def userinfo(r):   # what a parser would read as 127.0.0.1, and a browser as evil.example
+            d = json.loads(CLIENT.read_text())
+            d["redirect_uris"] = ["http://evil.example\\@127.0.0.1/callback"]
+            (r / "oauth" / "client.json").write_text(json.dumps(d))
+
+        def none(r):
+            d = json.loads(CLIENT.read_text())
+            d["redirect_uris"] = []
+            (r / "oauth" / "client.json").write_text(json.dumps(d))
+
+        def fragment(r):
+            d = json.loads(CLIENT.read_text())
+            d["redirect_uris"] = ["http://127.0.0.1:47615/callback#x"]
+            (r / "oauth" / "client.json").write_text(json.dumps(d))
+
+        def second_misnamed(r):   # client-2.json naming client.json's URL
+            shutil.copy(CLIENT, r / "oauth" / "client.json")
+            shutil.copy(CLIENT, r / "oauth" / "client-2.json")
+
+        def missing(r):
+            pass
+        for setup in (link, evil, moved, secret, userinfo, none, fragment, second_misnamed, missing):
             with self.subTest(setup.__name__):
                 self.assertNotEqual(self.stage(setup)[0], 0)
+
+    def test_a_second_document_is_published_beside_the_first(self):
+        def two(r):
+            shutil.copy(CLIENT, r / "oauth" / "client.json")
+            d = json.loads(CLIENT.read_text())
+            d["client_id"] = d["client_id"].replace("client.json", "client-2.json")
+            (r / "oauth" / "client-2.json").write_text(json.dumps(d))
+            (r / "oauth" / "notes.txt").write_text("not published")
+        code, repo = self.stage(two)
+        self.assertEqual(code, 0)
+        staged = sorted(str(p.relative_to(repo / "_site")) for p in (repo / "_site").rglob("*") if not p.is_dir())
+        self.assertEqual(staged, ["oauth/client-2.json", "oauth/client.json"])
+
+    def test_the_workflow_and_the_grant_read_loopback_the_same(self):
+        pattern = re.search(r'LOOPBACK = re\.compile\(r"([^"]+)"\)', WORKFLOW.read_text()).group(1)
+        self.assertEqual(pattern, credentials.LOOPBACK.pattern)
 
     def test_the_template_names_the_url_the_pin_does(self):
         self.assertIn(json.loads(CLIENT.read_text())["client_id"], WORKFLOW.read_text())
@@ -161,20 +199,79 @@ class Tripwire(unittest.TestCase):
         self.assertIn("404", why)
         self.assertEqual(self.alerts, [])
 
-    def test_once_shipped_it_checks_daily_and_alerts_on_a_mismatch(self):
+    def age(self, seconds):
+        st = self.tmp / "state" / "credentials" / "shared-client.json"
+        d = json.loads(st.read_text())
+        d["at_s"] = time.time() - seconds
+        st.write_text(json.dumps(d))
+
+    def test_once_shipped_it_alerts_on_a_mismatch_and_checks_hourly_until_it_matches(self):
         (self.oauth / "published").write_text("")
         self.srv.metadata["/oauth/client.json"] = {**self.pin, "redirect_uris": ["https://evil.example/cb"]}
         ok, why = credentials.tripwire()
         self.assertFalse(ok)
         self.assertIn("redirect_uris", why)
-        self.assertEqual(self.alerts[-1], ("credential:shared-client", [self.alerts[-1][1][0]]))
+        self.assertEqual(len(self.alerts[-1][1]), 1)
         self.assertFalse(credentials.shared_client_state()[0], "route (a) is off while it doesn't match")
         credentials.tripwire()
-        self.assertEqual(self.fetches(), 1, "at most once a day")
-        self.srv.metadata["/oauth/client.json"] = {**self.pin, "logo_uri": "https://x/y.png"}   # other fields may differ
-        self.assertTrue(credentials.tripwire(force=True)[0])
+        self.assertEqual(self.fetches(), 1, "not again within the hour")
+        self.age(credentials.TRIPWIRE_RETRY_S + 1)
+        self.srv.metadata["/oauth/client.json"] = dict(self.pin)
+        self.assertTrue(credentials.tripwire()[0], "hourly while it didn't match")
         self.assertEqual(self.alerts[-1], ("credential:shared-client", []), "the recovery")
         self.assertTrue(credentials.shared_client_state()[0])
+        self.age(credentials.TRIPWIRE_RETRY_S + 1)
+        credentials.tripwire()
+        self.assertEqual(self.fetches(), 2, "daily once it matches")
+
+    def test_unreachable_isnt_a_mismatch(self):
+        (self.oauth / "published").write_text("")
+        for answer in ("error", 503, 429):
+            with self.subTest(answer):
+                self.alerts.clear()
+                if answer == "error":
+                    patch = mock.patch.object(credentials, "http", side_effect=credentials.Transient("connection refused"))
+                else:
+                    patch = mock.patch.object(credentials, "http", lambda *a, **k: (answer, {}, b""))
+                with patch:
+                    ok, why = credentials.tripwire(force=True)
+                self.assertIsNone(ok)
+                st = json.loads((self.tmp / "state" / "credentials" / "shared-client.json").read_text())
+                self.assertTrue(st["unreachable"])
+                self.assertEqual(self.alerts, [], "no alert for a few days")
+                ok_a, why_a = credentials.shared_client_state()
+                self.assertFalse(ok_a, "route (a) stays off while unverified")
+                self.assertIn("couldn't be checked", why_a)
+        st_path = self.tmp / "state" / "credentials" / "shared-client.json"
+        st = json.loads(st_path.read_text())
+        st["unreachable_since"] = time.time() - credentials.UNREACHABLE_ALERT_S - 1
+        st_path.write_text(json.dumps(st))
+        with mock.patch.object(credentials, "http", side_effect=credentials.Transient("connection refused")):
+            credentials.tripwire(force=True)
+        self.assertEqual(len(self.alerts[-1][1]), 1, "after three days in a row, it alerts")
+
+    def test_the_result_is_tied_to_the_pin(self):
+        (self.oauth / "published").write_text("")
+        self.srv.metadata["/oauth/client.json"] = dict(self.pin)
+        self.assertTrue(credentials.tripwire()[0])
+        self.assertTrue(credentials.shared_client_state()[0])
+        (self.oauth / "client.json").write_text(json.dumps({**self.pin, "client_name": "other"}))   # a new release's pin
+        self.assertFalse(credentials.shared_client_state()[0], "another pin: never checked")
+        credentials.tripwire()
+        self.assertEqual(self.fetches(), 2, "and checked again at once")
+
+    def test_route_a_is_checked_again_right_before_the_grant_uses_it(self):
+        (self.oauth / "published").write_text("")
+        self.srv.metadata["/oauth/client.json"] = dict(self.pin)
+        credentials.tripwire()
+        meta = {"client_id_metadata_document_supported": True}
+        client = credentials.choose_client(meta, {}, "http://127.0.0.1:47615/callback", "X")
+        self.assertEqual(client["route"], "a")
+        self.assertEqual(self.fetches(), 2, "the grant-time check")
+        self.srv.metadata["/oauth/client.json"] = {**self.pin, "redirect_uris": ["https://evil.example/cb"]}
+        with mock.patch.object(credentials, "ask", return_value=""):
+            self.assertIsNone(credentials.choose_client(meta, {}, "http://127.0.0.1:47615/callback", "X"),
+                              "it falls through to the owner's own app (here: no client ID given)")
 
     def test_a_stale_check_runs_again(self):
         (self.oauth / "published").write_text("")

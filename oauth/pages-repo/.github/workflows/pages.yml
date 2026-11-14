@@ -1,7 +1,9 @@
-# The Pages site of brunna's shared OAuth client (docs/design/platform-credentials.md C2a): it serves one file,
-# https://brunna-dev.github.io/oauth/client.json, and nothing else. This file is a template kept in brunna's repository
-# (oauth/pages-repo/); the owner copies it into brunna-dev/brunna-dev.github.io once. Every action is pinned by commit
-# SHA (the tag in the comment is what it was on 11-15); the github-pages environment there is restricted to main.
+# The Pages site of brunna's shared OAuth client (docs/design/platform-credentials.md C2a): it serves the client
+# documents, https://brunna-dev.github.io/oauth/client.json (and client-2.json, … when a security field ever changes:
+# each a document of its own, the old ones kept), and nothing else. This file is a template kept in brunna's
+# repository (oauth/pages-repo/); the owner copies it into brunna-dev/brunna-dev.github.io once. Every action is pinned
+# by commit SHA (the tag in the comment is what it was on 11-15); the github-pages environment there is restricted to
+# main.
 name: pages
 on:
   push:
@@ -23,27 +25,45 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - name: Stage only the client document
+      - name: Stage only the client documents
         run: |
           set -eu
-          # the document as it should be: its own URL, a public client, loopback redirects only
-          test -f oauth/client.json && test ! -L oauth/client.json
-          python3 - oauth/client.json <<'EOF'
-          import json, sys, urllib.parse
-          d = json.load(open(sys.argv[1]))
-          assert d["client_id"] == "https://brunna-dev.github.io/oauth/client.json", "client_id is not this site's URL"
-          assert d.get("token_endpoint_auth_method") == "none", "not a public client"
-          assert not {"client_secret", "client_secret_expires_at", "jwks", "jwks_uri"} & set(d), "a public client has no keys"
-          for uri in d["redirect_uris"]:
-              u = urllib.parse.urlsplit(uri)
-              assert u.scheme == "http" and u.hostname == "127.0.0.1" and not u.query, f"not loopback: {uri}"
+          # each document as it should be (its own URL, a public client, loopback redirects only), staged alone
+          python3 - <<'EOF'
+          import json, os, pathlib, re, shutil, sys
+          SITE = "https://brunna-dev.github.io/oauth/"
+          NAME = re.compile(r"client(-[0-9]+)?\.json")
+          LOOPBACK = re.compile(r"http://127\.0\.0\.1(:[0-9]{1,5})?/[A-Za-z0-9._~/-]*")
+          def fail(why):
+              print(f"refused: {why}", file=sys.stderr)
+              sys.exit(1)
+          src = pathlib.Path("oauth")
+          docs = sorted(p for p in src.iterdir() if NAME.fullmatch(p.name)) if src.is_dir() else []
+          if not docs or src.joinpath("client.json") not in docs:
+              fail("no oauth/client.json")
+          for p in docs:
+              if p.is_symlink() or not p.is_file():
+                  fail(f"{p} is not a regular file")
+              d = json.loads(p.read_text())
+              if d.get("client_id") != SITE + p.name:
+                  fail(f"{p}: client_id is not this site's URL for it")
+              if d.get("token_endpoint_auth_method") != "none":
+                  fail(f"{p}: not a public client")
+              if {"client_secret", "client_secret_expires_at", "jwks", "jwks_uri"} & set(d):
+                  fail(f"{p}: a public client has no keys")
+              uris = d.get("redirect_uris")
+              if not isinstance(uris, list) or not uris or not all(isinstance(u, str) and LOOPBACK.fullmatch(u) for u in uris):
+                  fail(f"{p}: redirect_uris must be loopback only, and not empty")
+          os.makedirs("_site/oauth")
+          for p in docs:
+              shutil.copyfile(p, f"_site/oauth/{p.name}")
+          staged = [f for f in pathlib.Path("_site").rglob("*") if not f.is_dir()]
+          if len(staged) != len(docs) or any(f.is_symlink() or not f.is_file() for f in staged):
+              fail("_site must hold exactly the documents, as regular files, and no links")
+          if any(f.is_symlink() for f in pathlib.Path("_site").rglob("*")):
+              fail("_site holds a link")
+          print("staged:", ", ".join(sorted(str(f) for f in staged)))
           EOF
-          mkdir -p _site/oauth
-          cp oauth/client.json _site/oauth/client.json
-          # exactly that one regular file, and no links (upload-pages-artifact serves the folder's contents)
-          test "$(find _site -mindepth 1 ! -type d | wc -l | tr -d ' ')" = 1
-          test -z "$(find _site -type l)"
-          test -f _site/oauth/client.json && test ! -L _site/oauth/client.json
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9  # v5.0.0
         with:
           path: _site

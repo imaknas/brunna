@@ -688,25 +688,42 @@ def shared_client() -> dict | None:
 
 
 def shared_client_state() -> tuple[bool, str]:
-    """(route a may be used, why not). Only with oauth/published in this release and the tripwire's last check
-    matching."""
+    """(route a may be used, why not). Only with oauth/published in this release and the tripwire's last check, of
+    this very pin, having found the published document the same."""
     if not shipped() or shared_client() is None:
         return False, _("brunna's shared client isn't published in this release yet (no oauth/published)")
     st = _tripwire_status()
     if st.get("ok") is not True:
-        return False, _("the published client document didn't match this install's at the last check ({why})",
-                        why=st.get("why") or "-")
+        why = st.get("why") or _("not checked yet")
+        return False, _("the published client document couldn't be checked ({why})", why=why) if st.get("unreachable") \
+            else _("the published client document didn't match this install's at the last check ({why})", why=why)
     return True, ""
 
 
+def _pin_hash(pin: dict | None) -> str:
+    return hashlib.sha256(json.dumps(pin or {}, sort_keys=True).encode()).hexdigest()
+
+
+def _tripwire_path() -> pathlib.Path:
+    return hubconf.STATE / "credentials" / "shared-client.json"
+
+
 def _tripwire_status() -> dict:
+    """The last check's record, only when it is of the pin this install ships (another pin: never checked)."""
     try:
-        return json.loads((hubconf.STATE / "credentials" / "shared-client.json").read_text())
+        st = json.loads(_tripwire_path().read_text())
     except (OSError, ValueError):
         return {}
+    pin = shared_client()
+    if not isinstance(st, dict) or not pin or st.get("client_id") != pin.get("client_id") \
+            or st.get("pin") != _pin_hash(pin):
+        return {}
+    return st
 
 
-TRIPWIRE_S = 86400   # the tripwire runs at most once a day (doctor, the hourly job)
+TRIPWIRE_S = 86400   # the tripwire runs at most once a day while the document matches (doctor, the hourly job)
+TRIPWIRE_RETRY_S = 3600   # and hourly while it doesn't, or couldn't be fetched
+UNREACHABLE_ALERT_S = 3 * 86400   # an unreachable document alerts only after this long without a check that went through
 
 
 def shipped() -> bool:
@@ -714,28 +731,32 @@ def shipped() -> bool:
     return (OAUTH / "published").is_file()
 
 
-def check_published(op=None) -> tuple[bool | None, str]:
-    """The published document's security fields against this install's copy. (None, why) when there is nothing to
-    check. The provider fetches it without following redirects (CIMD draft -03, section 6), so neither does this."""
+def check_published(op=None) -> tuple[str, str]:
+    """The published document, whole, against this install's copy. → ("match" | "mismatch" | "unreachable" | "none",
+    why). The provider fetches it without following redirects (CIMD draft -03, section 6), so neither does this.
+    Unreachable (a network error, a 5xx, a 429) is not a mismatch: the document may be fine, it just can't be told."""
     pin = shared_client()
     if pin is None:
-        return None, _("this release ships no shared client document (oauth/client.json)")
+        return "none", _("this release ships no shared client document (oauth/client.json)")
     if not secure(pin.get("client_id")):
-        return False, _("its client_id isn't an https URL")
+        return "mismatch", _("its client_id isn't an https URL")
     try:
         status, _h, body = http("GET", pin["client_id"], headers={"Accept": "application/json"}, op=op)
     except Transient as e:
-        return False, _("the published document could not be fetched ({why})", why=e)
+        return "unreachable", _("the published document could not be fetched ({why})", why=e)
+    if status >= 500 or status == 429:
+        return "unreachable", _("the published document's address answered HTTP {status}", status=status)
     if status != 200:
-        return False, _("the published document's address answered HTTP {status}", status=status)
+        return "mismatch", _("the published document's address answered HTTP {status}", status=status)
     try:
         got = json.loads(body)
     except ValueError:
         got = None
     if not isinstance(got, dict):
-        return False, _("the published document could not be read as JSON")
-    diff = [k for k in SECURITY_FIELDS if got.get(k) != pin.get(k)]
-    return (False, _("its {fields} differ from this install's", fields=", ".join(diff))) if diff else (True, "")
+        return "mismatch", _("the published document could not be read as JSON")
+    diff = sorted(k for k in set(got) | set(pin) if got.get(k) != pin.get(k))
+    return ("mismatch", _("its {fields} differ from this install's", fields=clamp(", ".join(diff), 200))) if diff \
+        else ("match", "")
 
 
 def tripwire(force: bool = False, op=None) -> tuple[bool | None, str]:
@@ -745,31 +766,45 @@ def tripwire(force: bool = False, op=None) -> tuple[bool | None, str]:
     only when forced (the owner's check before that release), and never alerts. → (matches, why); None: not checked."""
     if not force and not shipped():
         return None, _("brunna's shared client isn't published in this release yet (no oauth/published)")
-    st = _tripwire_status()
-    if not force and isinstance(st.get("at_s"), (int, float)) and time.time() - st["at_s"] < TRIPWIRE_S:
+    st = _tripwire_status()   # {} when it was of another pin: stale
+    period = TRIPWIRE_S if st.get("ok") is True else TRIPWIRE_RETRY_S
+    if not force and isinstance(st.get("at_s"), (int, float)) and time.time() - st["at_s"] < period:
         return st.get("ok"), st.get("why") or ""
-    ok, why = check_published(op)
-    if ok is None:
+    result, why = check_published(op)
+    if result == "none":
         return None, why
-    p = hubconf.STATE / "credentials" / "shared-client.json"
+    pin = shared_client()
+    ok = {"match": True, "mismatch": False}.get(result)
+    since = (st.get("unreachable_since") or time.time()) if result == "unreachable" else None
+    record = {"ok": ok, "unreachable": result == "unreachable", "why": why, "at": now_iso(), "at_s": time.time(),
+              "client_id": (pin or {}).get("client_id"), "pin": _pin_hash(pin), "unreachable_since": since}
+    p = _tripwire_path()
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"ok": ok, "why": why, "at": now_iso(), "at_s": time.time()}))
+    tmp = p.with_name(f".{p.name}.{os.getpid()}")
+    tmp.write_text(json.dumps(record))
+    os.replace(tmp, p)
     if shipped():
-        try:
-            import alert
-            alert.once("credential:shared-client", [] if ok else [_("brunna's published client document: {why}", why=why)],
-                       _("brunna's published client document matches again"))
-        except Exception:
-            pass
+        problems = [] if ok else [_("brunna's published client document: {why}", why=why)]
+        if result == "unreachable" and time.time() - since < UNREACHABLE_ALERT_S:
+            problems = None   # a few days unreachable before anyone is told; route (a) stays off meanwhile
+        if problems is not None:
+            try:
+                import alert
+                alert.once("credential:shared-client", problems, _("brunna's published client document matches again"))
+            except Exception:
+                pass
     return ok, why
 
 
 def cmd_check_published() -> int:
     """The owner's check: before the release that ships oauth/published (the release checklist), and any time."""
+    if shared_client() is None:
+        print(_("this release ships no shared client document (oauth/client.json)"))
+        return 0
     ok, why = tripwire(force=True)
     if ok is None:
-        print(why)
-        return 0
+        print(_("⚠️ brunna's published client document couldn't be checked: {why}", why=why))
+        return 1
     if not ok:
         print(_("⚠️ brunna's published client document: {why}", why=why))
         return 1
@@ -937,9 +972,12 @@ def pkce() -> tuple[str, str]:
     return verifier, challenge
 
 
-def loopback(uri: str) -> bool:
-    u = urllib.parse.urlsplit(uri)
-    return u.scheme == "http" and u.hostname == "127.0.0.1" and not u.query and not u.fragment
+LOOPBACK = re.compile(r"http://127\.0\.0\.1(:[0-9]{1,5})?/[A-Za-z0-9._~/-]*")   # the Pages workflow checks the same
+
+
+def loopback(uri) -> bool:
+    """A redirect URI on this machine's loopback, written exactly so (no userinfo, backslash, query or fragment)."""
+    return isinstance(uri, str) and bool(LOOPBACK.fullmatch(uri))
 
 
 def bind_callback(port: int, want: dict | None = None):
@@ -1139,6 +1177,9 @@ def choose_client(meta: dict, notes: dict, redirect: str, label: str, own_app: b
         pass
     elif meta.get("client_id_metadata_document_supported"):
         ok, why = shared_client_state()
+        if ok:   # the grant-time pin: checked again right before it is used
+            matches, why = tripwire(force=True)
+            ok = matches is True
         if ok:
             pin = shared_client()
             uris = pin.get("redirect_uris") or []

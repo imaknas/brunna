@@ -70,7 +70,7 @@ config:
 owner(你本人;不是專案 session 的指令):
   brunna owner list | done/drop/already-done <key> | answer <問題 id> "回答"
                         = bin/owner.py:內建的 owner 端(hub.json owner_side: builtin;有助理的話只能 list)
-  brunna credentials status | grant <專案> <名稱> | set <專案> <名稱> | revoke <專案> <名稱>
+  brunna credentials status | grant <專案> <名稱> | set <專案> <名稱> | revoke <專案> <名稱> | check-published
                         平台自己持有、給無人值守 job 用的遠端 MCP server 授權(bin/credentials.py、
                         docs/design/platform-credentials.md):需要時會有待辦告訴你,附上指令
   brunna skills sync <專案> [--adopt] [--yes=<代碼>] | status [<專案>]

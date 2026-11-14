@@ -466,15 +466,17 @@ class Store(unittest.TestCase):
         self.assertIn("oauth/published", why)
         self.assertFalse((ROOT / "oauth" / "published").exists())
 
-    def test_the_tripwire_compares_security_fields(self):
+    def test_the_tripwire_compares_the_whole_document(self):
         doc = {"client_id": self.srv.base + "/c.json", "client_name": "brunna", "redirect_uris": ["http://127.0.0.1:47615/callback"],
-               "grant_types": ["authorization_code"], "token_endpoint_auth_method": "none", "logo_uri": "x"}
-        self.srv.metadata["/c.json"] = {**doc, "logo_uri": "y"}
+               "grant_types": ["authorization_code"], "token_endpoint_auth_method": "none", "client_uri": "x"}
+        self.srv.metadata["/c.json"] = dict(doc)
         with mock.patch.object(credentials, "shared_client", lambda: doc), mock.patch.object(credentials, "REQUIRE_HTTPS", False):
-            self.assertEqual(credentials.check_published()[0], True, "other fields may differ")
+            self.assertEqual(credentials.check_published()[0], "match")
+            self.srv.metadata["/c.json"] = {**doc, "client_uri": "y"}
+            self.assertEqual(credentials.check_published(), ("mismatch", "its client_uri differ from this install's"))
             self.srv.metadata["/c.json"] = {**doc, "redirect_uris": ["https://evil.example/cb"]}
-            ok, why = credentials.check_published()
-        self.assertFalse(ok)
+            result, why = credentials.check_published()
+        self.assertEqual(result, "mismatch")
         self.assertIn("redirect_uris", why)
 
     def test_the_callback_binds_loopback_without_reuse(self):
@@ -483,8 +485,12 @@ class Store(unittest.TestCase):
         self.assertEqual(srv.server_address[0], "127.0.0.1")
         with self.assertRaises(OSError):
             credentials.bind_callback(srv.server_address[1])
-        self.assertTrue(credentials.loopback("http://127.0.0.1:47615/callback"))
-        for bad in ("http://localhost:47615/callback", "https://evil.example/cb", "http://127.0.0.1.evil.example/cb"):
+        for good in ("http://127.0.0.1:47615/callback", "http://127.0.0.1/callback"):
+            self.assertTrue(credentials.loopback(good), good)
+        for bad in ("http://localhost:47615/callback", "https://evil.example/cb", "http://127.0.0.1.evil.example/cb",
+                    "http://evil.example\\@127.0.0.1/callback", "http://u:p@127.0.0.1/callback",
+                    "http://127.0.0.1/callback#x", "http://127.0.0.1/callback?x=1", "http://127.0.0.1:47615",
+                    "http://127.0.0.1\\evil/cb", None):
             self.assertFalse(credentials.loopback(bad), bad)
 
     def test_pkce(self):
