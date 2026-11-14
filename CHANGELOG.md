@@ -3,6 +3,18 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.19.0 (2026-11-14)
+
+### New
+
+- **credentials:** Brunna's shared OAuth client is published, so route (a) is offered
+- **llm:** The owner can pin a project's model call to a local provider
+
+### Fixed
+
+- **llm:** Going back to the runtime keeps a provider a pin names
+- **llm:** No silent truncation, agent-call provider pins refused, calls end before cap-runner's deadline
+
 ## v0.18.0 (2026-11-14)
 
 ### New
