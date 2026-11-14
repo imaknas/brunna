@@ -1798,7 +1798,15 @@ def doctor_credentials(add) -> None:
         else:
             add("info", _("platform credential {project}/{name}: declared, not granted, and no job lists it",
                           project=row["project"], name=row["name"]))
-    if rows:
+    if credentials.shipped():   # the daily tripwire (network at most once a day)
+        try:
+            matches, why = credentials.tripwire()
+        except Exception as e:
+            matches, why = False, str(e)
+        if matches is False:
+            add("bad", _("brunna's published client document doesn't match this install's: {why}", why=why),
+                _("tell brunna's maintainers; until it matches, grants use dynamic registration or your own app"))
+    if rows or credentials.shipped():
         ok, why = credentials.shared_client_state()
         add("ok" if ok else "info", _("brunna's shared client (route a): available") if ok else
             _("brunna's shared client (route a): {why}; a grant uses dynamic registration or your own app", why=why))

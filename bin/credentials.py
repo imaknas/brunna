@@ -560,6 +560,10 @@ def keepalive(idx: dict | None = None, op=None) -> int:
     a refresh for a refresh token unused for about a day; a file moved where its backup: setting puts it."""
     idx = idx or index()
     bad = 0
+    try:
+        tripwire()   # the shared client's daily check, once it is published
+    except Exception as e:
+        print(_("⚠️ brunna's published client document: {why}", why=clamp(e)), file=sys.stderr)
     for project, doc in sorted(idx["projects"].items()):
         for name, sec in sorted(entries(doc).items()):
             try:
@@ -686,7 +690,7 @@ def shared_client() -> dict | None:
 def shared_client_state() -> tuple[bool, str]:
     """(route a may be used, why not). Only with oauth/published in this release and the tripwire's last check
     matching."""
-    if not (OAUTH / "published").is_file() or shared_client() is None:
+    if not shipped() or shared_client() is None:
         return False, _("brunna's shared client isn't published in this release yet (no oauth/published)")
     st = _tripwire_status()
     if st.get("ok") is not True:
@@ -702,37 +706,71 @@ def _tripwire_status() -> dict:
         return {}
 
 
+TRIPWIRE_S = 86400   # the tripwire runs at most once a day (doctor, the hourly job)
+
+
+def shipped() -> bool:
+    """This release ships oauth/published: the shared client is live, and route (a) may use it (C2a)."""
+    return (OAUTH / "published").is_file()
+
+
 def check_published(op=None) -> tuple[bool | None, str]:
-    """The tripwire: the published document's security fields against this install's copy. (None, why) when there is
-    nothing to check."""
+    """The published document's security fields against this install's copy. (None, why) when there is nothing to
+    check. The provider fetches it without following redirects (CIMD draft -03, section 6), so neither does this."""
     pin = shared_client()
     if pin is None:
         return None, _("this release ships no shared client document (oauth/client.json)")
+    if not secure(pin.get("client_id")):
+        return False, _("its client_id isn't an https URL")
     try:
-        got = get_json(pin["client_id"], op=op)
+        status, _h, body = http("GET", pin["client_id"], headers={"Accept": "application/json"}, op=op)
     except Transient as e:
         return False, _("the published document could not be fetched ({why})", why=e)
-    if got is None:
+    if status != 200:
+        return False, _("the published document's address answered HTTP {status}", status=status)
+    try:
+        got = json.loads(body)
+    except ValueError:
+        got = None
+    if not isinstance(got, dict):
         return False, _("the published document could not be read as JSON")
     diff = [k for k in SECURITY_FIELDS if got.get(k) != pin.get(k)]
     return (False, _("its {fields} differ from this install's", fields=", ".join(diff))) if diff else (True, "")
 
 
-def cmd_check_published() -> int:
-    ok, why = check_published()
+def tripwire(force: bool = False, op=None) -> tuple[bool | None, str]:
+    """The daily check (C2a): once this release ships oauth/published, at most once a day unless forced, the published
+    document against this install's copy. It writes the result route (a) reads, and alerts on a mismatch (a hijacked or
+    changed document reaches every provider's consent screen). Before the flag ships nothing is live to guard: it runs
+    only when forced (the owner's check before that release), and never alerts. → (matches, why); None: not checked."""
+    if not force and not shipped():
+        return None, _("brunna's shared client isn't published in this release yet (no oauth/published)")
+    st = _tripwire_status()
+    if not force and isinstance(st.get("at_s"), (int, float)) and time.time() - st["at_s"] < TRIPWIRE_S:
+        return st.get("ok"), st.get("why") or ""
+    ok, why = check_published(op)
     if ok is None:
-        print(why)
-        return 0
+        return None, why
     p = hubconf.STATE / "credentials" / "shared-client.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps({"ok": ok, "why": why, "at": now_iso()}))
-    if not ok:
+    p.write_text(json.dumps({"ok": ok, "why": why, "at": now_iso(), "at_s": time.time()}))
+    if shipped():
         try:
             import alert
-            alert.once("credential:shared-client", [_("brunna's published client document: {why}", why=why)],
+            alert.once("credential:shared-client", [] if ok else [_("brunna's published client document: {why}", why=why)],
                        _("brunna's published client document matches again"))
         except Exception:
             pass
+    return ok, why
+
+
+def cmd_check_published() -> int:
+    """The owner's check: before the release that ships oauth/published (the release checklist), and any time."""
+    ok, why = tripwire(force=True)
+    if ok is None:
+        print(why)
+        return 0
+    if not ok:
         print(_("⚠️ brunna's published client document: {why}", why=why))
         return 1
     print(_("brunna's published client document matches this install's"))

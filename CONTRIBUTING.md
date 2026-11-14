@@ -66,6 +66,15 @@ Versions follow the commits: `feat` raises the minor version, `fix` and `perf` t
    `brunna merge-branch`).
 2. `git tag -a vX.Y.Z -m vX.Y.Z` on that commit, and push the commit and the tag. `brunna --version` reads the tag.
 3. `gh release create vX.Y.Z --title "brunna X.Y.Z" --notes "$(git cliff --latest --strip header)"`.
+4. The shared OAuth client (`oauth/client.json`; docs/design/platform-credentials.md C2a), when the release changes it or
+   is the one that adds `oauth/published`:
+   - Open a pull request in `brunna-dev/brunna-dev.github.io` that copies `oauth/client.json` exactly as it is at the
+     new tag, review its diff, and merge it.
+   - A change to a security field (`client_id`, `redirect_uris`, `client_name`, `grant_types`, the auth method fields)
+     is a new file with a new `client_id`, never an edit of a published one.
+   - Then run `brunna credentials check-published` on a machine at the new tag. It must say the published document
+     matches.
+   - `oauth/published` ships only in a release made after that check passed, and is never added before.
 
 Users upgrade only to tags (`brunna upgrade`), so a fix merged on main reaches them only when it is released. Release
 whenever main has user-visible changes (anything `git cliff --unreleased` lists), rather than holding them back. What

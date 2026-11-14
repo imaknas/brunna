@@ -1,0 +1,13 @@
+{
+  "client_id": "https://brunna-dev.github.io/oauth/client.json",
+  "client_name": "brunna",
+  "client_uri": "https://github.com/brunna-dev",
+  "redirect_uris": [
+    "http://127.0.0.1:47615/callback",
+    "http://127.0.0.1/callback"
+  ],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "token_endpoint_auth_methods_supported": ["none"]
+}

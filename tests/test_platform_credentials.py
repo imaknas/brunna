@@ -470,7 +470,7 @@ class Store(unittest.TestCase):
         doc = {"client_id": self.srv.base + "/c.json", "client_name": "brunna", "redirect_uris": ["http://127.0.0.1:47615/callback"],
                "grant_types": ["authorization_code"], "token_endpoint_auth_method": "none", "logo_uri": "x"}
         self.srv.metadata["/c.json"] = {**doc, "logo_uri": "y"}
-        with mock.patch.object(credentials, "shared_client", lambda: doc):
+        with mock.patch.object(credentials, "shared_client", lambda: doc), mock.patch.object(credentials, "REQUIRE_HTTPS", False):
             self.assertEqual(credentials.check_published()[0], True, "other fields may differ")
             self.srv.metadata["/c.json"] = {**doc, "redirect_uris": ["https://evil.example/cb"]}
             ok, why = credentials.check_published()
