@@ -209,7 +209,8 @@ class Run:
         if not isinstance(d, dict) or not all(isinstance(d.get(k), str) for k in ("project", "job", "credential")):
             raise ValueError(_("its file {file} doesn't name a project, a job and a credential", file=path))
         self.project, self.job, self.name = d["project"], d["job"], d["credential"]
-        idx = credentials.index()
+        # the registry's index as it is (never refreshed here: that starts git, in a process holding the agent's env)
+        idx = {"projects": hubconf.projects()}
         doc, sec = credentials.entry(self.project, self.name, idx)
         self.sec, self.id = sec, sec["server"]["id"]
         job = next((j for j in doc.get("jobs") or [] if isinstance(j, dict) and j.get("name") == self.job), None)
@@ -334,6 +335,7 @@ class Bridge:
                 self.status.update(unrecovered=True, last_error=_("the server refused the credential ({status})",
                                                                    status=status))
                 self.error(mid, -32001, _("the server refused the platform's credential; the owner has been told"))
+                break
             except Refused as e:
                 self.status["last_error"] = str(e)
                 self.error(mid, -32002, str(e))
@@ -343,9 +345,8 @@ class Bridge:
 
     def refresh(self) -> bool:
         """One detached refresh for the token just refused; → whether a new one is there to retry with."""
-        failed = hashlib.sha256((self.cred.get("access_token") or "").encode()).hexdigest()
-        if self.cred.get("kind") != "oauth":
-            return False
+        # a static value is refused for good: the refresh then marks it as needing the owner (alert, to-do)
+        failed = hashlib.sha256((self.cred.get("access_token") or self.cred.get("value") or "").encode()).hexdigest()
         env = {"HOME": os.environ.get("HOME", ""), "PATH": "/usr/bin:/bin", "LANG": os.environ.get("LANG", "C")}
         for k in LOCATIONS:
             if (v := names.env(k)):
@@ -363,7 +364,7 @@ class Bridge:
             cred = credentials.load(self.run.project, self.run.name)
         except (OSError, ValueError):
             return False
-        if not cred or cred.get("access_token") == self.cred.get("access_token"):
+        if not cred or cred.get("kind") != "oauth" or cred.get("access_token") == self.cred.get("access_token"):
             return False
         self.cred = cred
         self.up.header = header_for(self.run.sec, cred)

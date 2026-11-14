@@ -363,6 +363,120 @@ class Store(unittest.TestCase):
         self.assertEqual(status, 302)
         self.assertEqual(other.log, [], "the redirect was never followed, the header never sent there")
 
+    # ---- the grant, driven end to end: a fake browser follows the authorization URL to the callback ----
+    def grant_cmd(self, browser, answers=("cid", "y"), own_app=True, meta=None):
+        self.srv.oauth(**(meta or {}))
+        self.srv.token = "tok-granted"
+        self.srv.token_answers = [(200, {"access_token": "tok-granted", "refresh_token": "r1", "expires_in": 3600})]
+        import runtime_claude
+        with mock.patch.object(credentials, "REQUIRE_HTTPS", False), \
+                mock.patch.object(credentials, "refuse_unattended", lambda: None), \
+                mock.patch.object(credentials, "entry", lambda p, n, idx=None: (self.doc, self.sec)), \
+                mock.patch.object(credentials, "ask", side_effect=list(answers)), \
+                mock.patch("getpass.getpass", lambda prompt="": ""), mock.patch("webbrowser.open", browser), \
+                mock.patch.object(credentials, "learn", lambda *a, **k: None), \
+                mock.patch.object(runtime_ports, "load", lambda *a, **k: runtime_claude):
+            return credentials.cmd_grant("demo", "upwork", own_app=own_app, port=0)
+
+    def browser(self, **override):
+        import urllib.parse
+        import urllib.request
+        seen = {}
+
+        def open_(url):
+            q = dict(urllib.parse.parse_qsl(urllib.parse.urlsplit(url).query))
+            seen.update(q)
+            back = {"code": "code-1", "state": q["state"], **override}
+            urllib.request.urlopen(q["redirect_uri"] + "?" + urllib.parse.urlencode({k: v for k, v in back.items() if v}))
+            return True
+        return open_, seen
+
+    def test_a_grant_end_to_end(self):
+        open_, seen = self.browser()
+        self.assertEqual(self.grant_cmd(open_), 0)
+        self.assertNotEqual(seen["redirect_uri"], "http://127.0.0.1:0/callback", "--port=0: the port the system gave")
+        self.assertTrue(credentials.loopback(seen["redirect_uri"]))
+        self.assertEqual((seen["code_challenge_method"], seen["resource"]), ("S256", self.srv.url))
+        cred = credentials.load("demo", "upwork")
+        self.assertEqual((cred["access_token"], cred["client"]["route"]), ("tok-granted", "c"))
+        [post] = self.srv.posts("/token")
+        form = dict(x.split("=", 1) for x in post["body"].split("&"))
+        self.assertEqual(form["grant_type"], "authorization_code")
+        self.assertIn("code_verifier", form)
+        self.assertIn("resource", form)
+        self.assertEqual(credentials.read_status("demo", "upwork")["state"], "granted")
+        listed = [e["body"].get("method") for e in self.srv.posts() if isinstance(e["body"], dict)]
+        self.assertNotIn("tools/call", listed, "the check lists tools, never calls one")
+
+    def test_a_wrong_state_or_a_missing_iss_is_refused(self):
+        open_, _seen = self.browser(state="forged")
+        self.assertEqual(self.grant_cmd(open_), 1)
+        self.assertIsNone(credentials.load("demo", "upwork"))
+        open_, _seen = self.browser()
+        self.assertEqual(self.grant_cmd(open_, meta={"authorization_response_iss_parameter_supported": True}), 1)
+        self.assertIsNone(credentials.load("demo", "upwork"))
+        open_, _seen = self.browser(iss=self.srv.base)
+        self.assertEqual(self.grant_cmd(open_, meta={"authorization_response_iss_parameter_supported": True}), 0)
+
+    def test_saying_no_stops_before_the_browser(self):
+        opened = []
+        self.assertEqual(self.grant_cmd(lambda url: opened.append(url), answers=("cid", "n")), 1)
+        self.assertEqual(opened, [])
+
+    def test_a_pasted_address(self):
+        r, w = os.pipe()
+        os.write(w, b"http://127.0.0.1:1/callback?code=c-9&state=s-9\n")
+        os.close(w)
+        with os.fdopen(r) as f, mock.patch.object(sys, "stdin", f):
+            got = credentials.wait_callback({}, threading.Event(), timeout_s=5)
+        self.assertEqual(got, {"code": "c-9", "state": "s-9"})
+
+    def test_the_owner_todos_go_through_hubbus_itself(self):
+        """B1 of the r4 review: hubbus takes each episode's key and publishes each episode, in both of its modes."""
+        import contextlib
+        import io
+        hb = hubbus()
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        hb.DB = tmp / "bus.db"
+        hb.log = lambda s: None
+        hb.projects = lambda: {"demo": tmp, credentials.hubconf.hub_project(): tmp}
+        conn = hb.db()
+        hb.db = lambda *a, **k: conn
+
+        def send(*args):
+            with mock.patch.object(sys, "argv", ["hubbus", "send", "--from", credentials.hubconf.hub_project(), "--to",
+                                                 credentials.hubconf.owner_address(), *args]), \
+                    contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()) as err:
+                try:
+                    hb.main()
+                except SystemExit as e:
+                    if e.code:
+                        raise OSError(err.getvalue())
+
+        def rows():
+            return conn.execute("SELECT count(*) FROM events").fetchone()[0]
+        for records in (True, False):
+            with self.subTest(records=records), mock.patch.object(hb, "RECORDS", records), \
+                    mock.patch.object(credentials, "owner_notify", send):
+                credentials.status_path("demo", "upwork").unlink(missing_ok=True)
+                before = rows()
+                for _ in range(2):   # break, re-grant, break
+                    self.grant(access_expires_at=time.time() - 1)
+                    self.srv.token_answers = [(400, {"error": "invalid_grant"})]
+                    with self.assertRaises(credentials.NeedsGrant):
+                        credentials.fresh("demo", "upwork", idx=self.idx)
+                self.assertGreaterEqual(rows() - before, 3, "two to-dos and the close between them, each published")
+
+    def test_the_scheduler_names_the_job_for_llm(self):
+        idx = {"projects": {"demo": {**self.doc, "paths": {"workspace": str(self.tmp)},
+                                     "jobs": [{**self.doc["jobs"][0], "at": "09:00", "cwd": "workspace"}]}},
+               "modules": {}}
+        jobs, _skipped, _renames = registry.scheduler_jobs(idx, set())
+        [job] = [j for j in jobs if j["name"] == "demo/daily"]
+        self.assertIn("AGENT_JOB_CREDENTIALS=daily", job["command"])
+        self.assertIn("AGENT_JOB_ALLOW=", job["command"])
+
     def test_the_grant_refuses_inside_a_platform_run(self):
         with mock.patch.dict(os.environ, {"HUB_LLM_POINT": "agent-job-confined"}):
             self.assertIsNotNone(credentials.refuse_unattended())

@@ -368,9 +368,10 @@ spec of 2025-11-25 adopted it as the recommended way for a client to identify it
   (temp file, fsync, rename).
 - It holds the issuer, the endpoints, the client (ID, secret for route (c), redirect URI), the resource, the scopes, the
   access token and when it expires, the refresh token, when the grant was made, and the route.
-- Beside it is a **status file** with no secret in it, `<name>.status.json`: access expiry, last refresh and its result,
-  last error, refresh-token age, `needs_grant`. `check-secrets` and the status page read this file, never the
-  credential. (`max_age_days` restarts at every refresh, so it can't stand in for this.)
+- Its **status file**, with no secret in it, is in the platform's state, `<state>/credentials/<project>/<name>.json`
+  (as built; r1–r4 said beside the credential): state, access expiry, last refresh and its result, last error, when the
+  refresh token was last used, the grant episode and its to-do. `check-secrets`, doctor and the status page read this
+  file, never the credential. (`max_age_days` restarts at every refresh, so it can't stand in for this.)
 - **Backup.**
   - The secrets directory is already in the backup (`backup.covers`) and in every sandbox's read deny
     (`policy.secret_dirs`).
@@ -626,13 +627,29 @@ Steps 1–3 and C10, in four commits on the branch:
   - redaction, capabilities stripped, the tool filter, run-file validation.
 - A conformance check, `credential-bridge` (`credential_tools`, safety).
 - Tests: `tests/test_platform_credentials.py` and `tests/test_credential_bridge.py`, against local servers
-  (`tests/mcp_fixture.py`).
+  (`tests/mcp_fixture.py`). Besides the units, they drive the seams:
+  - `brunna credentials grant` end to end, with a fake browser following the authorization URL to the callback
+    (`--own-app`, `--port=0`, a forged `state`, a missing `iss`, saying no, a pasted address);
+  - the bridge's detached `credentials.py refresh`, run as started, against the local server (its environment holds
+    neither the agent's login nor a proxy);
+  - the owner to-dos through hubbus itself, in both of its modes (break, re-grant, break: each episode published);
+  - the scheduler naming the job for `llm.py`, and what `llm.py` attaches reaching the adapter's `--mcp-config`.
+- **Found by the review of the build, fixed before merge:**
+  - `--port=0` wrote port 0 into the redirect;
+  - a refused token was sent twice, with two replies for one request;
+  - the bridge refreshed the registry, which starts git in a process holding the agent's environment (it now reads
+    the index as it is);
+  - a refused static value raised no alert or to-do (its refresh now marks it as needing the owner).
 
-**Measured on the real tool (11-15, store copy 2.1.325)**, with a local MCP server in place of the remote one (SSE answers,
-a sampling request before each answer), the real bridge (the registry's https rule relaxed for the local http server,
-nothing else changed), a scratch instance, and one haiku run on the shared `~/.claude` (the headless token taken in
-memory by `runtime_claude.auth_env`, a logging refusing `security` first on PATH, `--restricted --strict-mcp-config
---mcp-config`):
+**Measured on the real tool (11-15, store copy 2.1.325).** The setup:
+- a local MCP server in place of the remote one (SSE answers, a sampling request before each answer);
+- the real bridge, with the registry's https rule relaxed for the local http server and nothing else changed;
+- a scratch instance;
+- one haiku run on the shared `~/.claude` (the headless token taken in memory by `runtime_claude.auth_env`, a logging
+  refusing `security` first on PATH, `--restricted --strict-mcp-config --mcp-config`).
+
+The run file and `mcp.json` were written by hand as `llm.py` writes them; `llm.py`'s own attach path has run only in
+the tests above, not against the real binary. What the run showed:
 - the run connected the bridge and listed exactly the job's two tools;
 - a third tool that `--allowedTools` allowed but the job's rules don't name was never offered;
 - both tools were called through the bridge, and one that echoes the Authorization header came back as

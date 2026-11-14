@@ -344,6 +344,8 @@ def refresh(project: str, name: str, failed: str | None = None, idx: dict | None
         if cred is None:
             raise NeedsGrant(_("not granted yet"))
         if cred.get("kind") == "static":
+            if failed and token_hash(cred.get("value")) == failed:   # the server refused the value itself
+                raise _broken(project, name, sec, _("the server refused the static value"))
             return cred["value"]
         if failed and token_hash(cred.get("access_token")) != failed:
             return cred["access_token"]
@@ -904,6 +906,7 @@ def cmd_grant(project: str, name: str, own_app: bool = False, port: int = CALLBA
     srv = None
     try:
         srv, got, done = bind_callback(port)
+        port = srv.server_address[1]   # --port=0: the port the system gave
     except OSError as e:
         if e.errno != errno.EADDRINUSE:
             raise

@@ -125,8 +125,10 @@ class Bridge(Scratch):
         self.cred["access_token"] = "a-wrong-one"
         b, out = self.bridge()
         with mock.patch.object(credential_bridge.Bridge, "refresh", lambda self: False):
-            self.session(b)
-        self.assertEqual(self.replies(out)[0]["error"]["code"], -32001)
+            b.handle(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
+        [reply] = self.replies(out)
+        self.assertEqual(reply["error"]["code"], -32001)
+        self.assertEqual(len(self.srv.posts()), 1, "the refused token is sent once, never again")
         st = self.status()
         self.assertTrue(st["unrecovered"])
         import llm
@@ -163,6 +165,98 @@ class Bridge(Scratch):
                          {"X-Api-Key": "v"})
 
 
+class DetachedRefresh(Scratch):
+    """Bridge.refresh starts credentials.py refresh with an environment of its own (no agent login, no proxy); that
+    command, run as it is started, refreshes against the server, or marks a refused static value as needing the
+    owner."""
+
+    def started(self, cred, run_child):
+        self.cred = cred
+        b, _out = self.bridge()
+        seen = {}
+
+        class P:
+            def __init__(self, argv, env=None, **kw):
+                seen.update(argv=argv, env=env, kw=kw)
+                run_child(argv)
+
+            def wait(self, timeout=None):
+                return 0
+        agent_env = {"CLAUDE_CODE_OAUTH_TOKEN": "agent-login", "HTTPS_PROXY": "http://127.0.0.1:9", "HOME": "/h"}
+        with mock.patch.dict(os.environ, agent_env), mock.patch("subprocess.Popen", P):
+            got = b.refresh()
+        return got, seen, b
+
+    def test_its_argv_and_env(self):
+        import hashlib
+        got, seen, _b = self.started(dict(self.cred), lambda argv: None)
+        self.assertFalse(got, "nothing new to retry with")
+        argv = seen["argv"]
+        self.assertEqual(argv[1:3], ["-I", str(ROOT / "bin" / "credentials.py")])
+        self.assertEqual(argv[3:7], ["refresh", "demo", "upwork", "--failed"])
+        self.assertEqual(argv[7], hashlib.sha256(TOKEN.encode()).hexdigest())
+        self.assertNotIn("CLAUDE_CODE_OAUTH_TOKEN", seen["env"])
+        self.assertNotIn("HTTPS_PROXY", seen["env"])
+        self.assertTrue(seen["kw"].get("start_new_session"))
+
+    def test_the_command_refreshes_and_the_bridge_retries_with_it(self):
+        self.srv.oauth()
+        tmp = self.tmp
+        sec = self.sec
+        doc = self.doc
+        bases = (tmp / "creds", tmp / "creds-kept")
+        old = {"v": 1, "kind": "oauth", "access_token": "old-token", "refresh_token": "r1", "issued_at": 1,
+               "access_expires_at": None, "token_endpoint": self.srv.base + "/token", "resource": self.srv.url,
+               "client": {"route": "c", "client_id": "cid", "auth_method": "none"}}
+        self.srv.token_answers = [(200, {"access_token": TOKEN, "expires_in": 3600})]
+        with mock.patch.object(credentials, "bases", lambda: bases), \
+                mock.patch.object(credentials, "status_path", lambda p, n: tmp / "st" / f"{n}.json"), \
+                mock.patch.object(credentials, "entry", lambda p, n, idx=None: (doc, sec)), \
+                mock.patch.object(credentials, "owner_notify", lambda *a: None):
+            credentials._write_private(bases[0] / "demo" / "upwork.json", old)
+
+            def child(argv):
+                self.assertEqual(credentials.main(argv[3:]), 0)
+            got, _seen, b = self.started(old, child)
+        self.assertTrue(got)
+        self.assertEqual(b.up.header, {"Authorization": f"Bearer {TOKEN}"})
+        [post] = self.srv.posts("/token")
+        self.assertIn("refresh_token=r1", post["body"])
+
+    def test_a_refused_static_value_needs_the_owner(self):
+        tmp, sec, doc, sent = self.tmp, {**self.sec, "kind": "static"}, self.doc, []
+        bases = (tmp / "creds", tmp / "creds-kept")
+        static = {"v": 1, "kind": "static", "value": "static-value-1"}
+        with mock.patch.object(credentials, "bases", lambda: bases), \
+                mock.patch.object(credentials, "status_path", lambda p, n: tmp / "st" / f"{n}.json"), \
+                mock.patch.object(credentials, "entry", lambda p, n, idx=None: (doc, sec)), \
+                mock.patch.object(credentials, "index", lambda: {"projects": {"demo": doc}}), \
+                mock.patch.object(credentials, "owner_notify", lambda *a: sent.append(a)), \
+                mock.patch("alert.once", lambda *a, **k: None):
+            credentials._write_private(bases[0] / "demo" / "upwork.json", static)
+            got, _seen, _b = self.started(static, lambda argv: credentials.main(argv[3:]))
+            self.assertFalse(got)
+            self.assertEqual(credentials.read_status("demo", "upwork")["state"], "needs_grant")
+        self.assertEqual([a[1] for a in sent], ["task"], "the owner is told: the bridge's word holds for static too")
+
+
+class Adapter(Scratch):
+    """What llm.py attaches reaches the runtime's command: the bridge in --mcp-config, its tools allowed, no token."""
+
+    def test_the_bridge_in_the_runs_config(self):
+        import runtime_claude
+        task, why = Attach.attach(self, extra=("--strict-mcp-config",))
+        self.assertIsNone(why)
+        task = task._replace(spec={"permission_mode": "dontAsk"})
+        with mock.patch.object(runtime_claude, "_exe", lambda: "claude"):
+            cmd = runtime_claude._flags(task)
+        cfg = json.loads(pathlib.Path(cmd[cmd.index("--mcp-config") + 1]).read_text())["mcpServers"]
+        self.assertEqual(cfg["upwork"]["args"][:2], ["-I", str(hubconf.ROOT / "bin" / "credential_bridge.py")])
+        self.assertIn("mcp__upwork__upwork__get_messages", cmd)
+        self.assertIn("--strict-mcp-config", cmd)
+        self.assertNotIn(TOKEN, json.dumps(cfg) + " ".join(cmd))
+
+
 class RunFile(Scratch):
     """The run file: read once, the platform's own, then checked again against the registry."""
 
@@ -177,7 +271,7 @@ class RunFile(Scratch):
 
     def load_run(self, path):
         import runtime_claude
-        with mock.patch.object(credentials, "index", lambda: {"projects": {"demo": self.doc}}), \
+        with mock.patch.object(credential_bridge.hubconf, "projects", lambda: {"demo": self.doc}), \
                 mock.patch.object(runtime_ports, "load", lambda *a, **k: runtime_claude):
             return credential_bridge.Run(str(path))
 
