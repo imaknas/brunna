@@ -1699,26 +1699,15 @@ def cmd_doctor(argv: list[str]) -> int:
                 _("judgment points go to the runtime {runtime} (no llm.providers; schedulectl models shows each point's "
                   "model)", runtime=rt))
         else:
-            add("bad", _("brunna's decisions (nightly notes, weekly report) have nowhere to run: no AI agent and no "
-                         "model provider is set up") if rt == "none" else
+            add("bad", _("brunna's decisions (nightly notes, weekly report) have nowhere to run: llm.providers serve only "
+                         "the points pinned to them (llm.use is not set), and the runtime {runtime} has no completion "
+                         "interface", runtime=rt) if s else
+                _("brunna's decisions (nightly notes, weekly report) have nowhere to run: no AI agent and no "
+                  "model provider is set up") if rt == "none" else
                 _("judgment points have nowhere to run: the runtime {runtime} has no completion interface and {settings} "
                   "has no llm.providers", runtime=rt),
                 _("brunna llm setup (pick one: an API key or a local Ollama)"))
-    try:
-        import llm
-        calls, stale = llm.project_calls()
-    except Exception as e:   # what can't be told is said, never skipped
-        calls, stale = [], []
-        add("warn", _("cannot tell where projects' model calls go: {error}", error=e), "schedulectl models")
-    for key, _tier, t, why in calls:
-        if t is None:
-            add("bad", _("project model call {key}: {reason}", key=key, reason=why), "schedulectl models")
-        elif t.get("group") is not None:   # served by a provider (the runtime's own are in the line above)
-            add("ok", _("project model call {key} → {provider} ({location}) {model}", key=key, provider=t["provider"],
-                        location=t["location"], model=t["model"]))
-    for key in stale:
-        add("warn", _("llm.points.{key} pins a call {project} does not declare (registry models: / agents:)", key=key,
-                      project=key.split("/", 1)[0]), _("remove the pin, or have the project declare it"))
+    doctor_project_calls(add)
 
     uid = os.getuid()
     scheduled = False   # whether a service manager runs this hub's scheduler (said again at the heartbeat below)
@@ -1831,6 +1820,27 @@ def doctor_credentials(add) -> None:
         ok, why = credentials.shared_client_state()
         add("ok" if ok else "info", _("brunna's shared client (route a): available") if ok else
             _("brunna's shared client (route a): {why}; a grant uses dynamic registration or your own app", why=why))
+
+
+def doctor_project_calls(add) -> None:
+    """Projects' declared model calls (registry models:): one line for each a provider serves (an owner's pin,
+    llm.points.<project>/<point>, or llm.use), red for one with nowhere to go, a warning for a pin on a call the project
+    no longer declares. Calls on the runtime are covered by the judgment points' line."""
+    try:
+        import llm
+        calls, stale = llm.project_calls()
+    except Exception as e:   # what can't be told is said, never skipped
+        add("warn", _("cannot tell where projects' model calls go: {error}", error=e), "schedulectl models")
+        return
+    for key, _tier, t, why in calls:
+        if t is None:
+            add("bad", _("project model call {key}: {reason}", key=key, reason=why), "schedulectl models")
+        elif t.get("group") is not None:   # resolved by completion.resolve: a provider, not the runtime's own interface
+            add("ok", _("project model call {key} → {provider} ({location}) {model}", key=key, provider=t["provider"],
+                        location=t["location"], model=t["model"]))
+    for key in stale:
+        add("warn", _("llm.points.{key} pins a call {project} does not declare (registry models: / agents:)", key=key,
+                      project=key.split("/", 1)[0]), _("remove the pin, or have the project declare it"))
 
 
 def doctor_memory_branches(add) -> None:
@@ -2097,8 +2107,13 @@ def llm_setup(args: dict) -> int:
     d = read_hub_json()
     if choice in ("runtime", "none"):
         llm = d.get("llm") or {}
+        # a provider a pin names stays (e.g. a local model serving a project's call): without use it serves only that
+        pinned = {p.get("provider") for p in (llm.get("points") or {}).values() if isinstance(p, dict)}
+        kept = {n: p for n, p in (llm.get("providers") or {}).items() if n in pinned}
         llm.pop("providers", None)
         llm.pop("use", None)
+        if kept:
+            llm["providers"] = kept
         if llm:
             d["llm"] = llm
         else:

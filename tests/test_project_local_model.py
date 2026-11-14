@@ -5,7 +5,7 @@ Configuring a provider for that must move nothing else: llm.providers without ll
 it, every other completion point (the platform's and other projects') goes where it goes without llm.providers. The
 local Ollama is a stub HTTP server here; no real model is called.
 
-    bin/run-tests tests/test_project_local_model.py
+    bin/run-tests        (or brunna test)
 """
 import importlib.machinery
 import importlib.util
@@ -133,6 +133,22 @@ class NothingElseMoves(Base):
         self.assertEqual(got["proj/reviewer"], ("local", "strong"))
         self.assertIsNone(got["other/summarize"][1], "the runtime's own completion interface")
         self.assertEqual(stale, ["proj/gone"])
+
+    def test_doctor_lines(self):
+        hub = load("agenthub_plm", "agenthub")
+        self.config({"providers": {"local": local()},
+                     "points": {"proj/reviewer": {"provider": "local"}, "proj/classify": {"provider": "nope"},
+                                "proj/gone": {"provider": "local"}}})
+        rows = []
+        hub.doctor_project_calls(lambda level, text, fix="": rows.append((level, text)))
+        by = {level: [t for lv, t in rows if lv == level] for level in ("ok", "bad", "warn")}
+        self.assertEqual(by["ok"], ["project model call proj/reviewer → local (local) big:35b"])
+        [bad] = by["bad"]
+        self.assertIn("proj/classify", bad)
+        self.assertIn("nope", bad)
+        [warn] = by["warn"]
+        self.assertIn("proj/gone", warn)
+        self.assertEqual(len(rows), 3, "calls on the runtime have no line of their own")
 
 
 class Ollama(Base):

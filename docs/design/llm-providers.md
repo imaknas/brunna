@@ -386,7 +386,9 @@ the config check; doctor's "model groups" line shows only when `use` is set.
 }
 ```
 
-No `use`: every other point stays where it is. `models` lists the model so `brunna llm health` checks it is pulled,
+No `use`: every other point stays where it is. Write it by hand, not with `brunna llm setup --llm ollama`: setup
+points every group at the provider it sets up (`use`), which moves all the platform's points. Going back with `brunna
+llm setup --llm runtime` drops `use` and every provider no pin names; a pinned one stays. `models` lists the model so `brunna llm health` checks it is pulled,
 and so the context written there caps the window (leave `context` out to take the model's own). `brunna config check`,
 then `schedulectl models` shows the call on `llm.providers.local`.
 

@@ -119,6 +119,19 @@ class Setup(unittest.TestCase):
                       "runtime none, picking runtime: says plainly that judgment points will fail")
         self.assertEqual(self.hub_json()["llm"], {"points": {"consolidate": {"model": "pinned"}}})
 
+    def test_runtime_choice_keeps_a_provider_a_pin_names(self):
+        """a local model serving a project's call (llm.points.<project>/<point>) outlives going back to the runtime: only
+        use goes, so it serves just that pin"""
+        self.hub("llm", "setup", "--llm", "ollama", "--llm-base-url", self.base, "--llm-model", "local-a", "--yes")
+        d = self.hub_json()
+        d["llm"]["points"]["proj/reviewer"] = {"provider": "ollama"}
+        (self.tmp / "config" / "hub.json").write_text(json.dumps(d))
+        self.assertEqual(self.hub("llm", "setup", "--llm", "runtime", "--yes").returncode, 0)
+        llm = self.hub_json()["llm"]
+        self.assertEqual((sorted(llm["providers"]), "use" in llm), (["ollama"], False))
+        import completion
+        self.assertEqual(completion.config_errors(llm), [])
+
     def test_non_interactive_needs_a_model(self):
         before = (self.tmp / "config" / "hub.json").read_text()
         r = self.hub("llm", "setup", "--llm", "ollama", "--llm-base-url", self.base, "--yes")

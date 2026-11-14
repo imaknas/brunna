@@ -312,5 +312,6 @@
  "project model call {key}: {reason}": "專案模型呼叫 {key}:{reason}",
  "project model call {key} → {provider} ({location}) {model}": "專案模型呼叫 {key} → {provider}({location}){model}",
  "llm.points.{key} pins a call {project} does not declare (registry models: / agents:)": "llm.points.{key} 指定了 {project} 沒宣告的呼叫(登記表 models: / agents:)",
- "remove the pin, or have the project declare it": "拿掉這個指定,或請該專案宣告它"
+ "remove the pin, or have the project declare it": "拿掉這個指定,或請該專案宣告它",
+ "brunna's decisions (nightly notes, weekly report) have nowhere to run: llm.providers serve only the points pinned to them (llm.use is not set), and the runtime {runtime} has no completion interface": "brunna 的判斷(每晚整理筆記、週報)沒地方跑:llm.providers 只接指定給它的點(沒設 llm.use),執行環境 {runtime} 也沒有 completion 介面"
 }
