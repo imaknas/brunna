@@ -116,15 +116,20 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      pushed from a platform-owned bare repo, fast-forward only, `.github/` changes only with `enforce.git_ci`, for
      every sandboxed project whether switched on or not ("Owner-run push, built first"). Sessions' own pushes
      wait for slices b and d.
-     **Platform push (`platform-push.md`, designed 11-15, not built; the owner's principle that no person runs `git
-     push`):** a sandboxed project's agent runs `brunna push`, a request in its outbox; `hubbus dispatch` starts a
-     detached worker that runs `git_remote.py`'s pipeline with automatic checks (fast-forward, CI files, author and
-     committer emails, a secret scan, private names for public remotes, sizes) and replies by result file and `info`
-     letter; what only the owner can fix becomes an owner to-do. The owner's per-project `enforce.git_push.branches`
-     (`none | others | all`) replaces "sessions push only non-default branches"; onboarding asks whether to sandbox and
-     whether the agent may push the default branch. It supersedes slice d's session push and goes before slices b–d.
-     The owner decided (11-15) that the five existing sandboxed projects with a remote get `all`. Open for the owner:
-     the credential (the owner's or a per-repo grant), the default for public remotes, who may request.
+     **Platform push (`platform-push.md`, designed 11-15, r1 after a blind review the same day, not built; the
+     owner's principle that no person runs `git push`):** a sandboxed project's session runs `brunna push`, which writes
+     a request into a folder only that project's session sandboxes can write (sessions only, as r3 decided); `hubbus
+     dispatch` starts a detached worker that runs `git_remote.py`'s pipeline with automatic checks in place of the
+     owner's look (fast-forward, objects and LFS, sizes, CI files, author and committer emails, a scan of every new blob
+     and commit message for secrets, private names and the owner's paths on public remotes), checked in staging repos
+     before the owned repo takes anything, and replies by result file and `info` letter; what only the owner can fix
+     becomes an owner to-do. The owner form gains the same checks as flags. The owner's per-project
+     `enforce.git_push.branches` (`none | others | all`) replaces "non-default branches only"; `others` bounds the
+     default branch's CI and deploys, not publication. Onboarding asks whether to sandbox and what may be pushed; with
+     nobody answering, a public remote gets `none` and a setup to-do. It supersedes slice d's session push mechanism
+     and goes before slices b–d. The owner decided (11-15) that the five existing sandboxed projects with a remote get
+     `all`. Open for the owner: the credential (the owner's or a per-repo grant), the default for public remotes, who
+     may request.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
@@ -289,9 +294,9 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   agents).
 - Platform push (`platform-push.md`, "Open questions for the owner"):
   - which credential the platform pushes with (recommended: a per-repo grant held by the platform);
-  - the non-interactive default for a public remote (recommended: `others`);
-  - who may request (recommended: the project as a whole, with "sessions only" as an option once the broker's
-    session socket exists).
+  - the non-interactive default for a public remote (recommended: `none` plus a one-time `brunna push setup` to-do);
+  - who may request (recommended: only the project's sessions, enforced by a request folder only their sandboxes can
+    write).
 
 ### 7. Not verified on a real run
 

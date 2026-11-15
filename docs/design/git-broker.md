@@ -2806,17 +2806,22 @@ owner's way to push the default branch.
 The owner's principle (11-15): no person runs `git push`; a project's agent says "push" and the platform does it.
 `platform-push.md` designs that for sandboxed projects. Nothing above is deleted; where they differ, that doc holds for
 pushing:
-- **Superseded:** slice d's push over the session socket ("sessions only", the project's own non-default branches,
-  `--force-with-lease` there, P1 updating the remote-tracking ref after a push). A push is a request in the project's
-  outbox, taken in by `hubbus dispatch`, and run by a detached worker through `git_remote.py`'s pipeline (this
-  section's "Owner-run push") with automatic checks in place of the owner's look.
-- **Revisited:** r3 question 2's "sessions push only non-default branches" becomes the owner's per-project field
-  `enforce.git_push.branches: none | others | all`. The rest of that answer stands (no tags, `.github/**` only with
-  `enforce.git_ci`, no signing). Slice d's `validate_enforce` refusal of `push_on_merge` with `enforce.git: platform`
-  is dropped: in a sandboxed project `push_on_merge` only files a request, which the owner's field decides.
+- **Superseded:** slice d's push mechanism over the session socket (the socket's `push`, "the project's own
+  non-default branches" as a fixed rule, `--force-with-lease` there, P1 updating the remote-tracking ref after a push).
+  A push is a request a session writes into its project's session request folder (`<push_dir>/<project>/`, writable
+  only from that project's session sandboxes, never from its services, jobs or platform-settings runs), taken in by
+  `hubbus dispatch`, and run by a detached worker through `git_remote.py`'s pipeline (this section's "Owner-run push")
+  with automatic checks in place of the owner's look.
+- **Kept:** r3 question 2's "sessions only", now enforced by that folder (`platform-push.md` r1, S4; the first version
+  of this section said it was dropped, which was wrong). No tags, `.github/**` only with `enforce.git_ci`, and no
+  signing stand too.
+- **Revisited:** "the project's own non-default branches" becomes the owner's per-project field
+  `enforce.git_push.branches: none | others | all` (`others` is the old rule). Slice d's `validate_enforce` refusal of
+  `push_on_merge` with `enforce.git: platform` is dropped: in a sandboxed project `push_on_merge` only files a request,
+  which the owner's field decides.
 - **What the broker still gives:** the fence (the owner's unsandboxed git, editors and agent tools safe in a project's
   repo), commits and config through the platform, brunna's own git flows (step 5), and sessions' network reads
-  (fetch, pull, clone, other URLs). A session socket later makes "sessions only" enforceable, as an option.
+  (fetch, pull, clone, other URLs). The session socket could later carry push requests for a synchronous answer.
 
 **Order of work, revised (11-15):**
 1. Platform push (`platform-push.md` section 9). It needs nothing from slices b–d.
