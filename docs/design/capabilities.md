@@ -402,6 +402,7 @@ passing the same run, not by reading its docs. The table below is the prose form
 | signals to the owner's other processes | blocked | only with ABI ≥ 6 (kernel 6.12); on 6.8 a service can signal the owner's processes |
 | what its sessions load settings, hooks and tools from (`policy.protect`, any depth, worktrees included) can't be written | yes (11-01) | **no**: Landlock only allows, and a write right on a folder covers everything under it; the renderer removes hooks the platform didn't write every 15 minutes |
 | programs that need unix sockets of their own (a local database socket, syslog) | allowed | refused (`EACCES`) |
+| nothing mounted, attached as a disk or unmounted (`no-mounts`, required; "11-15: no mounts") | yes (11-15) | yes (Landlock refuses every topology change) |
 
 ## 10-31: projects' own model calls (`agenthub complete`)
 
@@ -532,3 +533,88 @@ the file tools need from the home (shell snapshot, plans, skills), and deny the 
 - After merge, live, in a sandboxed project's session opened from the Desktop app: `command -v brunna node git` still answers; Bash
   `ls ~/.ssh`, `cat <data>/todo.md`, `ls <hub>/.state/agent-jobs` fail; `brunna inbox`, `brunna send`, `brunna test` and a send to a
   renamed project's old name still work; a memory note and a plan file can still be written.
+
+## 11-15: no mounts
+
+### The hole (cold review 11-15, reproduced on macOS 27.0.1)
+
+Under the Seatbelt service profile (services, command jobs, the test runner's wrap, platform git work as the project)
+and the cap profile, a process could write a disk image and attach it: `hdiutil attach -mountpoint <dir>`, `diskutil
+image attach --mountPoint <dir>`, or either at `/Volumes`. The mount point could be a folder of its workspace or any
+folder the owner owns, including one outside the profile's writable set. The image's files then appear there although
+the process never wrote them through the file system. The review planted a `.git` with a hostile `core.fsmonitor`, and
+the owner's git ran it. This defeats `own-writes-only` and `runtime-files-locked`, not only the git fence. The same
+profile also let it `mount_devfs` over its own folders, mount an image device the owner had attached, and unmount
+or eject the owner's volumes.
+
+The review reported that denying the DiskArbitration lookup didn't stop the attach. That was an artifact of judging by
+exit code: `hdiutil attach` exits 0 for an attach that made nothing. Every measurement below is taken from outside
+(the mount table, `hdiutil info`, `diskutil list`, polled), never from the route's exit code.
+
+### Measured (each rule alone under `(allow default)`, then the union in the real profiles)
+
+- **`(deny file-mount)`** (with `file-mount-update` and `file-unmount`): refuses a mount(2) the process makes itself
+  (`mount_devfs` mounted under a no-op profile and is refused with this rule), and a mount a daemon makes at a mount point the caller
+  names (`hdiutil attach -mountpoint`, `diskutil image attach --mountPoint`, `diskutil mount -mountPoint`:
+  DiskArbitration checks the caller's sandbox). It does **not** refuse an attach that DiskArbitration mounts at
+  `/Volumes`, nor the attach itself (a device is still made).
+- **The daemons, by mach service name** (`global-name-prefix`): `com.apple.DiskArbitration.` (diskarbitrationd: hdiutil
+  and diskutil can't attach, mount, unmount or eject at all), `com.apple.diskimage` (diskimagesiod, diskimagespawner:
+  with only this denied, diskutil's DiskImages2 attach fails with "Couldn't communicate with a helper application"),
+  `com.apple.system.hdiejectd` (with only this denied, hdiutil's attach fails), and with no single route of their own
+  measured, `com.apple.storagekitd` (erase and partition), `com.apple.filesystems.` and `com.apple.fskit.` (FSKit,
+  UserFS), `com.apple.netauth.` (NetFS), `com.apple.automountd`.
+- **The disk-image driver's door:** hdiutil opens `IOHDIXControllerUserClient` directly. Denying `iokit-open-user-client`
+  for that class, or `iokit-open-service` for `IOHDIXController`/`AppleDiskImagesController`, alone stops its attach.
+- **Not an exec deny:** denying `/usr/bin/hdiutil` stops only that path. (A copy of hdiutil or `open` in a writable
+  folder is killed at exec on this system, but that is code signing, not this profile.)
+
+All three layers together are `seatbelt.mount_denies()`, in `_isolation` and therefore in both profile kinds. Routes
+under the real `service_profile` and `profile(pol, "gpu")`, observed from outside:
+
+| route | before | after |
+|---|---|---|
+| `hdiutil attach -mountpoint <ws>/mnt` / at `/Volumes` | mounted | nothing |
+| `hdiutil attach -nomount`, `hdiutil attach ram://` | device made | nothing |
+| `diskutil image attach --mountPoint` / at `/Volumes` | mounted | nothing |
+| `diskutil image attach --noMount`, `ram://` | device made | nothing |
+| `mount_devfs`, `mount -t devfs` over its folder | mounted | refused |
+| `diskutil mount [-mountPoint]` of a device attached outside | mounted | refused |
+| `mount -t hfs` of that device | refused (device permissions) | refused |
+| `umount`, `diskutil unmount`, `hdiutil detach` of the owner's volume | unmounted | refused, still mounted |
+| `mount_nfs 127.0.0.1:/` | no server (connection refused) | refused before connecting |
+| `open x.dmg` | refused already (`/usr/bin/open` exec deny, `lsopen`) | refused |
+| `mount_ftp` (FSKit) to a local FTP server | refused already: FSKit refuses a sandboxed caller even under a no-op profile | refused |
+
+Not reached: SMB and WebDAV (no server on this machine). Their mount tools call mount(2) in-process, which the
+`mount_devfs` row shows refused. The automounter's maps here are `/home` and `/Network/Servers`; `/net` is off.
+
+Ordinary work under the new profiles, A/B with and without the block: python (json, sqlite3, ssl), the platform's
+Python with PyYAML, node, git (init, commit, log), `uv venv` + `uv pip install` and `npm install` over the network,
+`curl https://pypi.org`, `df`, and MLX on the GPU (Metal) under the cap profile all ran the same. Claude Code's
+own sandbox is deny-by-default, and its mach-lookup and IOKit allowlists name none of these services, classes or
+`file-mount`. That is read from the profile its binary generates, not measured. A canary in `conformance_claude`
+would run `hdiutil attach -mountpoint` and `diskutil image attach` through the session's Bash and look from outside.
+
+Linux: a landlocked process can't change the file-system topology (mount, umount, remount, pivot_root, move_mount:
+Landlock refuses them whatever the ABI). `no_new_privs` leaves a setuid helper (fusermount3, mount's `user` entries)
+powerless, and udisks, gvfs and systemd-mount are behind D-Bus, a unix socket the seccomp filter refuses. A mount in a
+user namespace of its own is seen only inside it. So `landlock.guarantees()` declares `no-mounts` too, and it is in
+`isolation.REQUIRED`: without it, `own-writes-only` means nothing. The Conformance probe tries `mount -t tmpfs` there.
+In the test container that fails as a non-root user with or without Landlock, so it has no positive control.
+
+Tests: `tests/test_no_mounts.py` (every route above under both kinds, an unsandboxed positive control, an existing
+device, the owner's volume, ordinary work), and the Conformance probe (`no-mounts`: `mount-blocked`, seen from outside).
+Switching `mount_denies` off makes 30 of its subtests fail.
+
+### Residuals
+
+- **By name, not by kind.** The daemon list is an enumeration of this macOS's services. A later macOS that mounts
+  through a new service is caught only if a route test covers it. `test_no_mounts` runs on every gate, so a new route
+  added there shows up; a new daemon nobody tries does not.
+- **Later rules win.** A capability fragment that allows `iokit-open`, `mach-lookup` or `default` after the base would
+  reopen this. `test_no_mounts` checks that nothing after the block allows them back, for the fragments that exist.
+- **Not measured here:** a hand-written DiskImages2 client. It needs diskimagesiod, which is denied by name, and
+  diskutil, which is one, is refused. Also not measured: whether a process under these profiles can get launchd to run
+  a job outside the sandbox through its API rather than the `launchctl` binary. The probe was not run in this session.
+  If launchd would run such a job, every guarantee here is moot, not only this one.

@@ -132,6 +132,11 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
    - The Keychain is blocked for services and capability runs, not for sessions. Loosening work mode's per-command
      prompts waits on that.
    - The git-filter protection in `mailbox-session-first.md` step 3 rests on one tool's environment variable.
+   - **No mounts** (`capabilities.md` 11-15): built and required for services, jobs and cap-run on both OSes (a
+     disk image mounted over a folder had put files past `own-writes-only`). Sessions: Claude Code's sandbox reads as
+     refusing every route (deny by default, none of the mount services allowed), but that is unmeasured, and no
+     `conformance_claude` canary exists yet. Codex's sandbox is not checked. Also open: whether launchd can be asked
+     to run a job outside the sandbox through its API rather than the blocked binary.
    - **Open (11-14, `git-broker.md` r3 B-1, "as built" and "after its cold review"):** any process of a sandboxed
      project can race an unsandboxed checkout (the owner's, or an agent tool's worktree mode) into writing its files
      anywhere the owner can write. Built: Claude Code's worktrees there are made by the platform as the project (its
