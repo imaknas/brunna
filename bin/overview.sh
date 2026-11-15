@@ -31,24 +31,37 @@ origin: {origin}" name="$name" path="$local_path" origin="$origin"
   echo
 
   echo "$SERVICES_HEADING"
-  if [ -f "$SERVICES" ]; then
-    matched=$(awk -F'\t' -v p="$name" '$2==p{print}' "$SERVICES")
-    if [ -z "$matched" ]; then
-      echo "$NO_SERVICES"
-    else
-      echo "$matched" | while IFS=$'\t' read -r label _project owner _plist purpose _notes; do
-        if command -v launchctl >/dev/null 2>&1; then
-          if launchctl list 2>/dev/null | awk '{print $3}' | grep -qxF "$label"; then
-            running="running"
-          else
-            running="NOT running"
-          fi
+  # the registry's services: (what render-services runs) and the hand-written services.tsv, one list
+  matched=$(
+    "$AGENT_HUB/bin/py" - "$AGENT_HUB/bin" "$name" <<'PY'
+import importlib.util, sys
+sys.path.insert(0, sys.argv[1])
+import hubconf
+spec = importlib.util.spec_from_file_location("render_services", f"{sys.argv[1]}/render-services.py")
+rs = importlib.util.module_from_spec(spec); spec.loader.exec_module(rs)
+doc = hubconf.projects().get(sys.argv[2]) or {}
+for svc in doc.get("services") or []:
+    if isinstance(svc, dict) and svc.get("name"):
+        run = " ".join(str(svc.get("run", "")).split())
+        print("\t".join([rs.label_of(sys.argv[2], svc), sys.argv[2], "registry", "-", f"{svc['name']}: {run}"[:160], "-"]))
+PY
+    [ -f "$SERVICES" ] && awk -F'\t' -v p="$name" '$2==p{print}' "$SERVICES"
+  )
+  if [ -z "$matched" ]; then
+    echo "$NO_SERVICES"
+  else
+    echo "$matched" | while IFS=$'\t' read -r label _project owner _plist purpose _notes; do
+      if command -v launchctl >/dev/null 2>&1; then
+        if launchctl list 2>/dev/null | awk '{print $3}' | grep -qxF "$label"; then
+          running="running"
         else
-          running="$(hub_msg "(launchctl status cannot be checked on this machine, or it is not managed by launchd)")"
+          running="NOT running"
         fi
-        echo "  - $label [$running] ($owner) — $purpose"
-      done
-    fi
+      else
+        running="$(hub_msg "(launchctl status cannot be checked on this machine, or it is not managed by launchd)")"
+      fi
+      echo "  - $label [$running] ($owner) — $purpose"
+    done
   fi
   echo
 

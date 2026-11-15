@@ -18,7 +18,7 @@ origin:(native)
 origin:(native)
 
 -- 綁定的服務 --
-(沒有登記任何服務)
+  - local.beta.tts [NOT running] (registry) — tts: bin/serve --port 8765
 
 -- STATE.md --
 (這台機器上讀不到 STATE.md——試過 <TMP>/ws/beta/.agent-memory/STATE.md 跟 <TMP>/copies/beta/STATE.md,都不存在)
@@ -46,7 +46,7 @@ $ overview.sh beta
 origin:(native)
 
 -- 綁定的服務 --
-(沒有登記任何服務)
+  - local.beta.tts [NOT running] (registry) — tts: bin/serve --port 8765
 
 -- STATE.md --
 (這台機器上讀不到 STATE.md——試過 <TMP>/ws/beta/.agent-memory/STATE.md 跟 <TMP>/copies/beta/STATE.md,都不存在)
