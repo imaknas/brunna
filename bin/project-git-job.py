@@ -89,6 +89,15 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import names  # noqa: E402  (standard library only, like this file)
 
+# the real git, by the absolute path project_git resolved: for a project whose git goes through the platform,
+# sandboxed-run puts the platform's wrapper first on PATH, which refuses bundle, worktree and the like. Its folder goes
+# first on PATH too, for what this job's helpers run (memory_paths)
+GIT = names.env("GIT_BIN") or ""
+if os.path.isabs(GIT) and os.path.basename(GIT) == "git" and os.access(GIT, os.X_OK):
+    os.environ["PATH"] = os.pathsep.join([os.path.dirname(GIT), *filter(None, [os.environ.get("PATH")])])
+else:
+    GIT = "git"
+
 # memory notes are not project code: the project's own git hooks don't run on them (git-sync-memory.sh says why)
 NO_HOOKS = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null"}
 MEMORY_PATHS = ("memory", "STATE.md")
@@ -97,7 +106,7 @@ LOCK_WAIT_S = 30
 
 
 def git(cwd, *args, check=False, env=None, text=True, **kw) -> subprocess.CompletedProcess:
-    r = subprocess.run(["git", "-C", str(cwd), *args], capture_output="stdout" not in kw, text=text,
+    r = subprocess.run([GIT, "-C", str(cwd), *args], capture_output="stdout" not in kw, text=text,
                        env={**os.environ, **(env or {})}, **kw)
     if check and r.returncode != 0:
         sys.stderr.write(f"git {' '.join(args)}: {(r.stderr or '').strip()[-300:]}\n")

@@ -94,8 +94,7 @@ def run(project: str | None, cwd, argv: list[str], input: str | bytes | None = N
     cap = MAX_JSON if cap is None else cap
     argv = isolation.as_project(project, cwd, argv)
     p = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.PIPE if input is not None else subprocess.DEVNULL,
-                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True,
-                         env={**os.environ, **env} if env else None)
+                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True, env=job_env(env))
     if input is not None:
         p.stdin.write(input if isinstance(input, bytes) else input.encode())
         p.stdin.close()
@@ -139,6 +138,34 @@ def run(project: str | None, cwd, argv: list[str], input: str | bytes | None = N
         fo.close()
     sel.close()
     return Result(why[0] if why else rc, b"".join(got), why[1] if why else err.decode(errors="replace"))
+
+
+def real_git() -> str | None:
+    """The git a project's job runs, resolved here by its absolute path: sandboxed-run puts the platform's git wrapper
+    first on PATH for a project whose git goes through the platform (enforce.git: platform), and the wrapper refuses
+    what the platform's own ops need (bundle, worktree…)."""
+    wrapper = (hubconf.ROOT / "bin" / "git-wrapper").resolve()
+    for d in os.environ.get("PATH", "").split(os.pathsep):
+        if not d or not os.path.isabs(d) or pathlib.Path(d).resolve() == wrapper or pathlib.Path(d).name == "git-wrapper":
+            continue
+        g = os.path.join(d, "git")
+        if os.path.isfile(g) and os.access(g, os.X_OK):
+            return g
+    return None
+
+
+IDENTITY = ("GIT_AUTHOR_NAME", "GIT_AUTHOR_EMAIL", "GIT_COMMITTER_NAME", "GIT_COMMITTER_EMAIL")
+
+
+def job_env(extra: dict | None = None) -> dict[str, str]:
+    """A job's environment, built, never the caller's: whoever starts it (the owner's terminal, a hook, a service) may
+    hold tokens a project's code would see (git status runs the repo's fsmonitor in the job). isolation.kept_env, as
+    isolation.run_as_project, plus the git identity a commit made here needs (memory-sync), the real git's path and
+    what the caller passes."""
+    env = {**isolation.kept_env(), **{k: os.environ[k] for k in IDENTITY if k in os.environ}}
+    if (g := real_git()):
+        names.env_set(env, "GIT_BIN", g)
+    return {**env, **(extra or {})}
 
 
 def data(project: str | None, cwd, op: str, *args, **kw):
