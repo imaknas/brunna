@@ -68,7 +68,7 @@ def note_commits_since(repo, since: datetime.datetime, branch: str = "agent-memo
     if not repo or not pathlib.Path(repo).is_dir():
         return -1
     r = subprocess.run(
-        ["git", "-C", str(repo), "log", branch, f"--since={since.isoformat()}", "--format=%h", "--no-merges",
+        ["git", "--git-dir", str(repo), "log", branch, f"--since={since.isoformat()}", "--format=%h", "--no-merges",
          "--invert-grep", *(f"--grep={g}" for g in PLATFORM_SUBJECTS), "--", "memory/"],
         capture_output=True, text=True,
     )

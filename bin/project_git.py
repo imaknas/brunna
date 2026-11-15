@@ -159,8 +159,9 @@ def strs(x) -> list[str]:
 
 
 def owned_git(repo, *args) -> subprocess.CompletedProcess:
-    """git in a repo the platform owns."""
-    return subprocess.run(["git", "-C", str(repo), *args], capture_output=True, text=True)
+    """git in a bare repo the platform owns. Named with --git-dir, never entered with -C: the owner's
+    safe.bareRepository=explicit (the git broker's precondition) refuses a bare repo git finds on its own."""
+    return subprocess.run(["git", "--git-dir", str(repo), *args], capture_output=True, text=True)
 
 
 REFUSED = "refused:"   # how fetch_bundle's refusal for what a bundle holds begins

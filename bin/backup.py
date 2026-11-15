@@ -187,7 +187,8 @@ def stage() -> dict:
     root = hubconf.path(CFG.get("bare_repos", "~/git-origin"))
     for repo in sorted(root.glob("*.git")) if root and root.is_dir() else []:
         out = STAGE / "git" / f"{repo.name}.bundle"
-        r = subprocess.run(["git", "-C", str(repo), "bundle", "create", str(out), "--all"], capture_output=True, text=True)
+        r = subprocess.run(["git", "--git-dir", str(repo), "bundle", "create", str(out), "--all"],  # bare: never -C
+                           capture_output=True, text=True)
         if r.returncode == 0:
             manifest["bundles"].append(repo.name)
         elif "empty bundle" not in r.stderr:

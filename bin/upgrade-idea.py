@@ -138,7 +138,7 @@ def own_copy(project: str, ws: pathlib.Path, branch: str, tmp: pathlib.Path) -> 
                             cap=project_git.MAX_BUNDLE)
     if r.returncode != 0:
         fail(_("{path}: its history could not be bundled ({why})", path=ws, why=r.stderr.strip()[-200:]))
-    run(["git", "-C", str(own), "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true", "fetch", "-q",
+    run(["git", "--git-dir", str(own), "-c", "transfer.fsckObjects=true", "-c", "fetch.fsckObjects=true", "fetch", "-q",
          "--no-tags", str(bundle), f"+refs/heads/{branch}:refs/heads/{branch}"])
     return own
 
@@ -147,11 +147,11 @@ def remote_is_ours(own: pathlib.Path, branch: str, url: str) -> bool:
     """The remote was pushed by this sandbox itself (the last run stopped halfway): no branches, or every branch tip is
     in the local history. Every branch, not just HEAD: a repo whose HEAD names a branch nobody pushed (the default
     branch name differs between git setups) would otherwise look empty while it holds someone else's history."""
-    r = subprocess.run(["git", "-C", str(own), "ls-remote", "--heads", url], text=True, capture_output=True)
+    r = subprocess.run(["git", "--git-dir", str(own), "ls-remote", "--heads", url], text=True, capture_output=True)
     if r.returncode != 0:
         return False
     tips = [line.split()[0] for line in r.stdout.splitlines() if line.strip()]
-    return all(subprocess.run(["git", "-C", str(own), "merge-base", "--is-ancestor", sha, f"refs/heads/{branch}"],
+    return all(subprocess.run(["git", "--git-dir", str(own), "merge-base", "--is-ancestor", sha, f"refs/heads/{branch}"],
                               capture_output=True).returncode == 0 for sha in tips)
 
 
@@ -268,7 +268,7 @@ def main(argv: list[str]) -> int:
     own = own_copy(proj, ws, branch, tmp)
     if not repo_exists:
         run(["gh", "repo", "create", f"{owner}/{final}", "--public" if public else "--private"])
-    run(["git", "-C", str(own), "push", "-q", url, f"refs/heads/{branch}:refs/heads/{branch}"])
+    run(["git", "--git-dir", str(own), "push", "-q", url, f"refs/heads/{branch}:refs/heads/{branch}"])
     r = project_git.job(proj, ws, "set-origin", ws, url, branch)
     if r.returncode != 0:
         fail(_("{path}: origin could not be set ({why})", path=ws, why=r.stderr.strip()[-200:]))

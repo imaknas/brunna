@@ -61,7 +61,7 @@ hub_say "[2/5] Cloned the code from {origin}" origin="$origin_url"
 # When restoring locally on the hub machine (working copy in ~/workspace/<name>), the bare repo is on this machine:
 # the hub machine can't resolve its own tailnet name, so use the local path; memory pulls/pushes then skip ssh too
 bare_rel="${memory_bare_repo#*:~/}"
-if [ "$bare_rel" != "$memory_bare_repo" ] && git -C "$HOME/$bare_rel" rev-parse --is-bare-repository >/dev/null 2>&1; then
+if [ "$bare_rel" != "$memory_bare_repo" ] && git --git-dir "$HOME/$bare_rel" rev-parse --is-bare-repository >/dev/null 2>&1; then
   memory_bare_repo="$HOME/$bare_rel"
 fi
 git remote add "$MEMORY_REMOTE" "$memory_bare_repo"
