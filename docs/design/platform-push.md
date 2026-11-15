@@ -1047,7 +1047,8 @@ What changed (`bin/git_push_grant.py` `consent()`):
 - **Explicit consent only.** The key is made after an interactive yes, or when the caller gave the branches itself
   (`--branches others|all`; onboarding `--push others|all`): giving them is the yes, and the text is still printed.
   `--yes` alone never makes a key, and neither does a run nobody answers (no terminal); `--grant-only` needs the
-  interactive yes. Keeping a grant that still works uses no gh and needs no yes.
+  interactive yes. Keeping a grant that still works changes nothing at GitHub and needs no yes (the only gh call
+  left on that path is the read-only `gh api user` that proposes the noreply address when the entry has no emails).
 - **Nobody answering is `none` plus the one-time setup to-do, for every visibility.** This replaces the 11-15 default
   "private remote, nobody answering: `all`". The registry is left as it is (a rerun keeps a policy chosen before, but
   a missing grant isn't made without a yes). The to-do's text carries the disclosure in short (the repo, write access

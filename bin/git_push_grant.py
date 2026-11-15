@@ -469,8 +469,8 @@ def title(project: str) -> str:
 def gh_login() -> str:
     """The account the owner's gh is signed in as on github.com, named before that login is used."""
     r = gh("api", "user", "--hostname", "github.com", "--jq", ".login")
-    login = (r.stdout or "").strip()
-    if r.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", login):
+    login = (r.stdout or "").strip().strip('"')   # an enterprise-managed account's login has a _
+    if r.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", login):
         raise Failed(_("gh isn't signed in to github.com ({why}): sign in with gh auth login and run this again; "
                        "nothing was changed", why=(r.stderr or "").strip()[-200:] or r.returncode))
     return login

@@ -714,6 +714,20 @@ class Grant(Base):
                 gpg.grant("proj", self.docs["proj"], "ask")   # no input at all is a no
         self.assertEqual([c for c in self.gh_calls() if c[:2] == ["repo", "deploy-key"]], [])
 
+    def test_a_moved_origin_is_said_and_a_no_keeps_the_old_key(self):
+        """Replacing a grant for an origin that changed deletes the old repo's key: that is said too, and a no leaves it
+        (and everything here) as it was."""
+        self.setup_grant()
+        old = self.deploy_keys()
+        rec = (self.gdir() / "grant.json").read_text()
+        self.docs["proj"]["paths"]["origin"] = "git@github.com:o/other.git"
+        code, out = self.interactive("n", argv=("setup", "proj", "--grant-only"))
+        self.assertEqual(code, gpg.REFUSED)
+        self.assertIn(f"deletes the platform's earlier deploy key {old[0]['id']} from github.com/o/proj", out)
+        self.assertIn("github.com/o/other", out)
+        self.assertEqual(self.deploy_keys(), old)
+        self.assertEqual((self.gdir() / "grant.json").read_text(), rec)
+
     def test_interactive_yes_adds_the_key(self):
         code, out = self.interactive("all", "y", "")
         self.assertEqual(code, 0, out)
