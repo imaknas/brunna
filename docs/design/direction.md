@@ -102,8 +102,12 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      runtimes' renderings, brunna's own git flows). Step 2's build list (11-15, "Step 2 build list", not built): four
      slices, each merged on its own (a: the channel, P1/P2, the allowlists, the config op; b: the composed operations;
      c: the rebuild; d: the network path under the push policy), and open points, some for the owner (owner network
-     steps only in a broker-owned bare repo, P1 off the network, where the service lives, the race probes' cost).
-     Still open: B-1's option 4.
+     steps only in a broker-owned bare repo, P1 off the network, where the service lives, the race probes' cost). r1
+     after a blind review (11-15): P2's working index moved out of the shared temp area into the project's own
+     platform folder (it was swappable by another project), git state no plumbing writes is the broker's, bundles only
+     in the private temp folder, the broker's git environment built from scratch, scratch repos only where the project
+     alone writes; new owner points: a `HEAD` folder P2 can't remove, worktrees outside the records at the rebuild,
+     what the `.github/**` check compares and what "own branches" means. Still open: B-1's option 4.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
