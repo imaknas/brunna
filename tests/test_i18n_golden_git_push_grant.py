@@ -62,11 +62,12 @@ class Golden(Base):
             self.docs["proj"]["paths"]["origin"] = "git@github.com:o/proj.git"
             self.case("status before", "status", "proj")
             self.vis = "public"
-            self.case("public, nobody answering: none", "setup", "proj", "--yes")
+            self.case("public, nobody answering: none and the to-do", "setup", "proj", "--yes")
             with self.denied():
                 self.case("the key doesn't work", "setup", "proj", "--yes", "--branches", "all")
             self.vis = "private"
-            self.case("interactive", "setup", "proj", tty=True, answers=["all", ""])
+            self.case("interactive, no to the key", "setup", "proj", tty=True, answers=["all", "n"])
+            self.case("interactive", "setup", "proj", tty=True, answers=["all", "y", ""])
             self.case("again: the grant is kept", "setup", "proj", "--yes", "--branches", "others", "--email",
                       "a@b.example")
             self.case("status", "status", "proj")

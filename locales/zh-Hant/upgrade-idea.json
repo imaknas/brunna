@@ -31,6 +31,6 @@
  "the platform's push: {push}": "平台推送:{push}",
  "usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--push none|others|all] [--apply]": "用法:upgrade-idea.py <沙盒名稱> [--rename <新名稱>] [--public] [--push none|others|all] [--apply]",
  "the platform's push for {project} was not set up ({why}); run brunna push setup {project}": "{project} 的平台推送沒設好({why});請跑 brunna push setup {project}",
- "by the new repo's visibility (private: all; public: none and a to-do)": "看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)",
- "--push takes none, others or all": "--push 只能是 none、others 或 all"
+ "--push takes none, others or all": "--push 只能是 none、others 或 all",
+ "none, and a to-do to decide with brunna push setup": "none,加一個用 brunna push setup 決定的待辦"
 }

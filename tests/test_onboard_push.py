@@ -133,11 +133,16 @@ class Onboard(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.reg("gamma")["enforce"], {"sandbox": True})
         self.assertEqual(self.grant_calls()[-1], ["onboard", "gamma", "--push-email", "a@b.example", "--push", "others"])
-        # no --push: the step decides by the remote's visibility (tests/test_git_push_grant.py, Onboard)
+        # no --push: the step makes it none with the to-do (tests/test_git_push_grant.py, Onboard)
         self.repo("delta", "git@github.com:o/delta.git")
         r = self.onboard("--sandbox", self.ws / "delta")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(self.grant_calls()[-1], ["onboard", "delta"])
+        # a person's typed answer (connect's question): the step still asks before the gh login adds the key
+        self.repo("zeta", "git@github.com:o/zeta.git")
+        r = self.onboard("--sandbox", "--push", "all", "--push-confirm", self.ws / "zeta")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.grant_calls()[-1], ["onboard", "zeta", "--confirm", "--push", "all"])
 
     def test_from_an_agent_session_the_push_is_not_a_persons_choice(self):
         self.repo("eps", "git@github.com:o/eps.git")
@@ -213,7 +218,7 @@ class Connect(unittest.TestCase):
         self.assertEqual(self.onboard_flags(), ["--no-remote"])
         self.ran.clear()
         rc, out, err = self.run_connect(str(self.app), "--yes", "--sandbox")
-        self.assertEqual(self.onboard_flags(), ["--no-remote", "--sandbox"], "onboarding decides by visibility")
+        self.assertEqual(self.onboard_flags(), ["--no-remote", "--sandbox"], "onboarding: none and the to-do")
 
     def test_bad_flags_show_the_usage(self):
         for args in (["--push", "all"], ["--no-sandbox", "--push", "others"], ["--sandbox", "--push", "most"],
@@ -228,7 +233,7 @@ class Connect(unittest.TestCase):
         # "Connect it?", "Sandbox it?", the push
         rc, out, err = self.run_connect(str(self.app), tty=True, answers=["", "y", "others"])
         self.assertEqual(rc, 0, out + err)
-        self.assertEqual(self.onboard_flags(), ["--no-remote", "--sandbox", "--push", "others"])
+        self.assertEqual(self.onboard_flags(), ["--no-remote", "--sandbox", "--push", "others", "--push-confirm"])
         self.ran.clear()
         rc, out, err = self.run_connect(str(self.app), tty=True, answers=["", "n"])
         self.assertEqual(self.onboard_flags(), ["--no-remote"], "not sandboxed: no push question")

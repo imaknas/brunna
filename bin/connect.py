@@ -17,8 +17,10 @@ Two questions per project (docs/design/platform-push.md section 2), or their fla
   sandbox it?   when its agent will touch other people's data, or run or read untrusted code or content (downloaded
                 models, others' benchmarks, unattended processing of outside content). Without a person: no
   push          for a sandboxed project with a remote, which branches the platform may push for its sessions: none,
-                others (every branch but the default) or all. Without a person: the remote's visibility decides
-                (private: all; public or can't tell: none, and you get a to-do to decide with brunna push setup)
+                others (every branch but the default) or all; others or all adds a deploy key with write access
+                to the repo using your gh login, after showing what it does (an answer typed here is then asked
+                [y/N]; the --push flag is the yes). Without a person: none, and you get a to-do to decide with
+                brunna push setup
 
 Refused: the home folder and its parents, hidden folders, the hub, the instance directory, anything inside a project
 that is already connected. The folder is resolved to its real path first.
@@ -167,8 +169,9 @@ SANDBOX_Q = ("Sandbox it? Yes when its agent will touch other people's data, or 
 PUSH_Q = ("Which branches may the platform push for it? none: you push yourself; others: every branch but the default; "
           "all: the default branch too. On a public remote every branch you allow is published as soon as it is pushed, "
           "and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) "
-          "runs it; others keeps the default branch's CI and deploys yours, not the content private. Empty: the "
-          "remote's visibility decides (private: all; public: none).")
+          "runs it; others keeps the default branch's CI and deploys yours, not the content private. others or all "
+          "then asks to add a deploy key with write access to the repo, using your gh login (what it does is shown "
+          "first). Empty: none for now, and you get a to-do to decide with brunna push setup.")
 
 
 def choose(question: str, options: tuple[str, ...], yes: bool) -> str | None:
@@ -196,11 +199,14 @@ def decide(p: pathlib.Path, remote: bool, opts: dict, yes: bool) -> list[str]:
     if not sandbox:
         return []
     out = ["--sandbox"]
-    push = opts.get("push")
+    push, typed = opts.get("push"), False
     if push is None and has_remote(p, remote):
         push = choose(_(PUSH_Q), ("none", "others", "all"), yes)
+        typed = push in ("others", "all")
     if push:
         out += ["--push", push]
+    if typed:   # an answer, not a flag: the deploy key is still asked for after what it does is shown
+        out.append("--push-confirm")
     for e in opts.get("emails") or []:
         out += ["--push-email", e]
     return out

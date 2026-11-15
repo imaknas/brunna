@@ -34,12 +34,19 @@ Owner-run (`brunna push setup <project>`):
       emails: asked, or the flags) goes into the registry's enforce.git_push (only once the grant works) and the project
       repo's user.name/user.email are set to the allowed address (as the project, through project-git-job.py), so its
       sessions' commits pass the push's identity check. A rerun with a working grant keeps it.
-  git_push_grant.py setup <project> --revoke     deletes the deploy key at GitHub and the key here
+      The owner's gh is never used without saying so and a yes (11-16, platform-push.md "the owner is asked before
+      their GitHub login is used"): before a deploy key is added or replaced, consent() prints what it will do (the gh
+      account, the repo, write access to that repo only, where the key stays, how to undo it), then asks [y/N].
+      Passing --branches others|all (onboarding: --push) is the yes, and the text is still printed. --yes alone, or a
+      run nobody answers, never makes a key: none (the registry as it is) plus the one-time setup to-do.
+  git_push_grant.py setup <project> --revoke     deletes the deploy key at GitHub and the key here (the flag is the
+                                                 yes; the gh account and the repos are printed first)
   git_push_grant.py status [<project>…]
-  git_push_grant.py onboard <project> [--push none|others|all] [--push-email <address>]… [--agent]
-      onboarding's step after registration (onboard-project.sh, upgrade-idea.py): with no --push, the remote's
-      visibility decides (private: all; public or can't tell: none, plus a one-time setup to-do); --agent: the choice
-      was not a person's, so none raises the to-do too
+  git_push_grant.py onboard <project> [--push none|others|all] [--push-email <address>]… [--agent] [--confirm]
+      onboarding's step after registration (onboard-project.sh, upgrade-idea.py): with no --push, none plus the
+      one-time setup to-do, whatever the remote's visibility; --push others|all is the yes for the key (the disclosure
+      is printed); --confirm: that --push was a person's typed answer (connect's question), so the disclosure is
+      followed by the [y/N] question; --agent: the choice was not a person's, so none, and the to-do too
   git_push_grant.py visibility <url>             public | private | unknown (an anonymous ls-remote)
   git_push_grant.py extra <json> [--sandbox]     onboard-project.sh's ONBOARD_REGISTRY_EXTRA with enforce.sandbox merged in
 
@@ -92,6 +99,10 @@ class Refused(Exception):
 
 class Failed(Exception):
     """gh, ssh-keygen, ssh or the network failed."""
+
+
+class Declined(Refused):
+    """Nobody said yes to using the owner's gh login: no deploy key is made and nothing is written."""
 
 
 # ---------- where things are ----------
@@ -455,6 +466,53 @@ def title(project: str) -> str:
     return f"{names.current('cli')} push: {project}"
 
 
+def gh_login() -> str:
+    """The account the owner's gh is signed in as on github.com, named before that login is used."""
+    r = gh("api", "user", "--hostname", "github.com", "--jq", ".login")
+    login = (r.stdout or "").strip()
+    if r.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9-]*", login):
+        raise Failed(_("gh isn't signed in to github.com ({why}): sign in with gh auth login and run this again; "
+                       "nothing was changed", why=(r.stderr or "").strip()[-200:] or r.returncode))
+    return login
+
+
+def disclosure(project: str, repo: str, account: str, old: dict | None = None) -> str:
+    """What adding the deploy key does, said before the owner's gh is used for it."""
+    lines = [_("To push {name}'s branches, the platform will use your gh login ({account}) on github.com/{repo} to add a "
+               "deploy key with WRITE access to that repo. The key can write only that repo, nothing else of your "
+               "account. A deploy key titled \"{title}\" that the platform added there before is replaced.",
+               name=project, account=account, repo=repo, title=title(project))]
+    if old:
+        lines.append(_("It first deletes the platform's earlier deploy key {id} from github.com/{old}.",
+                       id=old.get("deploy_key_id"), old=old.get("repo")))
+    lines.append(_("The platform keeps the private key in its secrets folder (not in the cloud backup) and uses it only "
+                   "to push the branches of {name} that its sessions ask for, after the automatic checks.", name=project))
+    lines.append(_("To undo it: {command} --revoke (deletes the key at GitHub and here).", command=setup_command(project)))
+    return "\n".join(lines)
+
+
+def consent(project: str, repo: str, mode: str, old: dict | None = None) -> None:
+    """The owner's yes before their gh adds or replaces a deploy key. mode: explicit (the branches were given on the
+    command line: the disclosure is printed, and that is the yes), ask (the disclosure, then [y/N]: only y or yes goes
+    on; an empty answer or no input is a no), anything else (nobody to ask: no key, and no gh call at all). Declined
+    otherwise, before anything has been changed."""
+    if mode not in ("explicit", "ask"):
+        raise Declined(_("Nobody said yes to using your gh login, so no deploy key was made for {name} and nothing was "
+                         "changed: run {command} yourself (it says what it will do and asks first), or give --branches "
+                         "others|all", name=project, command=setup_command(project)))
+    print(disclosure(project, repo, gh_login(), old))
+    if mode == "explicit":
+        print(_("Going ahead: the branches were given on the command line, which counts as your yes."))
+        return
+    try:
+        a = input(_("Add the deploy key with your gh login?") + " [y/N] ").strip().lower()
+    except EOFError:
+        a = ""
+    if a not in ("y", "yes"):
+        raise Declined(_("You said no: no deploy key was added for {name}, and nothing was changed. {command} asks "
+                         "again whenever you want it.", name=project, command=setup_command(project)))
+
+
 def same_key(a: str, b: str) -> bool:
     return a.split()[:2] == b.split()[:2]
 
@@ -504,11 +562,12 @@ def make_key(project: str) -> pathlib.Path:
     return new
 
 
-def grant(project: str, doc: dict) -> dict:
+def grant(project: str, doc: dict, mode: str = "no") -> dict:
     """A working grant for the project: the one there is when it still works at GitHub, or a new one made, added there
     and checked. Each step that fails undoes the ones before it (a deploy key added and not working is deleted again).
     One whose files are fine but that GitHub refuses (deleted there, gh's sign-in revoked) is made again: that is what
-    the probe's to-do asks the owner to run this for."""
+    the probe's to-do asks the owner to run this for. Keeping a working grant uses no gh; anything else needs the owner's
+    yes first (consent, by mode), before a file is written or gh is called."""
     host, repo = parse_origin(origin_of(doc))
     with contextlib.suppress(NotSetUp):
         g = read_grant(project)
@@ -523,7 +582,10 @@ def grant(project: str, doc: dict) -> dict:
         print(_("The grant here no longer works ({why}): making a new one", why=why))
     d = grant_dir(project)
     old = record(project)
-    if old and old.get("repo") and old.get("deploy_key_id") is not None and old["repo"].lower() != repo.lower():
+    moved = bool(old and old.get("repo") and old.get("deploy_key_id") is not None
+                 and old["repo"].lower() != repo.lower())
+    consent(project, repo, mode, old if moved else None)
+    if moved:
         # the origin changed: the old repo's write key goes before a new one is made
         if delete_key(old["repo"], old["deploy_key_id"]):
             print(_("✓ deploy key {id} deleted from {repo}", id=old["deploy_key_id"], repo=old["repo"]))
@@ -709,8 +771,11 @@ def warning(vis: str) -> str:
 
 
 def setup(project: str, *, yes: bool = False, branches: str | None = None, emails: list[str] | None = None,
-          grant_only: bool = False) -> int:
-    """Owner-run: the grant, then the policy. Refused/Failed propagate to main()."""
+          grant_only: bool = False, confirm: bool = False) -> int:
+    """Owner-run: the grant, then the policy. Refused/Failed propagate to main(). The owner's gh is used only with a
+    yes (consent): branches given here (--branches) are one; otherwise only a person answering [y/N]. confirm: the
+    branches given were a person's typed answer elsewhere (connect's question), so the [y/N] still follows. With no
+    yes: nothing written, the to-do raised, REFUSED."""
     doc = doc_of(project)
     if not doc:
         raise Refused(_("{name} is not in the registry", name=project))
@@ -730,20 +795,33 @@ def setup(project: str, *, yes: bool = False, branches: str | None = None, email
         raise Refused(_("this platform's registry doesn't know enforce.git_push yet, so no grant is made: update "
                         "brunna, then run {command}", command=setup_command(project)))
     interactive = not yes and sys.stdin.isatty()
-    vis = visibility(origin_of(doc))
-    print(warning(vis))
+    # the yes for using the owner's gh: the branches given here, or a person's [y/N]; nobody to ask is never one
+    if confirm:
+        mode = "ask" if sys.stdin.isatty() else "no"
+    else:
+        mode = "explicit" if branches is not None else "ask" if interactive else "no"
     # a rerun starts from what the registry has (the repair the probe's to-do asks for changes no policy)
     current = git_push_of(doc)
-    default = current.get("branches") if current.get("branches") in BRANCHES else \
-        ("all" if vis == "private" else "none")
-    if branches is None and not interactive and not grant_only:
-        branches = default
-    if interactive and branches is None and not grant_only:
-        print(_("Which branches may the platform push for {name}? none: you push yourself; others: every branch but "
-                "the default; all: the default branch too.", name=project))
-        while (branches := ask(_("none, others or all?"), default)) not in BRANCHES:
-            pass
-    g = grant(project, doc) if branches != "none" or grant_only else None
+    have = current.get("branches") if current.get("branches") in BRANCHES else None
+    try:
+        if branches is None and not interactive and not grant_only:
+            if have is None:   # nobody chose, now or before: none, and the to-do (11-16; no visibility default)
+                consent(project, parse_origin(origin_of(doc))[1], "no")
+            branches = have
+        vis = visibility(origin_of(doc))
+        print(warning(vis))
+        default = have or ("all" if vis == "private" else "none")
+        if interactive and branches is None and not grant_only:
+            print(_("Which branches may the platform push for {name}? none: you push yourself; others: every branch but "
+                    "the default; all: the default branch too. others and all add a deploy key with write access to "
+                    "the repo with your gh login: you are told what that does and asked first.", name=project))
+            while (branches := ask(_("none, others or all?"), default)) not in BRANCHES:
+                pass
+        g = grant(project, doc, mode) if branches != "none" or grant_only else None
+    except Declined as e:
+        print(e)
+        raise_todo(project)
+        return REFUSED
     if grant_only:
         close_todo(project)
         return OK
@@ -783,11 +861,19 @@ def record(project: str) -> dict | None:
 def revoke(project: str) -> int:
     """The project's write keys deleted at GitHub (the record's, and every key with its title on the record's repo and
     on the registry origin's repo, so a lost or broken record leaves none behind), then the key here. A GitHub that
-    can't be reached keeps the key here, to run again."""
+    can't be reached keeps the key here, to run again. --revoke is the owner's yes; the gh account and the repos are
+    said first."""
     d, g = grant_dir(project), record(project)
     repos = [g["repo"]] if g and isinstance(g.get("repo"), str) and REPO.fullmatch(g["repo"]) else []
     with contextlib.suppress(Refused):
         repos.append(parse_origin(origin_of(doc_of(project)))[1])
+    if repos:
+        account = None
+        with contextlib.suppress(Failed):
+            account = gh_login()
+        print(_("Using your gh login ({account}) to delete the platform's deploy keys for {name} from {repos}, as you "
+                "asked.", account=account or _("not signed in"), name=project,
+                repos=", ".join(f"github.com/{r}" for r in dict.fromkeys(repos))))
     gone = set()
     if g and repos and g.get("repo") == repos[0] and g.get("deploy_key_id") is not None:
         if delete_key(g["repo"], g["deploy_key_id"]):
@@ -842,8 +928,16 @@ def raise_todo(project: str, why: str | None = None) -> bool:
     if todo.get("episode") == episode and todo.get("closed"):
         episode += 1
     key = re.sub(r"[^A-Za-z0-9._-]", "-", f"git-push-setup-{project}-{episode}")[:128]
-    text = _c("{project}: decide what the platform may push for it{why}: {command}", project=project,
-              why=f" ({why[:200]})" if why else "", command=setup_command(project))
+    repo = None
+    with contextlib.suppress(Refused):
+        repo = parse_origin(origin_of(doc_of(project)))[1]
+    # the disclosure in short and with no gh call (check-secrets raises this too); setup names the gh account
+    text = _c("{project}: decide what the platform may push for it{why}: {command}. others or all adds a deploy key "
+              "with write access to {repo} (that repo only) using your gh login, after saying so and asking; the "
+              "platform keeps the private key in its secrets folder, not in the cloud backup, and uses it only to push "
+              "this project's branches its sessions ask for, after the automatic checks. Undo: {command} --revoke",
+              project=project, why=f" ({why[:200]})" if why else "", command=setup_command(project),
+              repo=f"github.com/{repo}" if repo else _c("its GitHub repo"))
     try:
         owner_notify("--type", "task", "--id", key, "--text", text, "--context", "git-push")
     except OSError as e:
@@ -871,10 +965,12 @@ def close_todo(project: str) -> None:
 
 # ---------- onboarding ----------
 
-def onboard(project: str, push: str | None, emails: list[str] | None, agent: bool) -> int:
-    """After registration: a sandboxed project with a remote gets its push decided. Explicit --push wins; otherwise the
-    remote's visibility (private: all; public or unknown: none). none raises the one-time setup to-do unless a person
-    chose it; a grant that can't be made leaves none, with the to-do saying why."""
+def onboard(project: str, push: str | None, emails: list[str] | None, agent: bool, confirm: bool = False) -> int:
+    """After registration: a sandboxed project with a remote gets its push decided. An explicit --push is the choice,
+    and others|all the yes for the deploy key (the disclosure is printed; with confirm, a person's typed answer, the
+    [y/N] follows). Otherwise none, whatever the remote's visibility (11-16: the 11-15 "private: all" used the owner's
+    gh unasked). none raises the one-time setup to-do unless a person chose it; a grant that can't be made, or wasn't
+    agreed to, leaves none with the to-do."""
     doc = doc_of(project)
     if not doc or not (doc.get("enforce") or {}).get("sandbox") or not origin_of(doc):
         return OK
@@ -886,14 +982,13 @@ def onboard(project: str, push: str | None, emails: list[str] | None, agent: boo
     if agent:   # what an agent passes is never a choice: none, and the owner decides with setup
         push = "none"
     chosen = push is not None and not agent
-    if push is None:
-        push = "all" if visibility(origin_of(doc)) == "private" else "none"
-    if push == "none":
+    if push is None or push == "none":
         if not chosen:
             raise_todo(project)
         return OK
     try:
-        return setup(project, yes=True, branches=push, emails=emails)
+        setup(project, yes=True, branches=push, emails=emails, confirm=confirm)   # a no raises the to-do itself
+        return OK
     except (Refused, Failed) as e:
         print(_("⚠️ the platform's push for {name} was not set up: {why}", name=project, why=e), file=sys.stderr)
         raise_todo(project, str(e))
@@ -951,7 +1046,7 @@ def main(argv: list[str]) -> int:
                 print(f"{r['project']}: {r['state']}" + (f" — {r['detail']}" if r["detail"] else ""))
             return OK if all(r["state"] != "not_set_up" for r in rows) else FAILED
         if cmd == "onboard" and rest:
-            push, emails, agent, it = None, None, False, iter(rest[1:])
+            push, emails, agent, confirm, it = None, None, False, False, iter(rest[1:])
             for a in it:
                 if a == "--push":
                     push = next(it, "")
@@ -959,11 +1054,13 @@ def main(argv: list[str]) -> int:
                     emails = [*(emails or []), next(it, "")]
                 elif a == "--agent":
                     agent = True
+                elif a == "--confirm":
+                    confirm = True
                 else:
                     return usage()
             if push is not None and push not in BRANCHES:
                 return usage()
-            return onboard(rest[0], push, emails, agent)
+            return onboard(rest[0], push, emails, agent, confirm)
         if cmd == "visibility" and len(rest) == 1:
             print(visibility(rest[0]))
             return OK

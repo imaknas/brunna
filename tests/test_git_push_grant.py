@@ -48,6 +48,12 @@ keys = json.loads(state.read_text()) if state.exists() else []
 a = sys.argv[1:]
 def opt(name):
     return a[a.index(name) + 1] if name in a else None
+if a[:2] == ["api", "user"] and opt("--jq") == ".login":   # the account the disclosure names
+    if os.environ.get("FAKE_GH_NOLOGIN"):
+        print("To get started with GitHub CLI, please run:  gh auth login", file=sys.stderr)
+        sys.exit(4)
+    print("octo")
+    sys.exit(0)
 if a[:2] == ["api", "user"]:
     print('"42+octo@users.noreply.github.com"')
     sys.exit(0)
@@ -132,6 +138,7 @@ class Base(unittest.TestCase):
         env.update(HOME=str(self.tmp / "home"), PATH=f"{fakebin}{os.pathsep}{os.environ['PATH']}",
                    GH_CONFIG_DIR=str(self.tmp / "gh-config"), FAKE_DIR=str(self.fake), FAKE_REMOTES=str(self.remotes),
                    GIT_CONFIG_GLOBAL=str(self.gitconfig), GIT_CONFIG_NOSYSTEM="1", AGENT_HUB_LANG_UI="en",
+                   AGENT_HUB_LANG_CONTENT="en",   # the to-do's text, read by the tests below
                    SSH_AUTH_SOCK=str(self.tmp / "owner-agent.sock"))   # the owner's agent: never used
         self.docs = {"proj": {"name": "proj", "paths": {"workspace": str(self.ws), "origin": "git@github.com:o/proj.git"},
                               "enforce": {"sandbox": True}}}
@@ -448,21 +455,33 @@ class Grant(Base):
 
     def test_a_rerun_keeps_the_policy_it_has(self):
         """Nobody answering: what the registry has stays (a public remote set to all doesn't fall back to none), and
-        fields setup doesn't ask about (max_file_mb) are kept."""
+        fields setup doesn't ask about (max_file_mb) are kept. A working grant is kept with no gh at all; with none, the
+        registry's all is not a yes for a new key (11-16): nothing made, nothing written, the to-do."""
         have = {"branches": "all", "emails": ["42+octo@users.noreply.github.com"], "max_file_mb": 20}
         self.docs["proj"]["enforce"]["git_push"] = dict(have)
         reg = self.tmp / "reg" / "proj.yaml"
-        reg.write_text("v: 1\nname: proj\nenforce:\n  sandbox: true\n  git_push:\n    branches: all\n    emails:\n"
-                       "    - 42+octo@users.noreply.github.com\n    max_file_mb: 20\n")
+        text = ("v: 1\nname: proj\nenforce:\n  sandbox: true\n  git_push:\n    branches: all\n    emails:\n"
+                "    - 42+octo@users.noreply.github.com\n    max_file_mb: 20\n")
+        reg.write_text(text)
         self.vis = "public"
-        with mock.patch.object(gpg, "field_supported", lambda: True), mock.patch("registry.validate", lambda d, s: []), \
-                mock.patch.object(gpg, "set_identity", lambda *a: None):
+        with mock.patch.object(gpg, "set_identity", lambda *a: None):
+            code, out, err = self.setup_grant(branches=None)
+            self.assertEqual(code, gpg.REFUSED, err)
+            self.assertEqual(self.gh_calls(), [], "no gh at all without a yes")
+            self.assertFalse(self.gdir().exists())
+            self.assertEqual(reg.read_text(), text)
+            self.assertEqual([t[1] for t in self.todos], ["task"])
+            # the control: a grant made with a yes, then the same unattended rerun keeps it and the policy
+            with mock.patch("sys.stdout", io.StringIO()):
+                gpg.grant("proj", self.docs["proj"], "explicit")
+            before = len(self.gh_calls())
             code, out, err = self.setup_grant(branches=None)
         self.assertEqual(code, 0, err)
         import yaml
         # and what the probe saw now is recorded (platform-push.md r2 S-l)
         self.assertEqual(yaml.safe_load(reg.read_text())["enforce"]["git_push"], {**have, "visibility": "public"})
-        self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1, "the grant was made for all")
+        self.assertEqual(len(self.gh_calls()), before, "a working grant is kept with no gh call")
+        self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1)
 
     def test_other_forges_and_local_paths_are_refused_before_anything(self):
         for origin in ("git@gitlab.com:o/proj.git", "https://codeberg.org/o/proj", "gh-work:o/proj.git",
@@ -616,26 +635,120 @@ class Grant(Base):
         self.assertEqual(gpg.default_emails("unknown"), ["42+octo@users.noreply.github.com"])
         self.assertEqual(gpg.default_emails("private"), ["owner@example.org", "42+octo@users.noreply.github.com"])
 
-    def test_non_interactive_defaults_follow_the_visibility(self):
-        with contextlib.nullcontext():
-            self.vis = "public"
-            code, out, _ = self.setup_grant(branches=None)
-            self.assertIn("'branches': 'none'".replace("'", '"'), out)
-            self.assertIn("public", out)
-            self.assertEqual(self.gh_calls(), [], "none: no grant made")
-            self.vis = "private"
-            code, out, _ = self.setup_grant(branches=None)
-            self.assertIn('"branches": "all"', out)
-            self.assertIn('"emails": ["owner@example.org", "42+octo@users.noreply.github.com"]', out)
+    def test_nobody_answering_is_none_and_the_todo_for_every_visibility(self):
+        """11-16: no default uses the owner's gh. A run nobody answers (no terminal, or --yes alone) with no branches
+        given: no gh call at all, no key, nothing written, and the one-time to-do carrying the disclosure in short.
+        The 11-15 "private: all" is gone."""
+        reg = self.tmp / "reg" / "proj.yaml"
+        text = reg.read_text()
+        for vis in ("private", "public", "unknown"):
+            for tty in (False, True):   # True with --yes: a person is there, but --yes alone is no yes for the key
+                with self.subTest(vis=vis, tty=tty):
+                    self.vis, self.todos[:] = vis, []
+                    (self.tmp / "state" / "git-push-grant" / "proj.json").unlink(missing_ok=True)
+                    out = io.StringIO()
+                    with mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()), \
+                            mock.patch("sys.stdin", mock.Mock(isatty=lambda tty=tty: tty)), \
+                            mock.patch("builtins.input", side_effect=AssertionError("nothing is asked")):
+                        self.assertEqual(gpg.main(["setup", "proj", "--yes"]), gpg.REFUSED)
+                    self.assertEqual(self.gh_calls(), [], "no gh at all")
+                    self.assertFalse(self.gdir().exists())
+                    self.assertEqual(reg.read_text(), text, "none: the registry as it is")
+                    self.assertEqual(self.commits, [])
+                    self.assertIn("no deploy key was made", out.getvalue())
+                    self.assertEqual([t[1] for t in self.todos], ["task"], "the to-do, not closed")
+                    todo = self.todos[0][5]
+                    for words in ("deploy key with write access to github.com/o/proj", "(that repo only)",
+                                  "your gh login", "after saying so and asking", "not in the cloud backup",
+                                  "after the automatic checks", f"{names.current('cli')} push setup proj --revoke"):
+                        self.assertIn(words, todo)
+
+    def test_branches_given_are_the_yes_and_the_disclosure_is_printed(self):
+        """--branches all with nobody at the terminal: the disclosure names the gh account and the repo, then the key is
+        added. The account is asked of gh before anything is added."""
+        code, out, err = self.setup_grant(branches="all")
+        self.assertEqual(code, 0, err)
+        for words in ("your gh login (octo) on github.com/o/proj", "deploy key with WRITE access to that repo",
+                      "can write only that repo", "secrets folder (not in the cloud backup)",
+                      "after the automatic checks", f"{names.current('cli')} push setup proj --revoke (deletes the key "
+                      "at GitHub and here)", "counts as your yes"):
+            self.assertIn(words, out)
+        self.assertLess(out.index("(octo)"), out.index("✓ deploy key"))
+        calls = self.gh_calls()
+        self.assertEqual(calls[0], ["api", "user", "--hostname", "github.com", "--jq", ".login"])
+        self.assertEqual(len([c for c in calls if c[2:3] == ["add"]]), 1)
+
+    def test_gh_not_signed_in_changes_nothing(self):
+        with mock.patch.dict(os.environ, {"FAKE_GH_NOLOGIN": "1"}), self.assertRaises(gpg.Failed) as cm:
+            self.setup_grant(branches="all")
+        self.assertIn("gh auth login", str(cm.exception))
+        self.assertEqual([c for c in self.gh_calls() if c[:2] == ["repo", "deploy-key"]], [])
+        self.assertFalse(self.gdir().exists())
+
+    def interactive(self, *answers, argv=("setup", "proj")):
+        it = iter(answers)
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)), \
+                mock.patch("builtins.input", lambda prompt="": (out.write(prompt), next(it))[1]):
+            code = gpg.main(list(argv))
+        return code, out.getvalue()
+
+    def test_interactive_no_adds_nothing(self):
+        reg = self.tmp / "reg" / "proj.yaml"
+        text = reg.read_text()
+        for no in ("n", "", "no", "nope"):
+            with self.subTest(answer=no):
+                code, out = self.interactive("all", no)
+                self.assertEqual(code, gpg.REFUSED)
+                self.assertIn("your gh login (octo) on github.com/o/proj", out, "said before the question")
+                self.assertLess(out.index("(octo)"), out.index("[y/N]"))
+                self.assertEqual([c for c in self.gh_calls() if c[:2] == ["repo", "deploy-key"]], [], "no gh add")
+                self.assertFalse(self.gdir().exists(), "nothing written")
+                self.assertEqual(reg.read_text(), text)
+                self.assertEqual(self.commits, [])
+                self.assertEqual([t[1] for t in self.todos], ["task"], "the to-do is open")
+        with mock.patch("builtins.input", side_effect=EOFError), mock.patch("sys.stdout", io.StringIO()), \
+                mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)):
+            with self.assertRaises(gpg.Declined):
+                gpg.grant("proj", self.docs["proj"], "ask")   # no input at all is a no
+        self.assertEqual([c for c in self.gh_calls() if c[:2] == ["repo", "deploy-key"]], [])
+
+    def test_interactive_yes_adds_the_key(self):
+        code, out = self.interactive("all", "y", "")
+        self.assertEqual(code, 0, out)
+        self.assertIn("Add the deploy key with your gh login? [y/N]", out)
+        self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1)
+        self.assertIn('"branches": "all"', out)
+        self.assertEqual([t[1] for t in self.todos], [])
+
+    def test_grant_only_needs_a_yes(self):
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stdin", mock.Mock(isatty=lambda: False)):
+            self.assertEqual(gpg.main(["setup", "proj", "--grant-only"]), gpg.REFUSED)
+        self.assertEqual(self.gh_calls(), [])
+        self.assertFalse(self.gdir().exists())
+        code, out = self.interactive("yes", argv=("setup", "proj", "--grant-only"))
+        self.assertEqual(code, 0, out)
+        self.assertTrue((self.gdir() / "grant.json").exists())
 
     def test_interactive_setup_asks_branches_and_emails(self):
-        answers = iter(["others", "a@b.example, 42+octo@users.noreply.github.com"])
+        answers = iter(["others", "y", "a@b.example, 42+octo@users.noreply.github.com"])
         out = io.StringIO()
         with mock.patch("sys.stdout", out), mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)), \
                 mock.patch("builtins.input", lambda prompt="": next(answers)):
             self.assertEqual(gpg.setup("proj"), 0)
         self.assertIn('"branches": "others"', out.getvalue())
         self.assertIn('"emails": ["a@b.example", "42+octo@users.noreply.github.com"]', out.getvalue())
+
+    def test_revoke_says_whose_login_and_which_repo(self):
+        self.setup_grant()
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            self.assertEqual(gpg.revoke("proj"), 0)
+        self.assertIn("Using your gh login (octo) to delete the platform's deploy keys for proj from github.com/o/proj",
+                      out.getvalue())
+        self.assertLess(out.getvalue().index("(octo)"), out.getvalue().index("✓ deploy key"))
 
     def test_status_and_the_probe(self):
         self.assertEqual(gpg.status("proj")["state"], "not_needed")
@@ -708,7 +821,7 @@ class Visibility(unittest.TestCase):
 class Onboard(Base):
     """git_push_grant.py onboard: what registration's next step decides, with setup replaced (Grant tests it)."""
 
-    def run_onboard(self, push=None, agent=False, fails=None):
+    def run_onboard(self, push=None, agent=False, fails=None, confirm=False):
         calls = []
 
         def setup(project, **kw):
@@ -718,12 +831,13 @@ class Onboard(Base):
             return 0
         with mock.patch.object(gpg, "setup", setup), mock.patch("sys.stdout", io.StringIO()), \
                 mock.patch("sys.stderr", io.StringIO()):
-            self.assertEqual(gpg.onboard("proj", push, None, agent), 0)
+            self.assertEqual(gpg.onboard("proj", push, None, agent, confirm), 0)
         return calls
 
     def test_defaults_and_choices(self):
+        """No --push is none and the to-do whatever the visibility (11-16: private no longer means all)."""
         for vis, push, agent, want_setup, want_todo in (
-                ("private", None, False, "all", False),
+                ("private", None, False, None, True),
                 ("public", None, False, None, True),
                 ("unknown", None, False, None, True),
                 ("public", "others", False, "others", False),
@@ -746,6 +860,65 @@ class Onboard(Base):
         self.assertEqual(len(calls), 1)
         self.assertEqual(len(self.todos), 1)
         self.assertIn("Deploy keys are disabled", self.todos[0][5])
+
+    def onboard_real(self, *argv, tty=False, answers=()):
+        it = iter(answers)
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", io.StringIO()), \
+                mock.patch("sys.stdin", mock.Mock(isatty=lambda: tty)), \
+                mock.patch("builtins.input", lambda prompt="": (out.write(prompt), next(it))[1]):
+            code = gpg.main(["onboard", "proj", *argv])
+        return code, out.getvalue()
+
+    @unittest.skipUnless(HAS_KEYGEN, "no ssh-keygen (OpenSSH's client) on this machine")
+    def test_onboarding_without_push_uses_no_gh(self):
+        for vis in ("private", "public"):
+            with self.subTest(vis=vis):
+                self.vis, self.todos[:] = vis, []
+                (self.tmp / "state" / "git-push-grant" / "proj.json").unlink(missing_ok=True)
+                code, out = self.onboard_real(tty=True)
+                self.assertEqual(code, 0)
+                self.assertEqual(self.gh_calls(), [])
+                self.assertFalse(self.gdir().exists())
+                self.assertEqual([t[1] for t in self.todos], ["task"])
+                self.assertIn("your gh login", self.todos[0][5])
+
+    @unittest.skipUnless(HAS_KEYGEN, "no ssh-keygen (OpenSSH's client) on this machine")
+    def test_onboarding_with_push_all_discloses_then_adds(self):
+        with mock.patch.object(gpg, "set_identity", lambda *a: None):
+            code, out = self.onboard_real("--push", "all")
+        self.assertEqual(code, 0, out)
+        self.assertIn("your gh login (octo) on github.com/o/proj", out)
+        self.assertLess(out.index("(octo)"), out.index("✓ deploy key"))
+        self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1)
+
+    @unittest.skipUnless(HAS_KEYGEN, "no ssh-keygen (OpenSSH's client) on this machine")
+    def test_onboarding_a_typed_answer_still_asks(self):
+        """connect's question answered all comes with --confirm: the disclosure, then [y/N]; a no leaves none and the
+        to-do, a yes adds the key; with no terminal it can't ask, so no key."""
+        code, out = self.onboard_real("--push", "all", "--confirm", tty=True, answers=["n"])
+        self.assertEqual(code, 0)
+        self.assertIn("[y/N]", out)
+        self.assertEqual([c for c in self.gh_calls() if c[:2] == ["repo", "deploy-key"]], [])
+        self.assertEqual([t[1] for t in self.todos], ["task"])
+        code, out = self.onboard_real("--push", "all", "--confirm", tty=False)
+        self.assertEqual([c for c in self.gh_calls() if c[:2] == ["repo", "deploy-key"]], [])
+        with mock.patch.object(gpg, "set_identity", lambda *a: None):
+            code, out = self.onboard_real("--push", "all", "--confirm", tty=True, answers=["y"])
+        self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1, out)
+
+    def test_connect_passes_a_typed_answer_as_confirm(self):
+        import connect
+        ws = self.ws
+        with mock.patch.object(connect, "has_remote", lambda p, r: True), \
+                mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)), \
+                mock.patch("builtins.input", lambda prompt="": "all"), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(connect.decide(ws, False, {"sandbox": True}, False),
+                             ["--sandbox", "--push", "all", "--push-confirm"])
+        # a flag is the yes itself; nobody answering is none (no flag: onboarding's none and the to-do)
+        self.assertEqual(connect.decide(ws, False, {"sandbox": True, "push": "all"}, False), ["--sandbox", "--push", "all"])
+        self.assertEqual(connect.decide(ws, False, {"sandbox": True}, True), ["--sandbox"])
+        self.assertIn("gh login", connect.PUSH_Q)
 
     def test_nothing_for_an_unsandboxed_project_or_one_without_a_github_remote(self):
         del self.docs["proj"]["enforce"]

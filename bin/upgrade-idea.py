@@ -4,9 +4,9 @@
 
 Usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--push none|others|all] [--apply] [--json]
   Without --apply it only prints what it would do. --push: which branches the platform may push for the project's
-  sessions once it has its repo (docs/design/platform-push.md section 2); without it the new repo's visibility decides
-  (private: all; public: none, plus a one-time owner to-do to run `brunna push setup <name>`). Anything but none makes
-  the platform's push grant (a write deploy key) first. With --json (lease-runner's call, the assistant's: never a
+  sessions once it has its repo (docs/design/platform-push.md section 2); without it none, plus a one-time owner to-do
+  to run `brunna push setup <name>`, whatever the repo's visibility. others or all makes the platform's push grant (a
+  write deploy key added with the owner's gh login) first: giving it is the yes, and what it does is printed. With --json (lease-runner's call, the assistant's: never a
   person's choice) none raises the to-do too. --json: the last line prints the result (used by lease-runner's
   POST /v1/sandboxes/<name>/upgrade):
     {"result": "upgraded"|"already", "name", "origin"}                                  exit 0
@@ -31,7 +31,7 @@ What it does (in order):
      (sandboxes created earlier without an explicit enforce.work get work: true on upgrade: idea sandboxes could
      always make changes in a discuss lease)
   5. Add origin to mirror-list.txt; regenerate the index.md roster; commit-hub-files commits only these files
-  6. The platform's push (bin/git_push_grant.py onboard): as --push says, or by the visibility; a grant that can't be
+  6. The platform's push (bin/git_push_grant.py onboard): as --push says, or none and the to-do; a grant that can't be
      made leaves none, with the owner's to-do saying why. Done again on a rerun (a working grant is kept)
 Each step that changes something outside (rename, repo) is recorded as the stage in .state/idea-upgrades.json once
 done; on a failure partway, call it again and it carries on from where the record says (under the new name if it was
@@ -257,8 +257,7 @@ def main(argv: list[str]) -> int:
             _("registry projects/{name}.yaml: type: project, paths.origin: {url} (purpose/enforce/privacy kept)",
               name=final, url=url),
             _("add origin to mirror-list.txt, regenerate index.md, commit brunna"),
-            _("the platform's push: {push}", push=push or _("by the new repo's visibility (private: all; public: none "
-                                                             "and a to-do)"))]
+            _("the platform's push: {push}", push=push or _("none, and a to-do to decide with brunna push setup"))]
     if not JSON:
         print("\n".join(f"  {i}. {p}" for i, p in enumerate(plan, 1)))
     if not apply:

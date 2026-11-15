@@ -1,6 +1,5 @@
 {
  "The remote is {visibility}. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.": "這個遠端是{visibility}。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。",
- "{project}: decide what the platform may push for it{why}: {command}": "{project}:決定平台可以替它推哪些分支{why}:{command}",
  "{path} is not a plain file or folder": "{path} 不是一般的檔案或資料夾",
  "{path} is not yours": "{path} 不是你的",
  "{path} has mode {mode}, not {want}": "{path} 的權限是 {mode},不是 {want}",
@@ -35,7 +34,6 @@
  "{name} is not sandboxed: its agents push with your own git, and there is no platform push to set up": "{name} 沒有沙盒:它的 agent 用你自己的 git 推,沒有平台推送要設定",
  "--branches takes none, others or all": "--branches 只能是 none、others 或 all",
  "not an email address: {emails}": "不是 email 地址:{emails}",
- "Which branches may the platform push for {name}? none: you push yourself; others: every branch but the default; all: the default branch too.": "平台可以替 {name} 推哪些分支?none:你自己推;others:預設分支以外的每個分支;all:連預設分支也推。",
  "⚠️ no email is allowed yet, so every push will be refused until one is: run {command} --email <address>": "⚠️ 還沒有允許任何 email,所以在加之前每次推送都會被拒絕:請跑 {command} --email <地址>",
  "✓ deploy key {id} deleted from {repo}": "✓ 已從 {repo} 刪掉 deploy key {id}",
  "✓ the key for {name} is deleted here": "✓ 這裡 {name} 的金鑰已刪除",
@@ -73,5 +71,19 @@
  "deploy key {id} was already gone from {repo}": "{repo} 上的 deploy key {id} 早就不在了",
  "its registry entry has no block-style enforce: to add git_push to; set it by hand": "它的登錄項目沒有區塊格式的 enforce: 可以加 git_push;請手動設定",
  "its registry entry's enforce.git_push isn't in block style; set it by hand": "它的登錄項目裡 enforce.git_push 不是區塊格式;請手動設定",
- "writing enforce.git_push into projects/{name}.yaml wouldn't read back as intended; set it by hand: enforce.git_push: {policy}": "把 enforce.git_push 寫進 projects/{name}.yaml 後讀回來會跟預期不同;請手動設定:enforce.git_push: {policy}"
+ "writing enforce.git_push into projects/{name}.yaml wouldn't read back as intended; set it by hand: enforce.git_push: {policy}": "把 enforce.git_push 寫進 projects/{name}.yaml 後讀回來會跟預期不同;請手動設定:enforce.git_push: {policy}",
+ "gh isn't signed in to github.com ({why}): sign in with gh auth login and run this again; nothing was changed": "gh 沒有登入 github.com({why}):用 gh auth login 登入後再跑一次;什麼都沒改",
+ "To push {name}'s branches, the platform will use your gh login ({account}) on github.com/{repo} to add a deploy key with WRITE access to that repo. The key can write only that repo, nothing else of your account. A deploy key titled \"{title}\" that the platform added there before is replaced.": "為了推 {name} 的分支,平台會用你的 gh 登入({account})在 github.com/{repo} 加一把有寫入權限(WRITE)的 deploy key。這把 key 只能寫這個 repo,碰不到你帳號的其他東西。平台之前在那裡加的、標題是「{title}」的 deploy key 會被換掉。",
+ "It first deletes the platform's earlier deploy key {id} from github.com/{old}.": "它會先從 github.com/{old} 刪掉平台之前的 deploy key {id}。",
+ "The platform keeps the private key in its secrets folder (not in the cloud backup) and uses it only to push the branches of {name} that its sessions ask for, after the automatic checks.": "私鑰由平台放在它的 secrets 資料夾(不進雲端備份),只用來推 {name} 的 session 要求推的分支,而且是在自動檢查之後。",
+ "To undo it: {command} --revoke (deletes the key at GitHub and here).": "要撤銷:{command} --revoke(GitHub 上和這裡的 key 都會刪掉)。",
+ "Nobody said yes to using your gh login, so no deploy key was made for {name} and nothing was changed: run {command} yourself (it says what it will do and asks first), or give --branches others|all": "沒有人同意使用你的 gh 登入,所以沒有替 {name} 建 deploy key,也什麼都沒改:請自己跑 {command}(它會先說明要做什麼再問你),或給 --branches others|all",
+ "Going ahead: the branches were given on the command line, which counts as your yes.": "繼續:分支是在指令上給的,這就算你同意了。",
+ "Add the deploy key with your gh login?": "要用你的 gh 登入加這把 deploy key 嗎?",
+ "You said no: no deploy key was added for {name}, and nothing was changed. {command} asks again whenever you want it.": "你選了不要:沒有替 {name} 加 deploy key,什麼都沒改。想要的時候再跑 {command},它會再問一次。",
+ "Which branches may the platform push for {name}? none: you push yourself; others: every branch but the default; all: the default branch too. others and all add a deploy key with write access to the repo with your gh login: you are told what that does and asked first.": "平台可以替 {name} 推哪些分支?none:你自己推;others:預設分支以外的每個分支;all:連預設分支也推。others 和 all 會用你的 gh 登入在 repo 加一把有寫入權限的 deploy key:會先告訴你這代表什麼,再問你。",
+ "Using your gh login ({account}) to delete the platform's deploy keys for {name} from {repos}, as you asked.": "照你的要求,用你的 gh 登入({account})從 {repos} 刪掉平台替 {name} 加的 deploy key。",
+ "not signed in": "沒有登入",
+ "{project}: decide what the platform may push for it{why}: {command}. others or all adds a deploy key with write access to {repo} (that repo only) using your gh login, after saying so and asking; the platform keeps the private key in its secrets folder, not in the cloud backup, and uses it only to push this project's branches its sessions ask for, after the automatic checks. Undo: {command} --revoke": "{project}:決定平台可以替它推哪些分支{why}:{command}。選 others 或 all 會用你的 gh 登入,在 {repo} 加一把有寫入權限的 deploy key(只能寫那個 repo),加之前會先說明並問你;私鑰由平台放在它的 secrets 資料夾,不進雲端備份,只用來在自動檢查之後推這個專案的 session 要求推的分支。撤銷:{command} --revoke",
+ "its GitHub repo": "它的 GitHub repo"
 }

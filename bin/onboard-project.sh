@@ -12,7 +12,7 @@
 # and the script won't guess and clear it away.
 #
 # Usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all]
-#                           [--push-email <address>]... <local project path>
+#                           [--push-confirm] [--push-email <address>]... <local project path>
 #   run on the hub machine, new projects go in ~/workspace/<name> (since 2026-10-15 every project is on the hub
 #   machine)
 #   --public     make the GitHub repo public when creating it (default private)
@@ -22,11 +22,13 @@
 #                run or read untrusted code or content (docs/design/platform-push.md section 1). Default: not
 #                sandboxed (--no-sandbox), as before
 #   --push       for a sandboxed project with a remote, which branches the platform may push for its sessions: none (you
-#                push yourself), others (every branch but the default), all. Without it the remote's visibility
-#                decides (an anonymous probe): private: all; public or can't tell: none, plus a one-time owner to-do
-#                to run `brunna push setup <name>` (also when the run came from an agent session). Anything but none
-#                makes the platform's push grant first (a write deploy key, bin/git_push_grant.py); if that fails it
-#                stays none, with the to-do saying why
+#                push yourself), others (every branch but the default), all. Without it: none, plus a one-time owner
+#                to-do to run `brunna push setup <name>`, whatever the remote's visibility (also when the run came from
+#                an agent session). others or all makes the platform's push grant first (a write deploy key added with
+#                your gh login, bin/git_push_grant.py): giving the flag is your yes, and what it does is printed first;
+#                if that fails it stays none, with the to-do saying why
+#   --push-confirm  the --push given was a person's typed answer (brunna connect's question): after what it does is
+#                printed, it still asks [y/N] before your gh login adds the key; a no leaves none and the to-do
 #   --push-email the commit emails the platform's pushes may carry (repeatable; default: check 6's proposal)
 #
 # What it does (in order):
@@ -84,6 +86,7 @@ while [ $# -gt 0 ]; do
     --push-email)
       [ -n "${2:-}" ] || fail "$(hub_msg "--push-email takes an address")"
       PUSH_ARGS+=(--push-email "$2"); shift 2 ;;
+    --push-confirm) PUSH_ARGS+=(--confirm); shift ;;
     --) shift; break ;;
     -*) fail "$(hub_msg "unknown argument: {arg}" arg="$1")" ;;
     *) break ;;

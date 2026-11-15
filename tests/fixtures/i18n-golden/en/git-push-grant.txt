@@ -70,26 +70,47 @@ refused: it has no remote (paths.origin): there is nothing to push to
 proj: not_needed — no grant, and none needed while the platform pushes nothing for it
 --- stderr
 
-=== public, nobody answering: none: setup proj --yes
-[exit 0]
+=== public, nobody answering: none and the to-do: setup proj --yes
+[exit 2]
 --- stdout
-The remote is public. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
-✓ projects/proj.yaml: enforce.git_push: {"branches": "none", "visibility": "public"}
+Nobody said yes to using your gh login, so no deploy key was made for proj and nothing was changed: run brunna push setup proj yourself (it says what it will do and asks first), or give --branches others|all
+An owner to-do asks for brunna push setup proj
 --- stderr
 
 === the key doesn't work: setup proj --yes --branches all
 [exit 1]
 --- stdout
 The remote is public. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
+To push proj's branches, the platform will use your gh login (octo) on github.com/o/proj to add a deploy key with WRITE access to that repo. The key can write only that repo, nothing else of your account. A deploy key titled "brunna push: proj" that the platform added there before is replaced.
+The platform keeps the private key in its secrets folder (not in the cloud backup) and uses it only to push the branches of proj that its sessions ask for, after the automatic checks.
+To undo it: brunna push setup proj --revoke (deletes the key at GitHub and here).
+Going ahead: the branches were given on the command line, which counts as your yes.
 --- stderr
 failed: the new deploy key didn't work (GitHub refused the deploy key (it was removed, or gh's sign-in that added it was revoked)); it was removed again
+
+=== interactive, no to the key: setup proj
+[exit 2]
+--- stdout
+The remote is private. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
+Which branches may the platform push for proj? none: you push yourself; others: every branch but the default; all: the default branch too. others and all add a deploy key with write access to the repo with your gh login: you are told what that does and asked first.
+none, others or all? [all] all
+To push proj's branches, the platform will use your gh login (octo) on github.com/o/proj to add a deploy key with WRITE access to that repo. The key can write only that repo, nothing else of your account. A deploy key titled "brunna push: proj" that the platform added there before is replaced.
+The platform keeps the private key in its secrets folder (not in the cloud backup) and uses it only to push the branches of proj that its sessions ask for, after the automatic checks.
+To undo it: brunna push setup proj --revoke (deletes the key at GitHub and here).
+Add the deploy key with your gh login? [y/N] n
+You said no: no deploy key was added for proj, and nothing was changed. brunna push setup proj asks again whenever you want it.
+--- stderr
 
 === interactive: setup proj
 [exit 0]
 --- stdout
 The remote is private. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
-Which branches may the platform push for proj? none: you push yourself; others: every branch but the default; all: the default branch too.
+Which branches may the platform push for proj? none: you push yourself; others: every branch but the default; all: the default branch too. others and all add a deploy key with write access to the repo with your gh login: you are told what that does and asked first.
 none, others or all? [all] all
+To push proj's branches, the platform will use your gh login (octo) on github.com/o/proj to add a deploy key with WRITE access to that repo. The key can write only that repo, nothing else of your account. A deploy key titled "brunna push: proj" that the platform added there before is replaced.
+The platform keeps the private key in its secrets folder (not in the cloud backup) and uses it only to push the branches of proj that its sessions ask for, after the automatic checks.
+To undo it: brunna push setup proj --revoke (deletes the key at GitHub and here).
+Add the deploy key with your gh login? [y/N] y
 ✓ deploy key 102 added to o/proj with write access, and checked (<FP>)
 Commit emails the platform's pushes may carry (comma-separated) [owner@example.org, 42+octo@users.noreply.github.com] 
 ✓ projects/proj.yaml: enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"], "visibility": "private"}
@@ -143,6 +164,7 @@ The platform pushes nothing for proj now; its deploy key stays at GitHub until y
 === revoke: setup proj --revoke
 [exit 0]
 --- stdout
+Using your gh login (octo) to delete the platform's deploy keys for proj from github.com/o/proj, as you asked.
 ✓ deploy key 102 deleted from o/proj
 ✓ the key for proj is deleted here
 --- stderr
@@ -150,6 +172,7 @@ The platform pushes nothing for proj now; its deploy key stays at GitHub until y
 === revoke again: setup proj --revoke
 [exit 0]
 --- stdout
+Using your gh login (octo) to delete the platform's deploy keys for proj from github.com/o/proj, as you asked.
 proj has no grant here
 --- stderr
 

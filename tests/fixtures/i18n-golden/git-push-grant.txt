@@ -70,26 +70,47 @@
 proj: not_needed — 沒有授權,平台不替它推任何東西時也不需要
 --- stderr
 
-=== public, nobody answering: none: setup proj --yes
-[exit 0]
+=== public, nobody answering: none and the to-do: setup proj --yes
+[exit 2]
 --- stdout
-這個遠端是公開的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
-✓ projects/proj.yaml:enforce.git_push: {"branches": "none", "visibility": "public"}
+沒有人同意使用你的 gh 登入,所以沒有替 proj 建 deploy key,也什麼都沒改:請自己跑 brunna push setup proj(它會先說明要做什麼再問你),或給 --branches others|all
+已開一個主人待辦,請跑 brunna push setup proj
 --- stderr
 
 === the key doesn't work: setup proj --yes --branches all
 [exit 1]
 --- stdout
 這個遠端是公開的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
+為了推 proj 的分支,平台會用你的 gh 登入(octo)在 github.com/o/proj 加一把有寫入權限(WRITE)的 deploy key。這把 key 只能寫這個 repo,碰不到你帳號的其他東西。平台之前在那裡加的、標題是「brunna push: proj」的 deploy key 會被換掉。
+私鑰由平台放在它的 secrets 資料夾(不進雲端備份),只用來推 proj 的 session 要求推的分支,而且是在自動檢查之後。
+要撤銷:brunna push setup proj --revoke(GitHub 上和這裡的 key 都會刪掉)。
+繼續:分支是在指令上給的,這就算你同意了。
 --- stderr
 失敗:新的 deploy key 不能用(GitHub 拒絕了這把 deploy key(它被刪了,或是加它的 gh 登入被撤銷了));已經再刪掉了
+
+=== interactive, no to the key: setup proj
+[exit 2]
+--- stdout
+這個遠端是私有的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
+平台可以替 proj 推哪些分支?none:你自己推;others:預設分支以外的每個分支;all:連預設分支也推。others 和 all 會用你的 gh 登入在 repo 加一把有寫入權限的 deploy key:會先告訴你這代表什麼,再問你。
+none、others 還是 all? [all] all
+為了推 proj 的分支,平台會用你的 gh 登入(octo)在 github.com/o/proj 加一把有寫入權限(WRITE)的 deploy key。這把 key 只能寫這個 repo,碰不到你帳號的其他東西。平台之前在那裡加的、標題是「brunna push: proj」的 deploy key 會被換掉。
+私鑰由平台放在它的 secrets 資料夾(不進雲端備份),只用來推 proj 的 session 要求推的分支,而且是在自動檢查之後。
+要撤銷:brunna push setup proj --revoke(GitHub 上和這裡的 key 都會刪掉)。
+要用你的 gh 登入加這把 deploy key 嗎? [y/N] n
+你選了不要:沒有替 proj 加 deploy key,什麼都沒改。想要的時候再跑 brunna push setup proj,它會再問一次。
+--- stderr
 
 === interactive: setup proj
 [exit 0]
 --- stdout
 這個遠端是私有的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
-平台可以替 proj 推哪些分支?none:你自己推;others:預設分支以外的每個分支;all:連預設分支也推。
+平台可以替 proj 推哪些分支?none:你自己推;others:預設分支以外的每個分支;all:連預設分支也推。others 和 all 會用你的 gh 登入在 repo 加一把有寫入權限的 deploy key:會先告訴你這代表什麼,再問你。
 none、others 還是 all? [all] all
+為了推 proj 的分支,平台會用你的 gh 登入(octo)在 github.com/o/proj 加一把有寫入權限(WRITE)的 deploy key。這把 key 只能寫這個 repo,碰不到你帳號的其他東西。平台之前在那裡加的、標題是「brunna push: proj」的 deploy key 會被換掉。
+私鑰由平台放在它的 secrets 資料夾(不進雲端備份),只用來推 proj 的 session 要求推的分支,而且是在自動檢查之後。
+要撤銷:brunna push setup proj --revoke(GitHub 上和這裡的 key 都會刪掉)。
+要用你的 gh 登入加這把 deploy key 嗎? [y/N] y
 ✓ 已把可寫的 deploy key 102 加到 o/proj,也檢查過了(<FP>)
 平台推送的 commit 可以帶哪些 email(用逗號分隔) [owner@example.org, 42+octo@users.noreply.github.com] 
 ✓ projects/proj.yaml:enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"], "visibility": "private"}
@@ -143,6 +164,7 @@ proj: not_set_up — 授權是給 o/proj 的,但 paths.origin 現在是 o/other:
 === revoke: setup proj --revoke
 [exit 0]
 --- stdout
+照你的要求,用你的 gh 登入(octo)從 github.com/o/proj 刪掉平台替 proj 加的 deploy key。
 ✓ 已從 o/proj 刪掉 deploy key 102
 ✓ 這裡 proj 的金鑰已刪除
 --- stderr
@@ -150,6 +172,7 @@ proj: not_set_up — 授權是給 o/proj 的,但 paths.origin 現在是 o/other:
 === revoke again: setup proj --revoke
 [exit 0]
 --- stdout
+照你的要求,用你的 gh 登入(octo)從 github.com/o/proj 刪掉平台替 proj 加的 deploy key。
 這裡沒有 proj 的授權
 --- stderr
 

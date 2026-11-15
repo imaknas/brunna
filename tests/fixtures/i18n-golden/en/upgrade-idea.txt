@@ -23,7 +23,7 @@ exit 0
   2. gh repo create o/idea-7 --private + push, origin = <TMP>/a/remotes/o/idea-7.git
   3. registry projects/idea-7.yaml: type: project, paths.origin: <TMP>/a/remotes/o/idea-7.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 (dry-run; add --apply to run it)
 --- stderr
 
@@ -40,7 +40,7 @@ exit 0
   2. gh repo create o/garden --public + push, origin = <TMP>/a/remotes/o/garden.git
   3. registry projects/garden.yaml: type: project, paths.origin: <TMP>/a/remotes/o/garden.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 (dry-run; add --apply to run it)
 --- stderr
 
@@ -63,7 +63,7 @@ exit 0
   2. o/idea-7 on GitHub was created by the previous run: push only, origin = <TMP>/a/remotes/o/idea-7.git
   3. registry projects/idea-7.yaml: type: project, paths.origin: <TMP>/a/remotes/o/idea-7.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 (dry-run; add --apply to run it)
 --- stderr
 
@@ -86,7 +86,7 @@ exit 1
   2. gh repo create o/idea-7 --private + push, origin = <TMP>/a/remotes/o/idea-7.git
   3. registry projects/idea-7.yaml: type: project, paths.origin: <TMP>/a/remotes/o/idea-7.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 --- stderr
 upgrade-idea: gh repo create failed: HTTP 502: bad gateway
 
@@ -97,7 +97,7 @@ exit 1
   2. gh repo create o/garden --private + push, origin = <TMP>/a/remotes/o/garden.git
   3. registry projects/garden.yaml: type: project, paths.origin: <TMP>/a/remotes/o/garden.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 --- stderr
 rename-project: folder is busy
 upgrade-idea: rename-project.sh failed; stopping here (the GitHub repo is not created yet)
@@ -109,7 +109,7 @@ exit 0
   2. gh repo create o/idea-7 --private + push, origin = <TMP>/a/remotes/o/idea-7.git
   3. registry projects/idea-7.yaml: type: project, paths.origin: <TMP>/a/remotes/o/idea-7.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 No platform push for idea-7: paths.origin <TMP>/a/remotes/o/idea-7.git is not a GitHub remote: the platform pushes only to GitHub, through a deploy key (no other forge, no local path)
 Done: idea-7 is now the project idea-7 (<TMP>/a/remotes/o/idea-7.git)
 --- stderr
@@ -145,7 +145,7 @@ exit 1
   2. gh repo create o/garden --private + push, origin = <TMP>/b/remotes/o/garden.git
   3. registry projects/garden.yaml: type: project, paths.origin: <TMP>/b/remotes/o/garden.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 --- stderr
 upgrade-idea: gh repo create failed: HTTP 502: bad gateway
 
@@ -162,7 +162,7 @@ exit 0
   2. gh repo create o/garden --private + push, origin = <TMP>/b/remotes/o/garden.git
   3. registry projects/garden.yaml: type: project, paths.origin: <TMP>/b/remotes/o/garden.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 (dry-run; add --apply to run it)
 --- stderr
 
@@ -179,6 +179,6 @@ exit 1
   2. gh repo create o/garden --private + push, origin = <TMP>/d/remotes/o/garden.git
   3. registry projects/garden.yaml: type: project, paths.origin: <TMP>/d/remotes/o/garden.git (purpose/enforce/privacy kept)
   4. add origin to mirror-list.txt, regenerate index.md, commit brunna
-  5. the platform's push: by the new repo's visibility (private: all; public: none and a to-do)
+  5. the platform's push: none, and a to-do to decide with brunna push setup
 --- stderr
 upgrade-idea: <TMP>/d/home/workspace/garden: its history could not be bundled (sandboxed-run: garden is not in the registry; not run (a sandboxed project's service or job never runs unsandboxed))
