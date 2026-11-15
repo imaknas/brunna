@@ -1,6 +1,22 @@
 $ <HUB>/bin/agenthub --help
 [exit 0]
 --- stdout
+brunna:在你自己的電腦上，由 AI agent 經營的很多個專案。
+
+大部分時候你只要跟你的 agent 說話，其餘的 brunna 由它們替你操作。你自己會用到的:
+  brunna init              在這台機器上裝好 brunna(或交給你的 agent:README「Set up through your agent」)
+  brunna glance            有什麼要你處理、平台是否正常
+  brunna owner list        等你決定的事和你的待辦(有助理時會送到助理那裡)
+  brunna push <專案>       把沙盒專案的成果推到它的遠端;先列出 commit 再問你
+  brunna doctor            覺得哪裡壞了的時候
+  brunna upgrade           升到最新版
+
+其他全部(專案、config、排程、專案 session 用的指令):brunna help all
+--- stderr
+
+$ <HUB>/bin/agenthub help all
+[exit 0]
+--- stdout
 brunna 的單一入口(docs/design/new-user.md 3.4)。薄薄一層分派,不重寫既有腳本。
 
 名稱是 `brunna`(2026-10-29:`hub` 跟 GitHub 舊的 hub CLI 撞名;`bin/hub` 留著轉過來)。`brunna install-cli` 在

@@ -50,6 +50,12 @@ that day; they are listed at the end.
 - Big changes get a blind review of the design before building, and of the code before `merge-branch`.
 - The README stays lean; new features go to `docs/` and the release notes.
 - Wording never makes the personal assistant sound required.
+- **The owner's surface stays small** (11-16): the system may be complex, but the complexity lands on the platform's
+  agents, never on the owner. The owner talks to agents, answers one list of decisions, and glances at the state. A
+  new feature adds no command the owner has to run: a decision reaches the owner as a question to answer to any agent,
+  and the agent runs the command. `brunna --help` lists only the owner's few commands (`help all` has the rest);
+  `tests/test_owner_surface.py` checks both. Still leaking (11-16): every push of a sandboxed project needs the owner at a
+  terminal, and security questions reach the owner in the platform's own terms.
 
 ## What is left
 

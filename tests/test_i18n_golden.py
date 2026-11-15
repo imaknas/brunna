@@ -101,7 +101,7 @@ class Golden(unittest.TestCase):
 
     # --- help texts ---------------------------------------------------------------------------------------------
     def test_help(self):
-        out = [self.run_(BIN / "agenthub", "--help"), self.run_(BIN / "hubbus", "--help"),
+        out = [self.run_(BIN / "agenthub", "--help"), self.run_(BIN / "agenthub", "help", "all"), self.run_(BIN / "hubbus", "--help"),
                self.run_(BIN / "schedulectl", "--help"), self.run_(BIN / "merge-branch", "--help")]
         self.check("help", "\n".join(out))
 

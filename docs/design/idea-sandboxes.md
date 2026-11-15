@@ -217,7 +217,7 @@ platform, not by a session that can't push. Built:
 - **Signals, registry facts only** (`bin/check-idea-upgrades.py`, platform job `brunna/idea-upgrades`, nightly after
   the librarian and todo, zero LLM): an idea sandbox whose entry declares secrets, tests, `metered_models`, services or
   jobs, or network hosts beyond the package indexes (`PACKAGE_HOSTS`). Commit counts and ages were left out: they would
-  be guesses. Each one goes into a fixed block of `todo.md` and the digest, with the upgrade command. Listing is a
+  be guesses. Each one goes into a fixed block of `todo.md` and the digest as a question the owner answers to any agent session (11-16: never a command for the owner to run, `tests/test_owner_surface.py`). Listing is a
   question; only the owner upgrades. `--keep <project>` records the signals it has, and it is listed again only when a
   new one appears (`.state/idea-upgrades-kept.json`). Checked against the first real case: its entry would have been
   listed from 11-15 05:47, when it declared its first credential.

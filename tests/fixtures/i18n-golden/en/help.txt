@@ -1,6 +1,22 @@
 $ <HUB>/bin/agenthub --help
 [exit 0]
 --- stdout
+brunna: many projects run by AI agents, on a computer you own.
+
+Most of the time you only talk to your agents; they run the rest of brunna for you. What you run yourself:
+  brunna init              set brunna up on this machine (or let your agent do it: README, "Set up through your agent")
+  brunna glance            what needs you, and whether the platform is healthy
+  brunna owner list        the decisions and to-dos waiting for you (with an assistant, they reach you there)
+  brunna push <project>    publish a sandboxed project's work to its remote; shows the commits and asks first
+  brunna doctor            when something seems broken
+  brunna upgrade           move to the newest release
+
+Everything else (projects, config, scheduling, the commands project sessions use): brunna help all
+--- stderr
+
+$ <HUB>/bin/agenthub help all
+[exit 0]
+--- stdout
 brunna's single entry point (docs/design/new-user.md 3.4). A thin dispatch layer; it does not rewrite the existing scripts.
 
 The name is `brunna` (2026-10-29: `hub` clashed with GitHub's old hub CLI; `bin/hub` stays and forwards here). `brunna install-cli`

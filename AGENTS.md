@@ -85,7 +85,7 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
   `brunna agent` (a project's declared confined agent call, docs/design/project-agent-calls.md) (rules files name
   only these, never local paths); the same mailbox is also an MCP server, `brunna mcp` (`bin/mcp_server.py`, for any
   agent that supports MCP; how to register it: docs/mcp.md)
-- **What commands the platform has**: `bin/brunna --help` (init, doctor, config, llm, modules, onboard, recover,
+- **What commands the platform has**: `bin/brunna help all` (`--help` shows only the owner's few; init, doctor, config, llm, modules, onboard, recover,
   rename, status, jobs, run); which provider's model makes the platform's judgments and where the key lives:
   `brunna llm setup` (init asks too); when something is broken, run `bin/brunna doctor` first. New machine:
   `bin/setup` → `brunna init`
@@ -130,8 +130,10 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
 - **Idea sandboxes** (exploration projects the assistant opens for an idea; registry `type: idea`,
   `~/workspace/idea-<n>`, no GitHub remote): the assistant opens one through lease-runner's `POST /v1/sandboxes`
   (→ `bin/create-idea-sandbox.py`); to upgrade one to a real project use
-  `bin/upgrade-idea.py <idea-n> [--rename <new name>] [--public]` (dry-run first, then add `--apply`). Design in
-  `docs/design/idea-sandboxes.md`
+  `bin/upgrade-idea.py <idea-n> [--rename <new name>] [--public]` (dry-run first, then add `--apply`). The nightly
+  `brunna/idea-upgrades` asks the owner in `todo.md` about sandboxes that look like projects; when the owner answers
+  "upgrade X, public/private", the session runs that script; "keep X an idea" is `bin/check-idea-upgrades.py --keep X`.
+  The owner never runs either. Design in `docs/design/idea-sandboxes.md`
 - **Renaming a project** (after the GitHub repo has been renamed):
   `bin/rename-project.sh <old> <new> [--path <new path>]` — registration, memory bare repo / `~/.memory-copies` copy /
   checkpoint / mirror and the local folder all change in one go, memory history kept. Dry-run first, then add `--apply`

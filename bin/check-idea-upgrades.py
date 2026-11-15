@@ -13,8 +13,9 @@ throwaway exploration doesn't need -- the signals:
   network        it reaches hosts beyond the package indexes (PACKAGE_HOSTS)
 
 Only registry facts: commit counts and ages would be guesses. Listing is a question for the owner, never an upgrade:
-upgrading is `bin/upgrade-idea.py` (a GitHub repo, the type), which only the owner starts. An owner who wants it to stay
-an idea says so once with `--keep <project>`: the signals it has then are recorded, and it is listed again only when a
+upgrading is `bin/upgrade-idea.py` (a GitHub repo, the type), which only the owner decides. The line asks the owner a question
+to answer to any agent session, never a command to run; the agent runs `bin/upgrade-idea.py`, or, for an owner who
+wants it to stay an idea, `--keep <project>`: the signals it has then are recorded, and it is listed again only when a
 new one appears.
 
 Usage: check-idea-upgrades.py [--project P] [--apply] | --keep P
@@ -94,9 +95,10 @@ def scan(only: str | None) -> list[str]:
         if not sig or set(sig) <= set(held.get(name) or []):
             continue
         lines.append("- [ ] " + _(
-            "**{project}**: an idea sandbox that already has {signals}. Upgrade it to a project? "
-            "`bin/upgrade-idea.py {project} [--public]` (a dry run first; the sandbox stays on); "
-            "to keep it an idea: `bin/check-idea-upgrades.py --keep {project}`",
+            # a question for the owner, answered to any agent; the agent runs bin/upgrade-idea.py or --keep (never the owner)
+            "**{project}**: an idea sandbox that already has {signals}. Upgrade it to a project, with a GitHub repo of "
+            "its own (its sandbox stays on)? Tell any agent session \"upgrade {project}, public\" (or private), or "
+            "\"keep {project} an idea\"",
             project=name, signals="; ".join(describe(s, doc) for s in sig)))
     return lines
 
