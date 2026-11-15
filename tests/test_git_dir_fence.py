@@ -121,6 +121,7 @@ ENV = {"PATH": "/usr/bin:/bin", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NO
        "GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": "a@example.com", "GIT_COMMITTER_NAME": "a",
        "GIT_COMMITTER_EMAIL": "a@example.com", "LANG": "C"}
 PF = f".git/{names.current('repo_dir')}"   # the repo's platform folder
+PF2 = f".git/{names.other('repo_dir')}"    # its other spelling, which doesn't exist
 UV = f"{PF}/cache/uv"
 MARKER = f"mkdir -p {UV}/sdists-v9 && : > {UV}/sdists-v9/.git"
 
@@ -158,6 +159,8 @@ REFUSED = {
     "uv-cache-moved-out": f"{MARKER} && mv {PF}/cache moved",
     "marker-elsewhere-in-cache": f"mkdir -p {UV}/other && : > {UV}/other/.git",
     "marker-hardlinked-as-git": f"{MARKER} && mkdir m && ln {UV}/sdists-v9/.git m/.git",
+    "platform-folder-made-as-a-link": f"ln -s . {PF2}",
+    "cache-made-as-a-link": f"ln -s .. {PF}/cache",
 }
 # what still works under the fence
 WORKS = {
@@ -257,6 +260,35 @@ class Seatbelt(unittest.TestCase):
                 self.assertNotEqual(r.returncode, 0, r.stderr)
                 self.assertFalse((ws / ".git" / "hooks" / "pre-commit").exists())
                 self.assertFalse((ws / ".git" / "pre-commit").exists())
+
+    def test_a_link_made_before_never_moves_the_exception(self):
+        """The profile is computed on every start. A link at the platform folder's unused spelling or at its cache/,
+        made where nothing fenced it (a session of the project until step 4, or before the switch), leaves the rules
+        as they were: below the .git they are written as the policy names them, never resolved, so a write through
+        the link is matched in the git dir where it lands (step 1's cold review)."""
+        # (the link, where it points: relative to its folder), each to the git dir or its hooks; the marker's place
+        # as reached through the link
+        links = [(PF2, ".", f"{PF2}/cache/uv"), (PF2, "hooks", f"{PF2}/cache/uv"), (f"{PF}/cache", "..", UV)]
+        for link, target, uv in links:
+            setup = f"ln -s {target} {link}"
+            attacks = {"config": "echo x >> .git/config", "hook": "echo x > .git/hooks/pre-commit",
+                       "through-the-link": f"echo x >> {link}/config",
+                       "marker-through-the-link": f"mkdir -p {uv}/sdists-v9 && : > {uv}/sdists-v9/.git"}
+            for name, attack in attacks.items():
+                with self.subTest(setup=setup, attack=name):
+                    tmp, ws, t, env = self.fixture()
+                    with mock.patch.object(seatbelt, "TMP", [str(t)]):
+                        before = seatbelt.service_profile(pol_for(ws, ON), [ws])
+                        subprocess.run(["/bin/sh", "-c", setup], cwd=ws, env=env, check=True)   # outside any fence
+                        prof = seatbelt.service_profile(pol_for(ws, ON), [ws])
+                    self.assertEqual(prof, before, "the link changed the rules")
+                    config = (ws / ".git" / "config").read_text()
+                    r = subprocess.run(["/usr/bin/sandbox-exec", "-p", prof, "/bin/sh", "-c", attack], cwd=ws,
+                                       env=env, capture_output=True, text=True, timeout=60)
+                    self.assertNotEqual(r.returncode, 0, r.stderr)
+                    self.assertEqual((ws / ".git" / "config").read_text(), config)
+                    self.assertFalse((ws / ".git" / "hooks" / "pre-commit").exists())
+                    self.assertFalse(any(x.name == ".git" for x in (ws / ".git").rglob("*")))
 
     def test_limits(self):
         """A rename is checked only at its two ends: a folder already holding a .git or a HEAD file, made outside every

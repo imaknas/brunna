@@ -183,6 +183,16 @@ def _glob_re(glob: str) -> str:
     return "[^/]+".join(re.escape(x) for x in glob.split("*"))
 
 
+def _fence_spellings(p) -> list[str]:
+    """A path of the fence: the folder above its .git resolved (both spellings, as spellings()), the rest kept as
+    written. Nothing at or below the .git is resolved: the project can make entries there (a link at the platform
+    folder's unused spelling, at cache/), and a profile computed from what it made would move the exception onto the
+    git dir itself on the next run."""
+    parts = pathlib.PurePosixPath(p).parts
+    i = parts.index(".git") if ".git" in parts else len(parts)
+    return [str(pathlib.PurePosixPath(h, *parts[i:])) for h in spellings(pathlib.PurePosixPath(*parts[:i]))]
+
+
 def git_fence_rules(pol: dict) -> list[str]:
     """The git fence (policy git_fence; docs/design/git-broker.md, "The fence", r2 B2), for a project whose git goes
     through the platform; nothing at all for any other. Denies only, after the allows, so nothing written later opens
@@ -193,7 +203,10 @@ def git_fence_rules(pol: dict) -> list[str]:
     - no entry named HEAD that isn't a folder, anywhere (no git-dir shape under another name; a folder HEAD/ is
       ordinary);
     - in each repo's platform folder: no .git below it but uv's marker, exactly; the folder itself and every folder on
-      the way to the marker can't be removed or renamed (moving the bucket out would carry the marker with it).
+      the way to the marker can't be removed or renamed (moving the bucket out would carry the marker with it), nor
+      made as a link.
+    Its paths are written as the policy names them below the folder that holds the .git (_fence_spellings): a link
+    the project made there leads a write elsewhere, where the deny matches it, and never moves the exception.
     Seatbelt matches the path the volume resolves, so a folded spelling (.GIT, head) is the same entry (measured,
     git-config-fence.md), and a write through a link is matched where it lands."""
     import re
@@ -202,7 +215,7 @@ def git_fence_rules(pol: dict) -> list[str]:
         return []
     names = "|".join(re.escape(n) for n in f["names"])
     files = "|".join(re.escape(n) for n in f["files"])
-    dirs = [s for d in f["repo_dirs"] for s in spellings(d)]
+    dirs = [s for d in f["repo_dirs"] for s in _fence_spellings(d)]
     keep = "".join(f" (require-not (subpath {q(d)}))" for d in dirs)
     out = ["; git dirs (git through the platform): no .git anywhere, no HEAD that isn't a folder, each repo's platform "
            "folder kept",
@@ -211,7 +224,7 @@ def git_fence_rules(pol: dict) -> list[str]:
     for d in dirs:
         marks = []
         for m in f.get("markers") or []:
-            for root in spellings(m["root"]):
+            for root in _fence_spellings(m["root"]):
                 if not (root == d or root.startswith(d + "/")):
                     continue
                 marks.append(f'(require-not (regex #"^{re.escape(root)}/{_glob_re(m["glob"])}$"))')
@@ -219,10 +232,12 @@ def git_fence_rules(pol: dict) -> list[str]:
                 parts = pathlib.PurePosixPath(root).relative_to(d).parts + pathlib.PurePosixPath(m["glob"]).parts[:-1]
                 for i in range(1, len(parts) + 1):
                     path = "/".join([re.escape(d), *(_glob_re(p) for p in parts[:i])])
-                    out.append(f'(deny file-write-unlink (require-all (regex #"^{path}$") (vnode-type DIRECTORY)))')
+                    out += [f'(deny file-write-unlink (require-all (regex #"^{path}$") (vnode-type DIRECTORY)))',
+                            f'(deny file-write-create (require-all (regex #"^{path}$") (vnode-type SYMLINK)))']
         out.append(f'(deny file-write* (require-all (regex #"^{re.escape(d)}/(.*/)?({names})(/|$)")'
                    + "".join(" " + x for x in marks) + "))")
-        out.append(f"(deny file-write-unlink (literal {q(d)}))")
+        out += [f"(deny file-write-unlink (literal {q(d)}))",
+                f"(deny file-write-create (require-all (literal {q(d)}) (vnode-type SYMLINK)))"]
     return out
 
 

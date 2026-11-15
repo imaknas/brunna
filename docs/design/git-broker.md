@@ -1511,12 +1511,20 @@ applies: services, command jobs, the test runner's wrap, the platform's git work
 - no `HEAD` that isn't a folder, anywhere;
 - below each repo dir, no `.git` except uv's marker, matched exactly;
 - the repo dir itself, and each folder on the way to the marker's bucket, can't be removed or renamed
-  (`file-write-unlink`; the folders only as folders). Moving the bucket out would carry the marker with it.
+  (`file-write-unlink`; the folders only as folders), nor made as a link. Moving the bucket out would carry the
+  marker with it.
 
 With the switch off, it adds nothing at all, not even a comment.
 
-**What a missing repo dir does.** The sandbox may make it. A link made there gains nothing: a write through
-`.git/brunna` → `hooks` or → `.` is matched where it lands, in the git dir, and is refused (tested).
+**Paths below the `.git` are never resolved** (`seatbelt._fence_spellings`). The profile is computed on every start, and
+the first build resolved every path of the fence. A link at the platform folder's unused spelling (`.git/agent-hub` →
+`.`), or at its `cache/`, made where nothing fenced it, would then have put the git dir itself into the next run's
+exception (the cold review of the build, 11-15; the test fails against that version). Now only the folder holding the
+`.git` is resolved, and the rest is written as the policy names it. Such a link changes no rule, and a write through it
+is matched in the git dir where it lands, and refused (tested, with the link made outside the fence before the run).
+
+**What a missing repo dir does.** The sandbox may make it as a folder (as today's outbox does), not as a link. A link
+made there by anything else gains nothing (above).
 
 **Linux.** Landlock doesn't declare the new guarantee. `isolation.NEEDS` / `unmet()` refuses a policy that carries the
 fence on an adapter without it: `sandboxed-run` exits 78 before anything runs, and `exec_service` raises. So a
@@ -1553,7 +1561,8 @@ Refused under the fence:
 - the platform folder renamed or removed; a `.git` below it;
 - a linked worktree's gitfile rewritten;
 - `git commit`;
-- uv's bucket or its cache moved out; a `.git` elsewhere in the cache; the marker hard-linked as a `.git`.
+- uv's bucket or its cache moved out; a `.git` elsewhere in the cache; the marker hard-linked as a `.git`;
+- the platform folder's other spelling, or its `cache/`, made as a link.
 
 A run of all of them together left no `.git`, gitfile or `HEAD` file behind.
 
@@ -1573,6 +1582,9 @@ keeps a fenced writer from building one; it can't stop one that exists from bein
 - A nested `.git` needs every writer of the project fenced, so it is fully closed only after step 4. Even then, a
   `.git` that another project or the owner stages in the shared temp area can be moved in. That is the same exposure
   as that writer's own nested repos.
+
+**Covered by the rule text only:** the runtime folder's repo dir and the cap-run profile (the same rules, asserted in
+the profile's text). Real Seatbelt runs cover the workspace, under the service profile.
 
 **Live check (11-15, this machine).** Each live project's renderings were compared before and after the change: Claude
 settings and env, and the Seatbelt service and cap-run profiles. All were byte-identical, and so was
