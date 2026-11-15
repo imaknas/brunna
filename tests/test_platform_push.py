@@ -11,6 +11,7 @@ with a control: plain git (or the same thing without the trap) does what the pla
     bin/run-tests <a folder holding this module>
 """
 import contextlib
+import datetime
 import io
 import json
 import os
@@ -519,7 +520,7 @@ class Worker(Push):
         self.assertNotEqual(os.getsid(pid), os.getsid(0), "in the caller's session")
         ppid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout)
         self.assertNotEqual(ppid, os.getpid(), "still the caller's child")
-        self.assertTrue(push_queue.alive({"pid": pid, "start": start}))
+        self.assertTrue(push_queue.alive({"pid": pid, "start": start, "spawned_at": push_queue.now_iso()}))
         child = subprocess.Popen(["sleep", "5"])
         self.addCleanup(child.wait)
         self.addCleanup(child.kill)
@@ -1375,8 +1376,8 @@ class ThirdReview(Review):
     def test_n1_dotenv(self):
         got = push_checks.dotenv_values('export\tA="x\\"y-0123456789"\nB="multi\nline-0123456789"\nC=plain0123456789 # c\n'
                                         "D='q # x 0123456789'\n")
-        self.assertEqual(got, {"A": 'x"y-0123456789', "B": "multi\nline-0123456789", "C": "plain0123456789",
-                               "D": "q # x 0123456789"})
+        self.assertEqual(got, {"A": ['x"y-0123456789'], "B": ["multi\nline-0123456789"], "C": ["plain0123456789"],
+                               "D": ["q # x 0123456789"]})
 
     def test_n3_a_letter_key_carries_the_take_in(self):
         rid = self.request()
@@ -1384,6 +1385,85 @@ class ThirdReview(Review):
         self.serve()
         [(_p, _t, key)] = self.letters
         self.assertTrue(key.startswith(f"push-{rid}-") and key != f"push-{rid}", key)
+
+
+class FourthReview(Review):
+    """The fourth review: an entry that can't be removed never blocks take-in; dotenv's bad statements and repeated keys;
+    the deadline inside the match; raw name bytes; a stuck worker."""
+
+    def test_an_unremovable_entry_blocks_nothing(self):
+        d = self.push_root / "proj"
+        push_queue.ensure_folder("proj")
+        (d / "junk" / "locked").mkdir(parents=True)
+        (d / "junk" / "locked" / "f").write_text("x")
+        os.chmod(d / "junk" / "locked", 0)
+        self.addCleanup(lambda: os.path.isdir(d / "junk" / "locked") and os.chmod(d / "junk" / "locked", 0o700))
+        rid = self.request()
+        said = []
+        got = push_queue.take_in("proj", log=said.append)
+        self.assertEqual(got, [rid])
+        self.serve()
+        self.assertEqual(self.result(rid)["state"], "nothing")
+        self.assertEqual(len(said), 1, said)
+        push_queue.take_in("proj", log=said.append)
+        self.assertEqual(len(said), 1, "said once")
+
+    def test_dotenv_bad_statements_and_repeated_keys(self):
+        v = self.VALUE
+        for text in (f"A='oops\nDB_PASSWORD={v}\n", f'A="oops\nDB_PASSWORD={v}\n'):
+            with self.subTest(text=text[:8]):
+                self.assertEqual(push_checks.dotenv_values(text).get("DB_PASSWORD"), [v])
+        self.assertEqual(push_checks._values(f"DB_PASSWORD={v}\nDB_PASSWORD={v}2\n".encode(), "DB_PASSWORD"),
+                         [v, f"{v}2"])
+        self.assertEqual(push_checks._values(f"DB_PASSWORD={v}\nDB_PASSWORD=\n".encode(), "DB_PASSWORD"), [v])
+
+    def test_the_deadline_inside_the_match(self):
+        d = push_checks.Declared.__new__(push_checks.Declared)
+        vals = ["k" * 12 + "x" * i for i in range(1, 300)]
+        d.names, d.hashes, d.by_key = {v: "n" for v in vals}, {}, {"k" * 12: vals}
+        import re as _re
+        d.rx = _re.compile("(?=(" + push_checks._trie_pattern(["k" * 12]) + "))")
+        text = "k" * (1 << 20)
+        t0 = time.monotonic()
+        with self.assertRaises(push_checks.Failure):
+            d.hits([text], time.monotonic() + 0.5)
+        self.assertLess(time.monotonic() - t0, 5, "it ran a whole chunk past the deadline")
+
+    def test_name_bytes_as_stored(self):
+        """A name that isn't UTF-8 counts as its bytes (one each), not as the replacement characters it is shown as."""
+        blob = subprocess.run(["git", "-C", str(self.ws), "hash-object", "-w", "--stdin"], input=b"x\n",
+                              capture_output=True, check=True).stdout.decode().strip()
+        name = b"\xff" * 100
+        tree = subprocess.run(["git", "-C", str(self.ws), "mktree", "-z"],
+                              input=b"100644 blob " + blob.encode() + b"\t" + name + b"\0",
+                              capture_output=True, check=True).stdout.decode().strip()
+        c = self.git(self.ws, "commit-tree", tree, "-p", self.base, "-m", "raw").strip()
+
+        def g(*a, input=None):
+            return subprocess.run(["git", "-C", str(self.ws), *a], input=input, capture_output=True, check=True).stdout
+        objs = push_checks.Objects(g, c, [self.base])
+        [(_m, shown, _o, n)] = objs.tree_entries_raw(objs.commit_header(c, "tree")[0])
+        self.assertEqual(n, 100)
+        self.assertEqual(len(shown.encode()), 300, "the control: shown, it is three bytes a character")
+        with mock.patch.object(push_checks, "MAX_PATH", 150):
+            objs.walk(time.monotonic() + 30)   # 100 bytes: within
+
+    def test_a_stuck_worker_is_stopped_and_its_slot_freed(self):
+        rid = self.request()
+        self.take()
+        sleeper = subprocess.Popen(["sleep", "60"], start_new_session=True)
+        self.addCleanup(sleeper.wait)
+        self.addCleanup(lambda: sleeper.poll() is None and sleeper.kill())
+        import runtime_ports
+        old = (datetime.datetime.now().astimezone() - datetime.timedelta(seconds=push_queue.WORKER_MAX_S + 60))
+        push_queue._write_json(push_queue.broker("proj") / "worker.json",
+                               {"pid": sleeper.pid, "start": runtime_ports.process_start(sleeper.pid), "id": rid,
+                                "attempts": 1, "spawned_at": old.isoformat()})
+        self.assertFalse(push_queue.alive(push_queue.worker("proj")))
+        spawned = []
+        push_queue.tick(spawn=lambda project: (spawned.append(project), (os.getpid(), None))[1])
+        self.assertEqual(sleeper.wait(10), -9, "the stuck worker was not stopped")
+        self.assertEqual(spawned, ["proj"], "its slot was not freed")
 
 
 # ---------- merge-branch's push_on_merge in a sandboxed project (section 5) ----------
