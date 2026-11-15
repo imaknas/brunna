@@ -103,9 +103,12 @@ def private_name_hits(names_text: str) -> list[str]:
     """Places in the platform repo (every versioned file) that mention a private project name: `file:line:name`."""
     pats = private_name_patterns(names_text)
     out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "-z"], capture_output=True, text=True).stdout
-    # no git (the gate's exported tree): what git would have left out is left out too, .state holding what a running test made
-    paths = [ROOT / q for q in out.split("\0") if q] or [p for p in ROOT.rglob("*") if p.is_file()
-                                                          and not {".git", ".state", ".logs"} & set(p.relative_to(ROOT).parts)]
+    # no git (the gate's exported tree): what git would have left out is left out too, .state holding what a running test
+    # made, and .shared (git-ignored, as .state): the registry index a test that runs config-check, upgrade-idea or
+    # schedulectl in the tree without a state of its own refreshes there, with its throwaway paths, while this runs
+    # (a race seen 11-16; the writers are older than this check, and the index is never versioned)
+    paths = [ROOT / q for q in out.split("\0") if q] or [
+        p for p in ROOT.rglob("*") if p.is_file() and not {".git", ".state", ".logs", ".shared"} & set(p.relative_to(ROOT).parts)]
     hits = []
     for f in sorted(paths):
         try:

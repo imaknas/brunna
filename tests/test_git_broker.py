@@ -202,12 +202,17 @@ class Fixture(unittest.TestCase):
                     if prove:
                         d.mkdir(parents=True, exist_ok=True)
                         (d / msg["nonce"]).write_text("")
-                    git_broker.send(s, b"P")
-                    git_broker.send(s, b"R", json.dumps({"argv": argv, "cwd": str(cwd or self.ws),
-                                                         "env": env or {}}).encode())
-                    if stdin:
-                        git_broker.send(s, b"I", stdin)
-                    git_broker.send(s, b"I")
+                    try:
+                        git_broker.send(s, b"P")
+                        git_broker.send(s, b"R", json.dumps({"argv": argv, "cwd": str(cwd or self.ws),
+                                                             "env": env or {}}).encode())
+                        if stdin:
+                            git_broker.send(s, b"I", stdin)
+                        git_broker.send(s, b"I")
+                    except (BrokenPipeError, ConnectionResetError):
+                        # the broker refused and closed while this side still wrote (under load, before the rest was
+                        # sent): its answer, already sent, is read below
+                        pass
                 elif k == b"O":
                     out += data
                 elif k == b"E":
@@ -543,35 +548,42 @@ class Identity(Fixture):
         real.mkdir(parents=True)
         hub = self.ws / ".hub-run"
 
+        def clear():
+            """Whatever is at .hub-run gone: a link or a FIFO unlinked (rmtree refuses a link), a folder removed."""
+            if hub.is_symlink() or (os.path.lexists(hub) and not hub.is_dir()):
+                hub.unlink()
+            elif hub.is_dir():
+                shutil.rmtree(hub)
+
         def fifo_top():
-            shutil.rmtree(hub, ignore_errors=True)
+            clear()
             os.mkfifo(hub)
 
         def fifo_git():
-            shutil.rmtree(hub, ignore_errors=True)
+            clear()
             hub.mkdir()
             os.mkfifo(hub / "git")
 
         def link_top():
-            shutil.rmtree(hub, ignore_errors=True)
+            clear()
             os.symlink(real.parent, hub)
 
         def link_git():
-            shutil.rmtree(hub, ignore_errors=True)
+            clear()
             hub.mkdir()
             os.symlink(real, hub / "git")
+        self.addCleanup(clear)
         for name, setup in (("fifo .hub-run", fifo_top), ("fifo git", fifo_git), ("link .hub-run", link_top),
                             ("link git", link_git)):
             with self.subTest(name):
                 t0 = time.monotonic()
-                code, _o, err = self.client(["commit", "--allow-empty", "-m", "x"], setup=setup, nonce_dir=real,
-                                            prove=True)
+                try:
+                    code, _o, err = self.client(["commit", "--allow-empty", "-m", "x"], setup=setup, nonce_dir=real,
+                                                prove=True)
+                finally:   # each subtest leaves nothing for the next, whatever it did (seen 11-16 under load)
+                    clear()
                 self.assertEqual(code, 2, err)
                 self.assertLess(time.monotonic() - t0, 10)
-                if hub.is_symlink() or not hub.is_dir():
-                    hub.unlink()
-                else:
-                    shutil.rmtree(hub)
 
     def test_nested_and_overlapping_projects_arent_served(self):
         self.made()
