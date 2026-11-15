@@ -232,5 +232,8 @@ Not done:
 - **Pushing from an upgraded sandboxed project**: `upgrade-idea` pushes main once from the platform's own copy; later
   pushes, `gh`, and the project's git config wait on the git broker (`git-broker.md`), which also owns "only main goes to
   the public remote". Until then the owner pushes, or the project writes to brunna.
+  **Designed 11-15 (`platform-push.md`):** the project's agent runs `brunna push` and the platform pushes after
+  automatic checks, as far as the owner's `enforce.git_push` allows; `upgrade-idea --push` sets it. "Only main goes to
+  the public remote" becomes that field plus the private-names check. `gh` and the git config still wait on the broker.
 - Turning the sandbox off on upgrade stays a separate decision of the owner (a security field).
 

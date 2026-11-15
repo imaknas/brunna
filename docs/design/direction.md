@@ -116,6 +116,15 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      pushed from a platform-owned bare repo, fast-forward only, `.github/` changes only with `enforce.git_ci`, for
      every sandboxed project whether switched on or not ("Owner-run push, built first"). Sessions' own pushes
      wait for slices b and d.
+     **Platform push (`platform-push.md`, designed 11-15, not built; the owner's principle that no person runs `git
+     push`):** a sandboxed project's agent runs `brunna push`, a request in its outbox; `hubbus dispatch` starts a
+     detached worker that runs `git_remote.py`'s pipeline with automatic checks (fast-forward, CI files, author and
+     committer emails, a secret scan, private names for public remotes, sizes) and replies by result file and `info`
+     letter; what only the owner can fix becomes an owner to-do. The owner's per-project `enforce.git_push.branches`
+     (`none | others | all`) replaces "sessions push only non-default branches"; onboarding asks whether to sandbox and
+     whether the agent may push the default branch. It supersedes slice d's session push and goes before slices b–d.
+     The owner decided (11-15) that the five existing sandboxed projects with a remote get `all`. Open for the owner:
+     the credential (the owner's or a per-repo grant), the default for public remotes, who may request.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
@@ -220,7 +229,7 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   published.
 - **Idea sandboxes:** an archive endpoint for dropped ideas. Growing up (11-15, `idea-sandboxes.md` "Growing up") is
   built: the nightly signal list, the sessions' rules text and the letter after an upgrade; pushing from an upgraded
-  sandboxed project waits on the git broker (`git-broker.md`).
+  sandboxed project is designed in `platform-push.md` (11-15), ahead of the rest of the git broker.
 - **Mail handler:** one that may change code (`mailbox-routing.md` step 4).
 - **Budgets:** per-project model budgets (today there is one platform-wide daily budget).
 - **Config pipeline:** an applier for `sync-local-setup` (`new-user.md` 1.5).
@@ -278,6 +287,11 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   lists zero as an open-source prerequisite.
 - llm-providers: the switch recommendations from shadow mode, and decision 3 (where memory notes come from for other
   agents).
+- Platform push (`platform-push.md`, "Open questions for the owner"):
+  - which credential the platform pushes with (recommended: a per-repo grant held by the platform);
+  - the non-interactive default for a public remote (recommended: `others`);
+  - who may request (recommended: the project as a whole, with "sessions only" as an option once the broker's
+    session socket exists).
 
 ### 7. Not verified on a real run
 

@@ -7,7 +7,8 @@ over both: an unsandboxed checkout can be raced into writing anywhere the owner 
 that is the owner's choice; B-1's mitigation 3 built 11-14, mitigation 2 built and removed 11-15, the last sections);
 approved by the owner 11-15; step 1 (the fence, behind the per-project switch) built 11-15, "Step 1 as built"; step
 2's build list after it (four slices, open points; not built), and slice d's push half as an owner-run command,
-built 11-15 ("Owner-run push, built first", at the end). It takes over the prevention half of
+built 11-15 ("Owner-run push, built first", at the end); slice d's session push superseded by
+`platform-push.md` (design, 11-15; "Platform push supersedes slice d's session push", at the very end). It takes over the prevention half of
 `git-config-fence.md` (the per-name fence, the narrow `brunna git` runner and the one-time install). That doc's scan stays
 as a second layer, and so do its config allowlist and its presets. Measured in scratch repos (git 2.50.1, macOS on a
 case-insensitive APFS volume). A sandboxed writer was stood in for by the platform's real Seatbelt profile
@@ -2799,3 +2800,25 @@ owner's way to push the default branch.
 - on macOS, the project's job runs under the real Seatbelt profile, with and without the git-dir fence;
 - one end-to-end run types `brunna push` in a throwaway instance: the registry entry read through its index and the
   job through the real `sandboxed-run` (Seatbelt on macOS, Landlock in `bin/linux-test`).
+
+### Platform push supersedes slice d's session push (11-15)
+
+The owner's principle (11-15): no person runs `git push`; a project's agent says "push" and the platform does it.
+`platform-push.md` designs that for sandboxed projects. Nothing above is deleted; where they differ, that doc holds for
+pushing:
+- **Superseded:** slice d's push over the session socket ("sessions only", the project's own non-default branches,
+  `--force-with-lease` there, P1 updating the remote-tracking ref after a push). A push is a request in the project's
+  outbox, taken in by `hubbus dispatch`, and run by a detached worker through `git_remote.py`'s pipeline (this
+  section's "Owner-run push") with automatic checks in place of the owner's look.
+- **Revisited:** r3 question 2's "sessions push only non-default branches" becomes the owner's per-project field
+  `enforce.git_push.branches: none | others | all`. The rest of that answer stands (no tags, `.github/**` only with
+  `enforce.git_ci`, no signing). Slice d's `validate_enforce` refusal of `push_on_merge` with `enforce.git: platform`
+  is dropped: in a sandboxed project `push_on_merge` only files a request, which the owner's field decides.
+- **What the broker still gives:** the fence (the owner's unsandboxed git, editors and agent tools safe in a project's
+  repo), commits and config through the platform, brunna's own git flows (step 5), and sessions' network reads
+  (fetch, pull, clone, other URLs). A session socket later makes "sessions only" enforceable, as an option.
+
+**Order of work, revised (11-15):**
+1. Platform push (`platform-push.md` section 9). It needs nothing from slices b–d.
+2. Slices b and c, then slice d without its push half.
+3. Steps 3–8 as before; step 5's `merge-branch` push is a platform push request.
