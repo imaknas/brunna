@@ -64,5 +64,6 @@
  "none, others or all?": "none、others 還是 all?",
  "public": "公開的",
  "private": "私有的",
- "no grant, and none needed while the platform pushes nothing for it": "沒有授權,平台不替它推任何東西時也不需要"
+ "no grant, and none needed while the platform pushes nothing for it": "沒有授權,平台不替它推任何東西時也不需要",
+ "The grant here no longer works ({why}): making a new one": "這裡的授權已經不能用了({why}):重做一份"
 }

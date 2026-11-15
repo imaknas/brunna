@@ -174,8 +174,7 @@ def anonymous_ls_remote(url: str) -> subprocess.CompletedProcess:
     place the probe reaches the network (tests replace it)."""
     with tempfile.TemporaryDirectory(prefix="push-probe-", dir=hubconf.private_tmp()) as home:
         env = {"HOME": home, "PATH": os.environ.get("PATH", "/usr/bin:/bin"), "GIT_CONFIG_NOSYSTEM": "1",
-               "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false",
-               "SSH_ASKPASS": "/bin/false", "LC_ALL": "C"}
+               "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "LC_ALL": "C"}
         try:
             return subprocess.run(["git", "-c", "credential.helper=", "ls-remote", "--heads", "--", url], cwd=home,
                                   env=env, capture_output=True, text=True, timeout=TIMEOUT_S)
@@ -289,7 +288,7 @@ def ssh_env(project: str) -> dict[str, str]:
     g = read_grant(project)
     return {"GIT_SSH_COMMAND": ssh_command(grant_dir(project) / "key", KNOWN_HOSTS[g["host"]]),
             "GIT_SSH_VARIANT": "ssh", "GIT_CONFIG_GLOBAL": str(empty_config()), "GIT_CONFIG_NOSYSTEM": "1",
-            "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/false", "SSH_ASKPASS": "/bin/false"}
+            "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": ""}   # empty: no helper asks (git reads empty as unset)
 
 
 def push_url(project: str) -> str:
@@ -429,14 +428,19 @@ def make_key(project: str) -> pathlib.Path:
 
 
 def grant(project: str, doc: dict) -> dict:
-    """A working grant for the project: the one there is, or a new one made, added at GitHub and checked. Each step that
-    fails undoes the ones before it (a deploy key added and not working is deleted again)."""
+    """A working grant for the project: the one there is when it still works at GitHub, or a new one made, added there
+    and checked. Each step that fails undoes the ones before it (a deploy key added and not working is deleted again).
+    One whose files are fine but that GitHub refuses (deleted there, gh's sign-in revoked) is made again: that is what
+    the probe's to-do asks the owner to run this for."""
     host, repo = parse_origin(origin_of(doc))
     with contextlib.suppress(NotSetUp):
         g = read_grant(project)
-        print(_("✓ the grant exists: deploy key {id} on {repo} ({fp})", id=g.get("deploy_key_id"), repo=g["repo"],
-                fp=g.get("fingerprint")))
-        return g
+        ok, why = probe(project)
+        if ok:
+            print(_("✓ the grant exists: deploy key {id} on {repo} ({fp})", id=g.get("deploy_key_id"), repo=g["repo"],
+                    fp=g.get("fingerprint")))
+            return g
+        print(_("The grant here no longer works ({why}): making a new one", why=why))
     d = grant_dir(project)
     new = make_key(project)
     try:
@@ -522,7 +526,8 @@ def write_policy(project: str, policy: dict) -> bool:
     reg = hubconf.registry_dir() / f"{project}.yaml"
     text = reg.read_text()
     doc = yaml.safe_load(text) or {}
-    doc.setdefault("enforce", {})["git_push"] = policy
+    enf = doc.setdefault("enforce", {})
+    enf["git_push"] = {**(enf.get("git_push") if isinstance(enf.get("git_push"), dict) else {}), **policy}
     if (errs := registry.validate(doc, project)):
         raise Refused(_("enforce.git_push {policy} isn't valid for {name}: {errors}", policy=shown, name=project,
                         errors="; ".join(errs)))
@@ -589,19 +594,23 @@ def setup(project: str, *, yes: bool = False, branches: str | None = None, email
     interactive = not yes and sys.stdin.isatty()
     vis = visibility(origin_of(doc))
     print(warning(vis))
+    # a rerun starts from what the registry has (the repair the probe's to-do asks for changes no policy)
+    current = git_push_of(doc)
+    default = current.get("branches") if current.get("branches") in BRANCHES else \
+        ("all" if vis == "private" else "none")
     if branches is None and not interactive and not grant_only:
-        branches = "all" if vis == "private" else "none"
+        branches = default
     if interactive and branches is None and not grant_only:
         print(_("Which branches may the platform push for {name}? none: you push yourself; others: every branch but "
                 "the default; all: the default branch too.", name=project))
-        while (branches := ask(_("none, others or all?"), "all" if vis == "private" else "none")) not in BRANCHES:
+        while (branches := ask(_("none, others or all?"), default)) not in BRANCHES:
             pass
     g = grant(project, doc) if branches != "none" or grant_only else None
     if grant_only:
         close_todo(project)
         return OK
     if branches != "none" and emails is None:
-        proposed = default_emails(vis)
+        proposed = list(current.get("emails") or []) or default_emails(vis)
         if interactive:
             got = ask(_("Commit emails the platform's pushes may carry (comma-separated)"), ", ".join(proposed))
             proposed = [e.strip() for e in got.split(",") if e.strip()]

@@ -220,6 +220,7 @@ class Grant(Base):
         env = gpg.ssh_env("proj")
         self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
+        self.assertEqual((env["GIT_ASKPASS"], env["SSH_ASKPASS"]), ("", ""), "the owner's askpass helpers are off")
         self.assertEqual(pathlib.Path(env["GIT_CONFIG_GLOBAL"]).read_text(), "", "no owner helper or insteadOf")
         cmd = shlex.split(env["GIT_SSH_COMMAND"])
         self.assertEqual(cmd[0], "ssh")
@@ -326,6 +327,38 @@ class Grant(Base):
         self.setup_grant()
         self.assertEqual(len(self.deploy_keys()), 1)
         self.assertNotEqual(self.deploy_keys()[0]["id"], first["deploy_key_id"])
+
+    def test_a_grant_github_no_longer_has_is_made_again(self):
+        """The probe's to-do asks the owner to run setup: with the key gone at GitHub (deleted there, or gh's sign-in
+        that added it revoked), setup makes a new one instead of saying the old one exists."""
+        self.setup_grant()
+        first = json.loads((self.gdir() / "grant.json").read_text())
+        (self.fake / "deploy-keys.json").write_text("[]")
+        self.assertFalse(gpg.probe("proj")[0])
+        code, out, err = self.setup_grant()
+        self.assertEqual(code, 0, err)
+        self.assertIn("no longer works", out)
+        g = json.loads((self.gdir() / "grant.json").read_text())
+        self.assertNotEqual(g["deploy_key_id"], first["deploy_key_id"])
+        self.assertNotEqual(g["fingerprint"], first["fingerprint"])
+        self.assertEqual(gpg.probe("proj"), (True, ""))
+
+    def test_a_rerun_keeps_the_policy_it_has(self):
+        """Nobody answering: what the registry has stays (a public remote set to all doesn't fall back to none), and
+        fields setup doesn't ask about (max_file_mb) are kept."""
+        have = {"branches": "all", "emails": ["42+octo@users.noreply.github.com"], "max_file_mb": 20}
+        self.docs["proj"]["enforce"]["git_push"] = dict(have)
+        reg = self.tmp / "reg" / "proj.yaml"
+        reg.write_text("v: 1\nname: proj\nenforce:\n  sandbox: true\n  git_push:\n    branches: all\n    emails:\n"
+                       "    - 42+octo@users.noreply.github.com\n    max_file_mb: 20\n")
+        self.vis = "public"
+        with mock.patch.object(gpg, "field_supported", lambda: True), mock.patch("registry.validate", lambda d, s: []), \
+                mock.patch.object(gpg, "set_identity", lambda *a: None):
+            code, out, err = self.setup_grant(branches=None)
+        self.assertEqual(code, 0, err)
+        import yaml
+        self.assertEqual(yaml.safe_load(reg.read_text())["enforce"]["git_push"], have)
+        self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1, "the grant was made for all")
 
     def test_other_forges_and_local_paths_are_refused_before_anything(self):
         for origin in ("git@gitlab.com:o/proj.git", "https://codeberg.org/o/proj", "gh-work:o/proj.git",
@@ -465,7 +498,7 @@ class Visibility(unittest.TestCase):
         self.assertNotIn("SSH_AUTH_SOCK", env)
         self.assertNotIn("GH_TOKEN", env)
         self.assertNotEqual(env["HOME"], os.environ.get("HOME"))
-        self.assertEqual(env["GIT_ASKPASS"], "/bin/false")
+        self.assertNotIn("GIT_ASKPASS", env, "the owner's askpass helper isn't carried")
         self.assertEqual(seen["argv"][:3], ["git", "-c", "credential.helper="])
 
 
@@ -529,6 +562,38 @@ class Onboard(Base):
         self.assertEqual(self.todos[-1][:4], ("--type", "done", "--task", "git-push-setup-proj-1"))
         self.assertTrue(gpg.raise_todo("proj"), "a new episode after it was closed")
         self.assertEqual(self.todos[-1][3], "git-push-setup-proj-2")
+
+    def test_the_bus_takes_the_todo_and_its_close(self):
+        """What owner_notify sends, sent to a real hubbus (in-process, on a throwaway bus), with records on and off: the
+        to-do is raised under its key, and the done closes that key."""
+        with mock.patch("sys.stdout", io.StringIO()):
+            gpg.raise_todo("proj", "the deploy key is gone")
+            gpg.close_todo("proj")
+        self.assertEqual(len(self.todos), 2)
+        for records in (False, True):
+            with self.subTest(records=records):
+                loader = importlib.machinery.SourceFileLoader(f"hubbus_push_{records}", str(BIN / "hubbus"))
+                spec = importlib.util.spec_from_loader(loader.name, loader)
+                m = importlib.util.module_from_spec(spec)
+                loader.exec_module(m)
+                m.DB = self.tmp / f"bus-{records}.db"
+                m.log = lambda s: None
+                m.projects = lambda: {hubconf.hub_project(): self.tmp, "proj": self.tmp}
+                c = m.db()
+                m.db = lambda *a, **k: c
+                m.RECORDS = records
+                for args in self.todos:
+                    argv = ["hubbus", "send", "--from", hubconf.hub_project(), "--to", hubconf.owner_address(), *args]
+                    with mock.patch.object(sys, "argv", argv), mock.patch("sys.stdout", io.StringIO()):
+                        try:
+                            m.main()
+                        except SystemExit as e:
+                            self.assertIn(e.code, (0, None), args)
+                rows = c.execute("SELECT payload FROM events").fetchall()
+                text = " ".join(str(r[0]) for r in rows)
+                self.assertIn("git-push-setup-proj-1", text)
+                self.assertIn("push setup proj", text)
+                c.close()
 
     def test_extra_merges_the_sandbox_into_what_the_caller_registers(self):
         self.assertEqual(json.loads(gpg.extra('{"type": "idea", "enforce": {"work": true}}', True)),
