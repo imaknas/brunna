@@ -163,9 +163,9 @@ def ssh_url(host: str, repo: str) -> str:
 
 
 def https_url(origin: str) -> str | None:
-    """The https form of a remote, for the anonymous probe: the URL itself, or the mechanical one for host:path and ssh://.
-    None for a local path."""
-    if origin.startswith("https://"):
+    """The https form of a remote, for the anonymous probe: the URL itself (an http:// one too), or the mechanical one for
+    host:path and ssh://. None for a local path, and for a scheme with no such form (git://)."""
+    if origin.startswith(("https://", "http://")):
         return origin
     m = (re.fullmatch(r"(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+):(?!//)/?(.+)", origin)
          or re.fullmatch(r"ssh://(?:[A-Za-z0-9._-]+@)?([A-Za-z0-9.-]+)(?::\d+)?/(.+)", origin))
@@ -190,7 +190,9 @@ def visibility(origin: str | None) -> str:
     form, the network) is treated as public by every caller: a false refusal, never a leak."""
     url = https_url(origin or "")
     if not url:
-        return "private" if origin else "unknown"   # a local path is private
+        # a local path is private; anything else with no https form (git://, an unknown scheme) can't be told, which
+        # counts as public
+        return "private" if (origin or "").startswith(("/", "~", "file:")) else "unknown"
     r = anonymous_ls_remote(url)
     if r.returncode == 0:
         return "public"
@@ -747,7 +749,10 @@ def setup(project: str, *, yes: bool = False, branches: str | None = None, email
                 raise Refused(_("not an email address: {emails}", emails=", ".join(bad)))
         emails = proposed
     # none with no emails given leaves the emails the entry has (setting none again later loses nothing)
-    policy = {"branches": branches, **({"emails": list(emails or [])} if branches != "none" or emails else {})}
+    policy = {"branches": branches, **({"emails": list(emails or [])} if branches != "none" or emails else {}),
+              # what the probe saw now (unknown counts as public): a push that sees otherwise raises this setup's to-do
+              # again (platform-push.md r2 S-l)
+              "visibility": "private" if vis == "private" else "public"}
     if branches != "none" and not policy["emails"]:
         print(_("⚠️ no email is allowed yet, so every push will be refused until one is: run {command} --email "
                 "<address>", command=setup_command(project)))

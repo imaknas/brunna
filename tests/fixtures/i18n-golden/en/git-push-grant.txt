@@ -74,7 +74,7 @@ proj: not_needed — no grant, and none needed while the platform pushes nothing
 [exit 0]
 --- stdout
 The remote is public. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
-✓ projects/proj.yaml: enforce.git_push: {"branches": "none"}
+✓ projects/proj.yaml: enforce.git_push: {"branches": "none", "visibility": "public"}
 --- stderr
 
 === the key doesn't work: setup proj --yes --branches all
@@ -92,7 +92,7 @@ Which branches may the platform push for proj? none: you push yourself; others: 
 none, others or all? [all] all
 ✓ deploy key 102 added to o/proj with write access, and checked (<FP>)
 Commit emails the platform's pushes may carry (comma-separated) [owner@example.org, 42+octo@users.noreply.github.com] 
-✓ projects/proj.yaml: enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"]}
+✓ projects/proj.yaml: enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"], "visibility": "private"}
 ✓ proj's repo commits as 42+octo@users.noreply.github.com
 --- stderr
 
@@ -101,7 +101,7 @@ Commit emails the platform's pushes may carry (comma-separated) [owner@example.o
 --- stdout
 The remote is private. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
 ✓ the grant exists: deploy key 102 on o/proj (<FP>)
-✓ projects/proj.yaml: enforce.git_push: {"branches": "others", "emails": ["a@b.example"]}
+✓ projects/proj.yaml: enforce.git_push: {"branches": "others", "emails": ["a@b.example"], "visibility": "private"}
 ✓ proj's repo commits as a@b.example
 --- stderr
 
@@ -122,7 +122,7 @@ proj: not_set_up — the grant is for o/proj, but paths.origin is now o/other: t
 --- stdout
 The remote is of unknown visibility (treated as public). On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
 ✓ the grant exists: deploy key 102 on o/proj (<FP>)
-✓ projects/proj.yaml: enforce.git_push: {"branches": "all", "emails": ["42+octo@users.noreply.github.com"]}
+✓ projects/proj.yaml: enforce.git_push: {"branches": "all", "emails": ["42+octo@users.noreply.github.com"], "visibility": "public"}
 ✓ proj's repo commits as 42+octo@users.noreply.github.com
 --- stderr
 
@@ -136,7 +136,7 @@ refused: --grant-only makes the grant and leaves the policy as it is: give it wi
 [exit 0]
 --- stdout
 The remote is of unknown visibility (treated as public). On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
-✓ projects/proj.yaml: enforce.git_push: {"branches": "none"}
+✓ projects/proj.yaml: enforce.git_push: {"branches": "none", "visibility": "public"}
 The platform pushes nothing for proj now; its deploy key stays at GitHub until you run brunna push setup proj --revoke
 --- stderr
 

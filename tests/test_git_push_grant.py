@@ -445,7 +445,8 @@ class Grant(Base):
             code, out, err = self.setup_grant(branches=None)
         self.assertEqual(code, 0, err)
         import yaml
-        self.assertEqual(yaml.safe_load(reg.read_text())["enforce"]["git_push"], have)
+        # and what the probe saw now is recorded (platform-push.md r2 S-l)
+        self.assertEqual(yaml.safe_load(reg.read_text())["enforce"]["git_push"], {**have, "visibility": "public"})
         self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1, "the grant was made for all")
 
     def test_other_forges_and_local_paths_are_refused_before_anything(self):
@@ -530,7 +531,8 @@ class Grant(Base):
         self.assertEqual(code, 0, err)
         import yaml
         doc = yaml.safe_load(reg.read_text())
-        self.assertEqual(doc["enforce"]["git_push"], {"branches": "all", "emails": ["42+octo@users.noreply.github.com"]})
+        self.assertEqual(doc["enforce"]["git_push"], {"branches": "all", "emails": ["42+octo@users.noreply.github.com"],
+                                                      "visibility": "private"})
         self.assertTrue(reg.read_text().startswith("# project registry\n"))
         self.assertEqual(self.commits[0][1:], ("projects/proj.yaml",))
         self.assertEqual(len(self.ident), 1)

@@ -74,7 +74,7 @@ proj: not_needed — 沒有授權,平台不替它推任何東西時也不需要
 [exit 0]
 --- stdout
 這個遠端是公開的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
-✓ projects/proj.yaml:enforce.git_push: {"branches": "none"}
+✓ projects/proj.yaml:enforce.git_push: {"branches": "none", "visibility": "public"}
 --- stderr
 
 === the key doesn't work: setup proj --yes --branches all
@@ -92,7 +92,7 @@ proj: not_needed — 沒有授權,平台不替它推任何東西時也不需要
 none、others 還是 all? [all] all
 ✓ 已把可寫的 deploy key 102 加到 o/proj,也檢查過了(<FP>)
 平台推送的 commit 可以帶哪些 email(用逗號分隔) [owner@example.org, 42+octo@users.noreply.github.com] 
-✓ projects/proj.yaml:enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"]}
+✓ projects/proj.yaml:enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"], "visibility": "private"}
 ✓ proj 的 repo 用 42+octo@users.noreply.github.com 做 commit
 --- stderr
 
@@ -101,7 +101,7 @@ none、others 還是 all? [all] all
 --- stdout
 這個遠端是私有的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
 ✓ 授權已經有了:o/proj 上的 deploy key 102(<FP>)
-✓ projects/proj.yaml:enforce.git_push: {"branches": "others", "emails": ["a@b.example"]}
+✓ projects/proj.yaml:enforce.git_push: {"branches": "others", "emails": ["a@b.example"], "visibility": "private"}
 ✓ proj 的 repo 用 a@b.example 做 commit
 --- stderr
 
@@ -122,7 +122,7 @@ proj: not_set_up — 授權是給 o/proj 的,但 paths.origin 現在是 o/other:
 --- stdout
 這個遠端是看不出公開與否(當作公開)。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
 ✓ 授權已經有了:o/proj 上的 deploy key 102(<FP>)
-✓ projects/proj.yaml:enforce.git_push: {"branches": "all", "emails": ["42+octo@users.noreply.github.com"]}
+✓ projects/proj.yaml:enforce.git_push: {"branches": "all", "emails": ["42+octo@users.noreply.github.com"], "visibility": "public"}
 ✓ proj 的 repo 用 42+octo@users.noreply.github.com 做 commit
 --- stderr
 
@@ -136,7 +136,7 @@ proj: not_set_up — 授權是給 o/proj 的,但 paths.origin 現在是 o/other:
 [exit 0]
 --- stdout
 這個遠端是看不出公開與否(當作公開)。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
-✓ projects/proj.yaml:enforce.git_push: {"branches": "none"}
+✓ projects/proj.yaml:enforce.git_push: {"branches": "none", "visibility": "public"}
 平台現在不替 proj 推任何東西;它的 deploy key 會留在 GitHub,直到你跑 brunna push setup proj --revoke
 --- stderr
 
