@@ -29,6 +29,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gitdirs  # noqa: E402
 import hubconf  # noqa: E402
 import names  # noqa: E402
 import hublib  # noqa: E402
@@ -71,7 +72,7 @@ def git_count(repo: pathlib.Path, since: datetime.datetime, until: datetime.date
               *extra: str, work_only: bool = False) -> int | None:
     if not repo.exists():
         return None
-    out = subprocess.run(["git", "-C", str(repo), "log", "--all", f"--since={since.isoformat()}",
+    out = subprocess.run(["git", *gitdirs.at(repo), "log", "--all", f"--since={since.isoformat()}",
                           f"--until={until.isoformat()}", "--format=%s", *extra],
                          capture_output=True, text=True).stdout.splitlines()
     return sum(1 for s in out if hublib.is_work_subject(s)) if work_only else len(out)

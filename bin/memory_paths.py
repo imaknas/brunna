@@ -35,6 +35,9 @@ import subprocess
 import sys
 import unicodedata
 
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+import gitdirs  # noqa: E402  standard library only, as this module is (the sandboxed sync job imports it)
+
 BRANCH = "agent-memory"   # the memory branch's name in a project's repo (its .agent-memory worktree)
 TOP = ("AGENT.md", "RULES", "STATE.md")
 TREE = "memory"
@@ -91,7 +94,8 @@ class Unreadable(Exception):
 
 
 def _git(repo, *args) -> str:
-    r = subprocess.run(["git", "-C", str(repo), "--literal-pathspecs", *args], capture_output=True)
+    # a bare repo (fetch_bundle's, doctor's) by --git-dir: the owner's safe.bareRepository=explicit refuses one entered with -C
+    r = subprocess.run(["git", *gitdirs.at(repo), "--literal-pathspecs", *args], capture_output=True)
     if r.returncode != 0:
         raise Unreadable(r.stderr.decode(errors="replace").strip()[-300:])
     return r.stdout.decode(errors="surrogateescape")

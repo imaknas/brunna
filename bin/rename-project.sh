@@ -151,7 +151,7 @@ if [ "$OLD_ORIGIN" != "(native)" ] && [ "$NEW_ORIGIN" != "(native)" ] && [ "$OLD
 set -euo pipefail
 if [ -d ~/git-origin/mirrors/'$OLD_MIRROR_NAME'.git ]; then
   mv ~/git-origin/mirrors/'$OLD_MIRROR_NAME'.git ~/git-origin/mirrors/'$NEW_MIRROR_NAME'.git
-  git -C ~/git-origin/mirrors/'$NEW_MIRROR_NAME'.git remote set-url origin '$NEW_ORIGIN'
+  git --git-dir ~/git-origin/mirrors/'$NEW_MIRROR_NAME'.git remote set-url origin '$NEW_ORIGIN'
 fi
 EOF
 fi

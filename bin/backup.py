@@ -307,12 +307,13 @@ def cmd_verify() -> int:
             if c.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
                 raise RuntimeError(_("integrity_check of the restored {name}.db is not ok", name=name))
         # `git bundle verify` needs a repository to run in, and the private temp folder is in none (an instance dir has
-        # no repo above it): an empty one of its own (each bundle is --all, so it has nothing to look up there)
+        # no repo above it): an empty one of its own (each bundle is --all, so it has nothing to look up there), named with
+        # --git-dir (the owner's safe.bareRepository=explicit refuses a bare repo git finds from its cwd)
         repo = tmp / ".verify-repo"
         subprocess.run(["git", "init", "-q", "--bare", str(repo)], capture_output=True, check=True)
         for b in m["bundles"]:
-            r = subprocess.run(["git", "bundle", "verify", str(staged / "git" / f"{b}.bundle")], capture_output=True, text=True,
-                               cwd=repo)
+            r = subprocess.run(["git", "--git-dir", str(repo), "bundle", "verify", str(staged / "git" / f"{b}.bundle")],
+                               capture_output=True, text=True)
             if r.returncode != 0:
                 raise RuntimeError(_("The restored {bundle}.bundle failed verification: {err}", bundle=b,
                                      err=r.stderr.strip()[-200:]))
