@@ -24,6 +24,8 @@ The base is "allow everything, then block the dangerous parts" (a deny-list; tri
            launchctl/crontab/at, inspecting or signalling other processes
 Capability fragments follow the base (later rules win); the gpu fragment is empty: here a capability's role is
 authorization.
+Both kinds carry the git fence (git_fence_rules) for a project whose git goes through the platform, and nothing of it
+for any other (docs/design/git-broker.md).
 
   profile(pol, cap) → str        paths are written straight into the profile (computed fresh on every run), no -D
                                  parameters
@@ -59,7 +61,7 @@ def can_sandbox() -> str | None:
 def guarantees() -> set[str]:
     """isolation.py's backend interface: what service_profile enforces (capabilities.md, "What each OS enforces")."""
     return {"own-writes-only", "isolated-reads", "declared-port-only", "localhost-inbound-only", "keychain-blocked",
-            "signals-blocked", "runtime-files-locked"}
+            "signals-blocked", "runtime-files-locked", "git-dirs-fenced"}
 
 
 def confined_now(marked: bool = False) -> bool:
@@ -175,6 +177,55 @@ def root_denies(pol: dict) -> list[str]:
     return out
 
 
+def _glob_re(glob: str) -> str:
+    """A glob of policy's (only *, within one name) → a regex for the same names."""
+    import re
+    return "[^/]+".join(re.escape(x) for x in glob.split("*"))
+
+
+def git_fence_rules(pol: dict) -> list[str]:
+    """The git fence (policy git_fence; docs/design/git-broker.md, "The fence", r2 B2), for a project whose git goes
+    through the platform; nothing at all for any other. Denies only, after the allows, so nothing written later opens
+    it again (the repo's platform folder is kept out of the deny, never allowed back: an allow there would reopen the
+    control-file denies under it too):
+    - no entry named .git, nor anything below one, anywhere: not in its folders, not in the temp area (a tree built
+      there and moved in is checked only at the rename's two ends), with each repo's platform folder left out;
+    - no entry named HEAD that isn't a folder, anywhere (no git-dir shape under another name; a folder HEAD/ is
+      ordinary);
+    - in each repo's platform folder: no .git below it but uv's marker, exactly; the folder itself and every folder on
+      the way to the marker can't be removed or renamed (moving the bucket out would carry the marker with it).
+    Seatbelt matches the path the volume resolves, so a folded spelling (.GIT, head) is the same entry (measured,
+    git-config-fence.md), and a write through a link is matched where it lands."""
+    import re
+    f = pol.get("git_fence")
+    if not f:
+        return []
+    names = "|".join(re.escape(n) for n in f["names"])
+    files = "|".join(re.escape(n) for n in f["files"])
+    dirs = [s for d in f["repo_dirs"] for s in spellings(d)]
+    keep = "".join(f" (require-not (subpath {q(d)}))" for d in dirs)
+    out = ["; git dirs (git through the platform): no .git anywhere, no HEAD that isn't a folder, each repo's platform "
+           "folder kept",
+           f'(deny file-write* (require-all (regex #"/({names})(/|$)"){keep}))',
+           f'(deny file-write* (require-all (regex #"/({files})$") (require-not (vnode-type DIRECTORY))))']
+    for d in dirs:
+        marks = []
+        for m in f.get("markers") or []:
+            for root in spellings(m["root"]):
+                if not (root == d or root.startswith(d + "/")):
+                    continue
+                marks.append(f'(require-not (regex #"^{re.escape(root)}/{_glob_re(m["glob"])}$"))')
+                # the folders from d down to the marker's own folder: pinned as entries
+                parts = pathlib.PurePosixPath(root).relative_to(d).parts + pathlib.PurePosixPath(m["glob"]).parts[:-1]
+                for i in range(1, len(parts) + 1):
+                    path = "/".join([re.escape(d), *(_glob_re(p) for p in parts[:i])])
+                    out.append(f'(deny file-write-unlink (require-all (regex #"^{path}$") (vnode-type DIRECTORY)))')
+        out.append(f'(deny file-write* (require-all (regex #"^{re.escape(d)}/(.*/)?({names})(/|$)")'
+                   + "".join(" " + x for x in marks) + "))")
+        out.append(f"(deny file-write-unlink (literal {q(d)}))")
+    return out
+
+
 def ancestors(paths) -> list[str]:
     """The folders above each path, as literals: what a process must be able to stat to resolve the path to a folder
     it may use (realpath, `git -C`), when one of them is in a denied tree (the workspace root, the platform state).
@@ -202,6 +253,7 @@ def _isolation(pol: dict, writable: list[pathlib.Path], writable_extra: list[pat
                                           *[f"(literal {q(d)})" for d in DEVICES]]) + ")",
         *protect_denies(pol),
         *root_denies(pol),
+        *git_fence_rules(pol),
         "; reads: other projects, services, platform state, credentials, Keychain files; its own folders allowed again",
         "(deny file-read* " + " ".join(read_denies(pol)) + ")",
         "(allow file-read* " + " ".join(own + [f"(subpath {q(r)})" for r in readable]) + ")",

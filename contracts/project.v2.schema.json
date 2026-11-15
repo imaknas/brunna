@@ -62,7 +62,8 @@
       "server": {"type": "object", "additionalProperties": false, "required": ["id", "url"], "properties": {"id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,47}$"}, "url": {"type": "string", "pattern": "^https://"}, "header": {"type": "string"}}, "description": "with kind: the MCP server the credential is for: id is the tool prefix the job's rules use, url its exact URL, header (static) where the value goes"},
       "broken": {"enum": ["todo", "alert"], "description": "with kind: what a broken grant raises: an alert and an owner to-do with the re-grant command (todo, the default), or the alert only"}}}},
     "enforce": {"type": "object", "properties": {"sandbox": {"type": "boolean"}, "capabilities": {"type": "array", "items": {"type": "string"}, "description": "platform capabilities (hub.json capabilities, e.g. gpu); inside the sandbox, hub-run --cap <capability> runs through the platform runner"},
-        "work": {"type": "boolean", "description": "a discuss session (lease) may write to the project; requires sandbox: true (the OS sandbox blocks writes outside the folder). Turned on only when the owner confirms directly"}}, "additionalProperties": false},
+        "work": {"type": "boolean", "description": "a discuss session (lease) may write to the project; requires sandbox: true (the OS sandbox blocks writes outside the folder). Turned on only when the owner confirms directly"},
+        "git": {"enum": ["platform"], "description": "the project's git goes through the platform (docs/design/git-broker.md): no sandbox of it writes a git dir; requires sandbox: true. Owner-only, like the rest of enforce"}}, "additionalProperties": false},
     "network": {"type": "array", "items": {"type": "string"}},
     "allow_write": {"type": "array", "items": {"type": "string"}},
     "gate": {"enum": ["strict", "detect"]}

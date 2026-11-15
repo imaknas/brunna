@@ -110,6 +110,21 @@ class Launcher(unittest.TestCase):
         ex.assert_not_called()
         self.assertIn("never runs unsandboxed", err.getvalue())
 
+    def test_a_project_whose_git_goes_through_the_platform_is_refused_where_the_fence_cant_be_made(self):
+        """docs/design/git-broker.md, "Linux": its services and jobs are never run unfenced"""
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        doc = {"name": "proj", "paths": {"workspace": str(tmp)}, "enforce": {"sandbox": True, "git": "platform"}}
+        fake = type("A", (), {"can_sandbox": staticmethod(lambda: None), "exec_service": mock.Mock(),
+                              "guarantees": staticmethod(lambda: set(isolation.REQUIRED))})
+        with mock.patch.object(isolation, "adapter", lambda: ("landlock", fake)), \
+                mock.patch.object(sandboxed_run.hubconf, "projects", lambda: {"proj": doc}), \
+                mock.patch.object(os, "execv") as ex, redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(sandboxed_run.main(["--project", "proj", "--cwd", str(tmp), "--", "true"]), 78)
+        ex.assert_not_called()
+        fake.exec_service.assert_not_called()
+        self.assertIn("git-dirs-fenced", err.getvalue())
+
     def test_unknown_project_is_refused(self):
         with mock.patch.object(isolation, "can_sandbox", lambda: None), \
                 mock.patch.object(sandboxed_run.hubconf, "projects", lambda: {}), \
@@ -224,6 +239,8 @@ touch "$TOP/outside" 2>/dev/null || echo outside-write-blocked
 [ -d "$ROOT" ] && echo root-stat
 ls "$ROOT" >/dev/null 2>&1 || echo root-list-blocked
 mkdir -p "$WS/.ctl" && { touch "$WS/.ctl/settings" 2>/dev/null || echo control-blocked; }
+mkdir -p "$WS/gsub" && { mkdir "$WS/gsub/.git" 2>/dev/null || echo git-dir-blocked; }
+{ echo x > "$WS/gsub/HEAD"; } 2>/dev/null || echo head-file-blocked
 cat "$OTHER/secret" >/dev/null 2>&1 || echo other-blocked
 cat "$CRED" >/dev/null 2>&1 || echo cred-blocked
 cat "$SECRETS_LINK/key" >/dev/null 2>&1 || echo linked-secrets-blocked
@@ -260,7 +277,8 @@ PROBES = {"own-writes-only": {"outside-write-blocked", "bus-write-blocked"},
                              "linked-secrets-blocked", "linked-secrets-target-blocked"},
           "declared-port-only": {"bind-other-blocked"}, "unix-sockets-blocked": {"unix-blocked"},
           "keychain-blocked": {"keychain-blocked"}, "signals-blocked": {"signal-blocked"},
-          "runtime-files-locked": {"control-blocked"}}
+          "runtime-files-locked": {"control-blocked"},
+          "git-dirs-fenced": {"git-dir-blocked", "head-file-blocked"}}
 # guarantees no probe here can show, with why (checked by hand when an adapter declares them)
 UNPROBED = {"localhost-inbound-only": "needs a second address to connect from (macOS checked live 10-31)"}
 
@@ -330,7 +348,10 @@ class Conformance(unittest.TestCase):
         port = 18125
         args = {"bin": str(BIN), "ws": str(ws), "cred": str(cred), "port": port, "probe": PROBE, "bus": str(bus),
                 "root": str(root),
-                "projects": {"proj": {"name": "proj", "paths": {"workspace": str(ws)}, "enforce": {"sandbox": True},
+                # its git through the platform where this adapter can fence it (elsewhere it would be refused whole)
+                "projects": {"proj": {"name": "proj", "paths": {"workspace": str(ws)},
+                                      "enforce": {"sandbox": True, **({"git": "platform"} if "git-dirs-fenced" in
+                                                                      isolation.guarantees() else {})},
                                       "allow_write": [str(shared)]},
                              "other": {"name": "other", "paths": {"workspace": str(other)}}}}
         # no runtime in the fixture (it would be under services_root): the workspace stands in for it

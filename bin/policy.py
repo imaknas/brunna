@@ -53,6 +53,9 @@ policy(name, doc, index) → {
                       the rules files use platform_cli)
   platform_cli:       the same channels as brunna subcommands on PATH (strings, e.g. "brunna send")
   capabilities:       the registry's enforce.capabilities
+  git_fence:          None, or for a project whose git goes through the platform (enforce.git: platform, with
+                      enforce.sandbox; docs/design/git-broker.md, "The fence") what every sandbox of it denies, wherever
+                      it may write (git_fence below): {names, files, repo_dirs, markers}
 }
 """
 from __future__ import annotations
@@ -239,6 +242,44 @@ def protected_changes(paths) -> list[str]:
 
 def cache_env(ws: pathlib.Path | None) -> dict[str, str]:
     return {k: str(names.repo_dir(ws / ".git") / "cache" / v) for k, v in CACHE_ENV.items()} if ws else {}
+
+
+# ---------- the git fence (docs/design/git-broker.md, "The fence"; r2 B2) ----------
+# For a project whose git goes through the platform, no sandbox of it writes a git dir, at any depth, anywhere it may
+# write: what git dirs are found by can't be made either. Names, matched as the volume resolves them (a folded spelling
+# is the same entry), anywhere, not only in its folders: a tree built where it may write (the temp area) and moved in is
+# checked only at the rename's two ends, so it must be refused where it was built.
+GIT_FENCE_NAMES = (".git",)      # the entry and everything below it
+GIT_FENCE_FILES = ("HEAD",)      # any entry but a folder (r2 B2: a folder named HEAD is ordinary)
+# the one exception below a repo's platform folder: uv's marker in its cache (the fence doc measured it), where the
+# folders on the way stay pinned so the bucket holding it can't be moved out
+GIT_FENCE_MARKERS = (("UV_CACHE_DIR", "sdists-v*/.git"),)
+
+
+def git_platform(doc: dict | None) -> bool:
+    """The project's git goes through the platform (the registry's enforce.git: platform; an owner-only field). Only
+    with enforce.sandbox: without a sandbox there is nothing to render it into."""
+    enf = (doc or {}).get("enforce") or {}
+    return enf.get("sandbox") is True and enf.get("git") == "platform"
+
+
+def git_fence(doc: dict, roots) -> dict | None:
+    """What every sandbox of a project whose git goes through the platform denies (None when it doesn't):
+    names      every entry of these names, and everything below it, wherever it is
+    files      every entry of these names that isn't a folder, wherever it is
+    repo_dirs  the platform's folder in each repo of the project (<root>/.git/<platform>/, both spellings, for its
+               workspace and its runtime folder): writable again, as today (its outbox, the test runner's store, its
+               tool caches), its own entry pinned (not made, removed, renamed or replaced from inside), and none of
+               the names above below it
+    markers    [{root, glob}]: the one exception below a repo_dir, each a single file (glob's * = one name's part);
+               every folder from the repo_dir down to the file's own folder pinned as an entry (not removed or renamed)
+    The paths are as configured; a renderer resolves them as it matches them."""
+    if not git_platform(doc):
+        return None
+    dirs = [pathlib.Path(r) / ".git" / n for r in roots if r for n in names.all("repo_dir")]
+    markers = [{"root": str(d / "cache" / CACHE_ENV[var]), "glob": glob} for d in dirs for var, glob in GIT_FENCE_MARKERS]
+    return {"names": list(GIT_FENCE_NAMES), "files": list(GIT_FENCE_FILES), "repo_dirs": [str(d) for d in dirs],
+            "markers": markers}
 
 
 def mail_outbox(doc: dict | None) -> bool:
@@ -438,6 +479,7 @@ def policy(name: str, doc: dict, index: dict) -> dict:
         "platform_commands": [hubconf.ROOT / "bin" / "hubbus", hubconf.ROOT / "bin" / "merge-branch"],
         "platform_cli": platform_cli(),
         "capabilities": list((doc.get("enforce") or {}).get("capabilities") or []),
+        "git_fence": git_fence(doc, [d["workspace"], d["runtime"]]),
     }
 
 

@@ -32,6 +32,9 @@ hooks from, and the runtime's own folder in the project, inside
 its own writable folder: Landlock can only allow, and a write right on a folder covers everything under it, so it
 doesn't declare runtime-files-locked; there the platform's renderer removes hooks it didn't write), the listening address (a service may bind 0.0.0.0:<its port>; macOS accepts
 only localhost), UDP binds, the network allowlist (policy.network), signals to the owner's other processes below ABI 6.
+policy.git_fence (no .git or HEAD anywhere it may write: the same limit, a name inside a writable tree can't be denied),
+so it doesn't declare git-dirs-fenced, and a project whose git goes through the platform has its services and jobs
+refused here (isolation.unmet), never run unfenced (docs/design/git-broker.md, "Linux").
 
   can_sandbox() → None | why not       guarantees() → set[str]       plan(pol, dirs, port) → {read, write, bind}
   exec_service(pol, dirs, port, argv)

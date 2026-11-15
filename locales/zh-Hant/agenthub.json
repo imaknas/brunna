@@ -316,5 +316,11 @@
  "brunna's decisions (nightly notes, weekly report) have nowhere to run: llm.providers serve only the points pinned to them (llm.use is not set), and the runtime {runtime} has no completion interface": "brunna 的判斷(每晚整理筆記、週報)沒地方跑:llm.providers 只接指定給它的點(沒設 llm.use),執行環境 {runtime} 也沒有 completion 介面",
  "llm.points.{key} pins a provider on an agent call (registry agents:), which runs on the runtime: the call is refused": "llm.points.{key} 在 agent 呼叫(登記表 agents:)上指定了 provider,但 agent 呼叫在執行環境上跑:這個呼叫會被拒絕",
  "pin only a model there, or make it a model call (models:)": "那裡只指定模型,或把它改成模型呼叫(models:)",
- "kept llm.providers {providers}: a pin in llm.points names them, and they now serve only those points": "保留 llm.providers {providers}:llm.points 裡有指定用到它們,現在只接那些點"
+ "kept llm.providers {providers}: a pin in llm.points names them, and they now serve only those points": "保留 llm.providers {providers}:llm.points 裡有指定用到它們,現在只接那些點",
+ "safe.bareRepository=explicit is set in your git config (a precondition of the git fence: a folder shaped like a git dir moved into a project isn't entered by your git)": "你的 git 設定有 safe.bareRepository=explicit(git 圍欄的前提:搬進專案、長得像 git dir 的資料夾,你的 git 不會進去)",
+ "safe.bareRepository isn't explicit in your git config: a folder shaped like a git dir moved into a sandboxed project is entered by your git, and no project's git fence holds without it": "你的 git 設定裡 safe.bareRepository 不是 explicit:搬進沙盒化專案、長得像 git dir 的資料夾,你的 git 會進去;少了它,哪個專案的 git 圍欄都不成立",
+ "{project}: its git goes through the platform (enforce.git), which this system's sandbox can't fence: its services and jobs are not run": "{project}:它的 git 走平台(enforce.git),這個系統的沙盒圍不起來:它的服務和工作不會執行",
+ "docs/design/git-broker.md, \"Linux\"": "docs/design/git-broker.md 的「Linux」",
+ "{project}: enforce.git is on, but its git dirs aren't fenced without safe.bareRepository=explicit": "{project}:enforce.git 開著,但少了 safe.bareRepository=explicit,它的 git dir 沒有圍起來",
+ "{project}: no git dir can be written by its services, jobs and cap-run programs (enforce.git: platform); its sessions aren't fenced yet, and git's own writes from those programs fail until the platform runs git for them": "{project}:它的服務、工作和 cap-run 程式寫不了任何 git dir(enforce.git: platform);它的 session 還沒圍起來,而且在平台替它們跑 git 之前,這些程式自己用 git 寫入都會失敗"
 }

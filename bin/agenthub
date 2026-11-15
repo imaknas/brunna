@@ -1510,6 +1510,49 @@ def doctor_git_fence(add) -> None:
             "" if level == "ok" else _("bin/git_fence.py --report lists every finding ({n})", n=len(details)))
 
 
+def global_git_setting(key: str) -> str | None:
+    """A setting from the owner's global git config, read only (`git config --global --get`); None when unset or git
+    can't say. The platform never writes it: it is the owner's own setting."""
+    try:
+        r = subprocess.run(["git", "config", "--global", "--get", key], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def doctor_git_platform(add) -> None:
+    """Git through the platform (docs/design/git-broker.md): the precondition, safe.bareRepository=explicit in the
+    owner's global git config (r2 B2: a folder shaped like a git dir moved into a project is otherwise entered by the
+    owner's git, fence or not), and per project switched on (enforce.git: platform) what is fenced so far: its services,
+    jobs and cap-run programs (the Seatbelt rendering, step 1). Its sessions aren't (each runtime's rendering is step 4),
+    and nothing writes its git for it yet (the broker, step 2), so it is never said to be fenced whole."""
+    import isolation
+    import policy
+    on = [n for n, d in sorted(hubconf.projects().items()) if policy.git_platform(d)]
+    held = (global_git_setting("safe.bareRepository") or "").lower() == "explicit"
+    fix = "git config --global safe.bareRepository explicit"
+    if held:
+        add("ok", _("safe.bareRepository=explicit is set in your git config (a precondition of the git fence: a folder "
+                    "shaped like a git dir moved into a project isn't entered by your git)"))
+    else:
+        add("bad" if on else "warn",
+            _("safe.bareRepository isn't explicit in your git config: a folder shaped like a git dir moved into a "
+              "sandboxed project is entered by your git, and no project's git fence holds without it"), fix)
+    fenced = "git-dirs-fenced" in isolation.guarantees()
+    for project in on:
+        if not fenced:
+            add("bad", _("{project}: its git goes through the platform (enforce.git), which this system's sandbox can't "
+                         "fence: its services and jobs are not run", project=project),
+                _("docs/design/git-broker.md, \"Linux\""))
+        elif not held:
+            add("bad", _("{project}: enforce.git is on, but its git dirs aren't fenced without safe.bareRepository=explicit",
+                         project=project), fix)
+        else:
+            add("warn", _("{project}: no git dir can be written by its services, jobs and cap-run programs "
+                          "(enforce.git: platform); its sessions aren't fenced yet, and git's own writes from those "
+                          "programs fail until the platform runs git for them", project=project))
+
+
 def doctor_checkout_race(add, why_no_sandbox, installed) -> None:
     """The owner's checkout race (docs/design/git-broker.md, r3 B-1): while any process of a sandboxed project runs (its
     sessions' commands, services, jobs), an unsandboxed checkout in its folder can be raced into writing its files
@@ -1760,6 +1803,7 @@ def cmd_doctor(argv: list[str]) -> int:
         doctor_checkout_race(add, why, installed)
         doctor_confined(add, installed)
         doctor_git_fence(add)
+        doctor_git_platform(add)
     hb = hubconf.STATE / "scheduler-heartbeat"
     if hb.exists():
         age = (datetime.datetime.now() - datetime.datetime.fromtimestamp(hb.stat().st_mtime)).total_seconds() / 60

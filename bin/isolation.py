@@ -31,7 +31,8 @@ checks each guarantee it declares (Conformance): a new backend is added by passi
   adapter() → (name, module) | None           this machine's adapter
   can_sandbox() → None | why not              the adapter's own reason, or a missing/unknown guarantee
   guarantees() → list[str]                    what this machine's adapter guarantees (empty when it can't sandbox)
-  exec_service(pol, dirs, port, argv)         through the adapter, after can_sandbox()
+  exec_service(pol, dirs, port, argv)         through the adapter, after can_sandbox() and unmet(pol) (a policy asking
+                                              for a guarantee the adapter lacks, NEEDS: refused, never run without it)
 """
 from __future__ import annotations
 
@@ -54,7 +55,11 @@ GUARANTEES = {
     "unix-sockets-blocked": "unix-domain sockets can't be created (no D-Bus, no systemd user manager)",
     "signals-blocked": "the owner's other processes can't be signalled",
     "runtime-files-locked": "what its sessions load settings, hooks and tools from can't be written (policy protect)",
+    "git-dirs-fenced": "for a project whose git goes through the platform (policy git_fence), no git dir can be written "
+                       "or made anywhere: no .git, no HEAD that isn't a folder (docs/design/git-broker.md)",
 }
+# what a policy asks for that only some adapters can give: a policy carrying it is refused where the adapter lacks it
+NEEDS = {"git_fence": "git-dirs-fenced"}
 # what a sandboxed service or job must never get past, whatever the backend
 REQUIRED = ("own-writes-only", "isolated-reads", "declared-port-only")
 
@@ -212,7 +217,19 @@ def run_as_project(project: str, doc: dict, argv: list[str], guard: str) -> tupl
     return wrap(project, os.getcwd(), argv), {**kept_env(), guard: "1"}
 
 
+def unmet(pol: dict) -> str | None:
+    """Why this machine's adapter can't apply this policy whole (it asks for a guarantee the adapter doesn't give: the
+    git fence on Linux, where Landlock can't deny a name inside a writable tree), else None. Such a policy is never
+    applied without it: the command isn't run (fail closed)."""
+    has = set(guarantees())
+    missing = [g for k, g in NEEDS.items() if pol.get(k) and g not in has]
+    if missing:
+        name = (adapter() or ("none",))[0]
+        return f"its policy needs {', '.join(missing)}, which the {name} adapter can't give on this system"
+    return None
+
+
 def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str]):
-    if (why := can_sandbox()):
+    if (why := can_sandbox() or unmet(pol)):
         raise OSError(0, why)
     adapter()[1].exec_service(pol, dirs, port, argv)

@@ -52,6 +52,8 @@ def main(argv: list[str]) -> int:
     if not doc:
         return refuse(f"{a.project} is not in the registry")
     pol = policy.policy(a.project, doc, {"projects": projects})
+    if (why := isolation.unmet(pol)):   # the git fence where this OS's sandbox can't make it (docs/design/git-broker.md)
+        return refuse(why)
     d = registry.dirs(doc)
     dirs = [p for p in (d["runtime"], d["workspace"]) if p]
     os.chdir(a.cwd)

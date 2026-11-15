@@ -66,6 +66,15 @@ class Capabilities(unittest.TestCase):
         self.assertTrue(self.errs(doc(enforce={"sandbox": True, "other": 1})))
         self.assertEqual(self.errs(doc(enforce={"sandbox": True})), [])
 
+    def test_git_through_the_platform_needs_a_sandbox_and_only_says_platform(self):
+        """docs/design/git-broker.md, "Rollout per project": enforce.git: platform, owner-only, needs the sandbox it is
+        rendered into"""
+        self.assertEqual(self.errs(doc(enforce={"sandbox": True, "git": "platform"})), [])
+        self.assertTrue(self.errs(doc(enforce={"git": "platform"})))
+        self.assertTrue(self.errs(doc(enforce={"sandbox": False, "git": "platform"})))
+        for bad in ("direct", True, None, ""):
+            self.assertTrue(self.errs(doc(enforce={"sandbox": True, "git": bad})), bad)
+
     def test_catalog_needs_profile_file(self):
         mock.patch.stopall()
         with mock.patch.object(registry.hubconf, "get", return_value={"_comment": "x", "gpu": {}, "nofile": {}}):
@@ -86,6 +95,11 @@ class PlatformOwned(unittest.TestCase):
                      ("type", "project"), ("network", ["evil.example"]), ("allow_write", ["~/"]),
                      ("privacy", {"reflection": "include"}), ("paths", {"workspace": "~"})]:
             self.assertTrue(registry.platform_owned_changes(dict(self.cur, **{k: v}), self.cur), k)
+
+    def test_a_letter_cant_switch_git_through_the_platform_on_or_off(self):
+        on = dict(self.cur, enforce={**self.cur["enforce"], "git": "platform"})
+        self.assertTrue(registry.platform_owned_changes(on, self.cur))
+        self.assertTrue(registry.platform_owned_changes(self.cur, on))
 
     def test_removing_counts_as_change(self):
         new = {k: v for k, v in self.cur.items() if k != "privacy"}
