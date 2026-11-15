@@ -222,7 +222,7 @@ platform, not by a session that can't push. Built:
   new one appears (`.state/idea-upgrades-kept.json`). Checked against the first real case: its entry would have been
   listed from 11-15 05:47, when it declared its first credential.
 - **The sessions know** (`templates/rules/idea-sandbox.md`, added by `prompts.listed_rules` for `type: idea`, like
-  `conventional-commits`): what the sandbox blocks (no remote, no `gh`, git settings the platform's), that an upgrade
+  `conventional-commits`): what the sandbox blocks (no remote, no `gh`, no push), that an upgrade
   keeps the sandbox, and how to ask for one (a `request` to brunna). The upgrade removes the rule (the type changes).
 - **One flow, no new letter type**: a `request` (or the nightly list) → the owner's yes → `upgrade-idea.py`. It now ends
   with an info letter to the project (`idea-upgraded-<name>`): its repo, that only main was pushed, what stays (the
