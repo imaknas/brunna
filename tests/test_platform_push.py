@@ -48,6 +48,7 @@ class Push(Base):
         self.names_file = None
         self.limits = dict(LIMITS)
         for p in (mock.patch.object(hubconf, "push_dir", lambda: self.push_root),
+                  mock.patch.object(hubconf, "secrets_dir", lambda: self.tmp / "secrets"),
                   mock.patch.object(push_queue, "limits", lambda: dict(self.limits)),
                   mock.patch.object(push_queue, "project_letter",
                                     lambda project, text, key: self.letters.append((project, text, key))),
@@ -144,7 +145,9 @@ class WhoMayRequest(unittest.TestCase):
         platform = runtime_claude.settings(self.pol)
         self.assertNotIn(own, [os.path.expanduser(w) for w in platform[0]["filesystem"]["allowWrite"]])
         self.assertFalse(any(own in r for r in platform[1]), "the platform's own rules name it")
-        self.assertNotIn(own, json.dumps(runtime_claude.lease_settings(self.pol)))
+        # a lease only denies it (review S2): it loads the session rendering, and never asks for a push
+        lease = runtime_claude.lease_settings(self.pol)["permissions"]["deny"]
+        self.assertTrue(all(r.startswith("Edit(") for r in lease if own in r))
         self.assertNotIn(own, [str(w) for w in self.pol["write"]])
         self.assertNotIn(own, seatbelt.service_profile(self.pol, [self.ws]))
         self.assertIn(theirs, seatbelt.service_profile(self.pol, [self.ws]), "another project's folder is denied there")
@@ -274,7 +277,8 @@ class TakingIn(Push):
         self.assertEqual(q[0]["supersedes"]["id"], first)
         # a started one is never replaced
         push_queue._write_json(push_queue.broker("proj") / "worker.json",
-                               {"pid": os.getpid(), "start": None, "id": newer, "started": newer})
+                               {"pid": os.getpid(), "start": None, "id": newer, "started": newer,
+                                "spawned_at": push_queue.now_iso()})
         later = self.request("main")
         self.take()
         self.assertEqual(self.result(later)["state"], "refused")
@@ -728,7 +732,17 @@ class Checks(Push):
         self.field(emails=["dev@example.org"], public_emails=["dev@example.org"])
         self.commit(self.ws, "secretproj/readme.txt", "hello\n", "a")
         with mock.patch.object(git_remote, "visibility", lambda origin: "unknown"):   # can't tell: public
-            self.refused(self.ask(), check="names", says="secretproj")
+            res = self.ask()
+        self.refused(res, check="names", says="private project")
+        # which name: the owner's record only (review S3), never the result or the letter
+        self.assertNotIn("secretproj", json.dumps(res) + json.dumps(self.letters))
+        self.assertIn("secretproj", json.dumps(self.pushes()[-1]))
+        self.git(self.ws, "reset", "-q", "--hard", self.base)
+        self.commit(self.ws, "notes/readme.txt", "see secretproj for it\n", "b")
+        with mock.patch.object(git_remote, "visibility", lambda origin: "public"):
+            res = self.ask()
+        self.refused(res, check="names")
+        self.assertNotIn("secretproj", json.dumps(res) + json.dumps(self.letters))
         self.names_file = self.tmp / "missing.txt"
         with mock.patch("private_names.names_file", side_effect=__import__("private_names").ListError("x")), \
                 mock.patch.object(git_remote, "visibility", lambda origin: "public"):
@@ -879,6 +893,181 @@ class Field(unittest.TestCase):
         said = registry.platform_owned_changes(
             {**cur, "enforce": {"sandbox": True, "git_push": {"branches": "all"}}}, cur)
         self.assertTrue(any("enforce" in s for s in said), said)
+
+
+# ---------- the code review's findings (B1, B2, S1, S2, S3 and the nits) ----------
+
+def mktree(repo, entries) -> str:
+    inp = "".join(f"{m} {t} {o}\t{n}\n" for m, t, o, n in entries)
+    return subprocess.run(["git", "-C", str(repo), "mktree"], input=inp, capture_output=True, text=True,
+                          check=True).stdout.strip()
+
+
+class Review(Push):
+    VALUE = "Zq7xK2mPa9Lr4tWv"   # letters and digits only
+
+    def declare(self, value: str):
+        (self.ws / ".env").write_text(f"DB_PASSWORD={value}\n")
+        self.docs["proj"]["secrets"] = [{"name": "db", "path": ".env", "env_key": "DB_PASSWORD"}]
+
+    def shape(self, i: int, text: str) -> dict:
+        self.git(self.ws, "checkout", "-q", "-b", f"s{i}", self.base)
+        self.commit_as(f"f{i}.txt", text, f"shape {i}")
+        return self.ask(branch=f"s{i}")
+
+    def test_b1_a_declared_value_inside_other_text(self):
+        """A declared value is found wherever it sits in a text, not only as a whole word; the control is the bare
+        value, which was caught before too."""
+        v = self.VALUE
+        self.declare(v)
+        for i, text in enumerate([f"url = 'https://user:{v}@db.example.org/x'\n", f"q = 'a={v}&b=1'\n",
+                                  f"Use the password {v}.\n", f"x = '{v}'\n"]):
+            with self.subTest(text=text):
+                res = self.shape(i, text)
+                self.assertEqual((res["state"], res["check"]), ("refused", "secrets"), res)
+                self.assertIn("db", res["reason"])
+                self.assertNotIn(v, json.dumps(res) + json.dumps(self.letters), "the value itself was told")
+
+    def test_b1_a_value_with_characters_a_word_splits_on(self):
+        v = "p@ss(word)2024!xy'z\"Q"
+        self.declare(v)
+        res = self.shape(0, f'DB = "{v}"\n')
+        self.assertEqual((res["state"], res["check"]), ("refused", "secrets"), res)
+        # the values live where no sandbox reads (the platform's secrets), owner-only
+        f = push_checks.declared_file("proj")
+        self.assertTrue(f.is_relative_to(hubconf.secrets_dir()))
+        self.assertEqual(oct(f.stat().st_mode & 0o777), "0o600")
+        self.assertEqual(oct(f.parent.stat().st_mode & 0o777), "0o700")
+        # control: a push without the value passes
+        self.assertEqual(self.shape(1, "DB = 'something else'\n")["state"], "pushed")
+
+    def bomb(self, k: int) -> str:
+        blob = subprocess.run(["git", "-C", str(self.ws), "hash-object", "-w", "--stdin"], input="x\n",
+                              capture_output=True, text=True, check=True).stdout.strip()
+        t = mktree(self.ws, [("100644", "blob", blob, "f")])
+        for _i in range(k):
+            t = mktree(self.ws, [("040000", "tree", t, "a"), ("040000", "tree", t, "b")])
+        root = mktree(self.ws, [("040000", "tree", t, "bomb"), ("100644", "blob", blob, "README")])
+        c = self.git(self.ws, "commit-tree", root, "-p", self.base, "-m", "bomb").strip()
+        self.git(self.ws, "update-ref", "refs/heads/main", c)
+        return c
+
+    def test_b2_a_tree_bomb_is_walked_once_per_tree(self):
+        """k levels of a tree naming one subtree twice: 2^k paths, k+2 trees. Each tree is walked once, fast; the control
+        (the same shape, walked per path as before) lists 2^k entries."""
+        k = 18
+        c = self.bomb(k)
+
+        def g(*a, input=None):
+            return subprocess.run(["git", "-C", str(self.ws), *a], input=input, capture_output=True, check=True).stdout
+        objs = push_checks.Objects(g, c, [self.base])
+        t0 = time.monotonic()
+        entries, _gl, _f = objs.walk(time.monotonic() + 60)
+        self.assertLess(time.monotonic() - t0, 10)
+        self.assertLess(len(entries), 10 * k)
+        res = self.ask()
+        self.assertEqual(res["state"], "pushed", res)   # nothing in it is refused: the bomb is only big when listed
+        # control: walked per path, as before the fix, it lists every path
+        n, stack = 0, [(objs.commit_header(c, "tree")[0], 0)]
+        while stack and n <= 1 << 12:
+            tree, depth = stack.pop()
+            for mode, _name, oid in objs.tree_entries(tree):
+                n += 1
+                if mode == "40000":
+                    stack.append((oid, depth + 1))
+        self.assertGreater(n, 1 << 12, "the control: per path it would have listed thousands")
+
+    def test_b2_caps_are_size_findings(self):
+        with mock.patch.object(push_checks, "MAX_ENTRIES", 50):
+            self.commit_as("many/" + "x" * 3 + ".txt", "x\n", "one")
+            for i in range(60):
+                (self.ws / "many" / f"f{i}").write_text(f"{i}\n")
+            self.git(self.ws, "add", "many")
+            self.git(self.ws, "commit", "-q", "-m", "many")
+            res = self.ask()
+        self.refused(res, check="size", says="entries")
+        self.git(self.ws, "reset", "-q", "--hard", self.base)
+        deep = "/".join(f"d{i}" for i in range(12)) + "/f.txt"
+        with mock.patch.object(push_checks, "MAX_DEPTH", 8):
+            self.commit_as(deep, "x\n", "deep")
+            self.refused(self.ask(), check="size", says="deeper")
+        self.assertEqual(self.ask()["state"], "pushed", "the control: the same deep tree within the default caps")
+
+    def test_s1_a_flood_is_bounded(self):
+        self.limits["requests_per_day"] = 5
+        push_queue.ensure_folder("proj")
+        for i in range(400):
+            rid = f"m11161200-{i:012x}"
+            (self.push_root / "proj" / f"{rid}.request.json").write_text(
+                json.dumps({"v": 1, "id": rid, "branch": "main", "sha": self.base}))
+        reads = []
+        real = push_queue.nofollow.read
+        with mock.patch.object(push_queue.nofollow, "read", lambda *a, **k: (reads.append(a[1]), real(*a, **k))[1]):
+            t0 = time.monotonic()
+            self.take()
+        self.assertLess(time.monotonic() - t0, 20)
+        self.assertLessEqual(len([r for r in reads if r.endswith(".request.json")]), 6)
+        self.assertEqual([n for n in os.listdir(self.push_root / "proj") if n.endswith(".request.json")], [])
+        self.assertEqual(len([x for x in self.letters if "over what one day allows" in x[1]]), 1)
+
+    def test_s1_taken_is_pruned(self):
+        f = push_queue.broker("proj") / "taken.jsonl"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"at": "2020-01-01T00:00:00+00:00", "id": "m01010000-000000000000"}) + "\n")
+        self.request()
+        self.take()
+        self.assertNotIn("2020-01-01", f.read_text())
+
+    def test_nit_a_folder_by_a_requests_name(self):
+        push_queue.ensure_folder("proj")
+        bad = self.push_root / "proj" / "m11160000-aaaaaaaaaaaa.request.json"
+        bad.mkdir()
+        (bad / "inside").write_text("x\n")
+        os.utime(bad, (1, 1))
+        (self.push_root / "proj" / "m11160000-bbbbbbbbbbbb.result.json").mkdir()
+        self.commit(self.ws, "a.txt", "a\n", "a")
+        rid = self.request()
+        self.assertEqual(self.take(), [rid])
+        self.assertFalse(bad.exists())
+        self.assertFalse((self.push_root / "proj" / "m11160000-bbbbbbbbbbbb.result.json").exists())
+
+    def test_nit_no_start_time_is_not_forever(self):
+        now = push_queue.now_iso()
+        self.assertTrue(push_queue.alive({"pid": os.getpid(), "start": None, "spawned_at": now}))
+        self.assertFalse(push_queue.alive({"pid": os.getpid(), "start": None,
+                                           "spawned_at": "2020-01-01T00:00:00+00:00"}))
+
+    def test_s2_a_lease_never_pushes(self):
+        """A lease loads the workspace's local settings (the session rendering, with the push rule and folder): its own
+        --settings deny both, and deny wins. Control: the session rendering allows them."""
+        import importlib.util
+        import runtime_claude
+        pol = policy.policy("proj", self.docs["proj"], {"projects": self.docs})
+        folder = str(self.push_root / "proj")
+        lease = runtime_claude.lease_settings(pol)["permissions"]["deny"]
+        self.assertIn("Bash(brunna push *)", lease)
+        self.assertTrue(any(r.startswith("Edit(") and folder in r for r in lease))
+        session = runtime_claude.session_settings(pol)
+        self.assertIn("Bash(brunna push *)", session[2])
+        self.assertNotIn("Bash(brunna push *)", session[1])
+        # the lease's real command line names the file that holds them
+        spec = importlib.util.spec_from_file_location("lease_runner_t", BIN / "lease-runner.py")
+        lr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(lr)
+        with mock.patch.object(lr, "DIR", self.tmp / "leases"), \
+                mock.patch.object(policy, "for_project", lambda name: pol):
+            f = lr.deny_settings("proj")
+        self.assertIn("Bash(brunna push *)", json.loads(f.read_text())["permissions"]["deny"])
+
+    def test_grant_probe_shapes(self):
+        import git_push_grant
+        self.assertEqual(git_push_grant.https_url("http://127.0.0.1:9/x.git"), "http://127.0.0.1:9/x.git")
+        self.assertIsNone(git_push_grant.https_url("git://example.org/x.git"))
+        self.assertEqual(git_push_grant.visibility("git://example.org/x.git"), "unknown")
+        self.assertEqual(git_push_grant.visibility(str(self.remote)), "private")
+        with mock.patch.object(git_push_grant, "anonymous_ls_remote",
+                               lambda url: subprocess.CompletedProcess([], 0, "", "")):
+            self.assertEqual(git_push_grant.visibility("http://127.0.0.1:9/x.git"), "public")
 
 
 # ---------- merge-branch's push_on_merge in a sandboxed project (section 5) ----------

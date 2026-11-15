@@ -200,4 +200,6 @@ To <TMP>/remote.git
 === usage: brunna push
 [exit 2]
 --- stderr
-拒絕:brunna 沒有沙盒:照常用 git 推;別的專案用 brunna push --owner <專案> <分支>
+拒絕:用法:brunna push [<分支>] [--no-wait | --wait <秒>]   (在沙盒專案的資料夾裡)
+       brunna push --owner <專案> [<分支>] [--yes]
+       brunna push setup <專案> [--branches none|others|all] [--email <位址>…]

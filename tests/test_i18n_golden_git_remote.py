@@ -73,7 +73,7 @@ class Golden(Base):
         import io
         err = io.StringIO()
         with mock.patch("sys.stderr", err):
-            code = main(["push"])
+            code = main(["push"], cwd=self.tmp)   # outside every project, whatever folder the run is in
         self.out.append(f"=== usage: brunna push\n[exit {code}]\n--- stderr\n{err.getvalue()}")
         text = "\n".join(self.out).replace(str(self.tmp), "<TMP>")
         text = re.sub(r"\b[0-9a-f]{7,40}\b", "<SHA>", text)

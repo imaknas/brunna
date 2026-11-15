@@ -200,4 +200,6 @@ refused: proj is not in the registry
 === usage: brunna push
 [exit 2]
 --- stderr
-refused: brunna is not sandboxed: push with git as usual; for another project use brunna push --owner <project> <branch>
+refused: usage: brunna push [<branch>] [--no-wait | --wait <seconds>]   (in a sandboxed project's folder)
+       brunna push --owner <project> [<branch>] [--yes]
+       brunna push setup <project> [--branches none|others|all] [--email <address>…]
