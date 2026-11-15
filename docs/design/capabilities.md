@@ -558,19 +558,33 @@ exit code: `hdiutil attach` exits 0 for an attach that made nothing. Every measu
   names (`hdiutil attach -mountpoint`, `diskutil image attach --mountPoint`, `diskutil mount -mountPoint`:
   DiskArbitration checks the caller's sandbox). It does **not** refuse an attach that DiskArbitration mounts at
   `/Volumes`, nor the attach itself (a device is still made).
-- **The daemons, by mach service name** (`global-name-prefix`): `com.apple.DiskArbitration.` (diskarbitrationd: hdiutil
-  and diskutil can't attach, mount, unmount or eject at all), `com.apple.diskimage` (diskimagesiod, diskimagespawner:
-  with only this denied, diskutil's DiskImages2 attach fails with "Couldn't communicate with a helper application"),
-  `com.apple.system.hdiejectd` (with only this denied, hdiutil's attach fails), and with no single route of their own
-  measured, `com.apple.storagekitd` (erase and partition), `com.apple.filesystems.` and `com.apple.fskit.` (FSKit,
-  UserFS), `com.apple.netauth.` (NetFS), `com.apple.automountd`.
+- **The services, by name** (`global-name-prefix`, and `global-name` for one): `com.apple.DiskArbitration.`
+  (diskarbitrationd: hdiutil and diskutil can't attach, mount, unmount or eject at all), `com.apple.diskimagescontroller`
+  (named on its own, and also under the `com.apple.diskimage` prefix), `com.apple.diskimage` (diskimagesiod,
+  diskimagespawner), `com.apple.system.hdiejectd` (with only this denied, hdiutil's attach fails), and with no single
+  route of their own measured, `com.apple.storagekitd` (erase and partition), `com.apple.filesystems.` and
+  `com.apple.fskit.` (FSKit, UserFS), `com.apple.netauth.` (NetFS), `com.apple.automountd`.
+  diskutil's attach goes through **diskimagescontroller**, the XPC service bundled in DiskImages2.framework. It runs in
+  a sandbox of its own, not the caller's, and reaches diskimagesiod from there. With diskimagesiod and diskimagespawner
+  denied and diskimagescontroller allowed, `diskutil image attach --noMount` still makes the device. Denying
+  diskimagescontroller alone, as `global-name` or as `xpc-service-name`, stops it with "Couldn't communicate with a
+  helper application". (A first reading credited this to diskimagesiod; the prefix only caught the controller because
+  the names share it.)
 - **The disk-image driver's door:** hdiutil opens `IOHDIXControllerUserClient` directly. Denying `iokit-open-user-client`
   for that class, or `iokit-open-service` for `IOHDIXController`/`AppleDiskImagesController`, alone stops its attach.
+  `AppleDiskImagesController` also serves `DIDeviceCreatorUserClient`, the client diskimagescontroller opens; an
+  `IOServiceOpen` from the sandboxed process on either service gets `kIOReturnNotPermitted`.
+- **LaunchServices** (`(deny lsopen)`, in `_isolation`): opening a .dmg starts DiskImageMounter outside the
+  sandbox, which attaches it and mounts it at `/Volumes`. Under the `mount_denies()` lines alone, a process's own
+  `LSOpenCFURLRef` (or `NSWorkspace.open`) on the image mounts it; under the real profiles, `lsopen` refuses it. The
+  `/usr/bin/open` binary is stopped earlier by the exec deny, so a route through the binary alone never reaches this
+  layer.
 - **Not an exec deny:** denying `/usr/bin/hdiutil` stops only that path. (A copy of hdiutil or `open` in a writable
   folder is killed at exec on this system, but that is code signing, not this profile.)
 
-All three layers together are `seatbelt.mount_denies()`, in `_isolation` and therefore in both profile kinds. Routes
-under the real `service_profile` and `profile(pol, "gpu")`, observed from outside:
+The first three layers are `seatbelt.mount_denies()`, and the fourth is `(deny lsopen)`. Both are in `_isolation`, so
+both profile kinds carry them. Routes under the real `service_profile` and `profile(pol, "gpu")`, observed from
+outside ("before" is the same profile without `mount_denies()`):
 
 | route | before | after |
 |---|---|---|
@@ -579,19 +593,30 @@ under the real `service_profile` and `profile(pol, "gpu")`, observed from outsid
 | `diskutil image attach --mountPoint` / at `/Volumes` | mounted | nothing |
 | `diskutil image attach --noMount`, `ram://` | device made | nothing |
 | `mount_devfs`, `mount -t devfs` over its folder | mounted | refused |
+| `hdiutil attach -shadow`, `hdiutil convert` to UDRW then attach, `hdiutil mount` | mounted | nothing |
+| a mount point that is a symbolic link to an owner folder (hdiutil, diskutil) | mounted there | nothing |
+| `/usr/libexec/attach_automation_image` | device made | nothing |
 | `diskutil mount [-mountPoint]` of a device attached outside | mounted | refused |
-| `mount -t hfs` of that device | refused (device permissions) | refused |
+| `mount -t hfs -o rdonly` of that device | mounted (no-op profile) | refused |
 | `umount`, `diskutil unmount`, `hdiutil detach` of the owner's volume | unmounted | refused, still mounted |
 | `mount_nfs 127.0.0.1:/` | no server (connection refused) | refused before connecting |
-| `open x.dmg` | refused already (`/usr/bin/open` exec deny, `lsopen`) | refused |
+| `open x.dmg` | refused already (`/usr/bin/open` exec deny) | refused |
+| `LSOpenCFURLRef` / `NSWorkspace.open` on x.dmg from its own code | refused already (`lsopen`); mounted at `/Volumes` with only `mount_denies()` | refused |
 | `mount_ftp` (FSKit) to a local FTP server | refused already: FSKit refuses a sandboxed caller even under a no-op profile | refused |
+| `mount_webdav`, `mount_url http://` to a local WebDAV server | mounts unsandboxed; under any Seatbelt profile, a no-op one included, nothing is mounted although the server is asked | nothing |
+| reading `/dev/rdiskN` of the owner's image mounted over a folder in `deny_read` | the file refused, its blocks read | both refused |
 
-Not reached: SMB and WebDAV (no server on this machine). Their mount tools call mount(2) in-process, which the
-`mount_devfs` row shows refused. The automounter's maps here are `/home` and `/Network/Servers`; `/net` is off.
+Not reached: SMB (no server on this machine). Its mount tool calls mount(2) in-process, which the `mount_devfs` row
+shows refused. The automounter's maps here are `/home` and `/Network/Servers`; `/net` is off.
 
 Ordinary work under the new profiles, A/B with and without the block: python (json, sqlite3, ssl), the platform's
-Python with PyYAML, node, git (init, commit, log), `uv venv` + `uv pip install` and `npm install` over the network,
-`curl https://pypi.org`, `df`, and MLX on the GPU (Metal) under the cap profile all ran the same. Claude Code's
+Python with PyYAML, node, git (init, commit, log, `clone` over https), `uv venv` + `uv pip install` and `npm install`
+over the network, `curl https://pypi.org`, node `fetch`, `swiftc` and `clang` builds, ad-hoc `codesign -s -`, `df`,
+`stat -f`, `FileManager.mountedVolumeURLs`, a Metal shader compiled at run time and dispatched, and MLX on the GPU
+(Metal) under the cap profile all ran the same. What no longer works: read-only disk questions (`diskutil info`,
+`diskutil list`, `hdiutil imageinfo`: they need DiskArbitration or the disk-image services) and `stat` of a
+`/dev/disk*` node. Building a .dmg (`hdiutil create -srcfolder`, `-attach`) failed before this block too, under the
+write rules. Claude Code's
 own sandbox is deny-by-default, and its mach-lookup and IOKit allowlists name none of these services, classes or
 `file-mount`. That is read from the profile its binary generates, not measured. A canary in `conformance_claude`
 would run `hdiutil attach -mountpoint` and `diskutil image attach` through the session's Bash and look from outside.
@@ -603,18 +628,40 @@ user namespace of its own is seen only inside it. So `landlock.guarantees()` dec
 `isolation.REQUIRED`: without it, `own-writes-only` means nothing. The Conformance probe tries `mount -t tmpfs` there.
 In the test container that fails as a non-root user with or without Landlock, so it has no positive control.
 
-Tests: `tests/test_no_mounts.py` (every route above under both kinds, an unsandboxed positive control, an existing
-device, the owner's volume, ordinary work), and the Conformance probe (`no-mounts`: `mount-blocked`, seen from outside).
-Switching `mount_denies` off makes 30 of its subtests fail.
+Tests: `tests/test_no_mounts.py` (the routes of the first table above under both kinds, LaunchServices through the
+platform's Python and ctypes, an existing device, the owner's volume, the raw device, ordinary work), and the
+Conformance probe (`no-mounts`: `mount-blocked`, seen from outside). Every route first runs under `(allow default)` and
+must be seen there, or the test fails: a flag gone or a tool moved can't pass as "refused". The sandboxed run is then
+watched twice as long as the control took to show. The tools are named by absolute path, never through PATH. Switching
+`mount_denies` off made 30 of its subtests fail; dropping `(deny lsopen)` fails the LaunchServices route under both
+kinds, and dropping the raw-device deny fails the raw read under both.
 
 ### Residuals
 
-- **By name, not by kind.** The daemon list is an enumeration of this macOS's services. A later macOS that mounts
+- **By name, not by kind.** The service list is an enumeration of this macOS's services. A later macOS that mounts
   through a new service is caught only if a route test covers it. `test_no_mounts` runs on every gate, so a new route
-  added there shows up; a new daemon nobody tries does not.
-- **Later rules win.** A capability fragment that allows `iokit-open`, `mach-lookup` or `default` after the base would
-  reopen this. `test_no_mounts` checks that nothing after the block allows them back, for the fragments that exist.
-- **Not measured here:** a hand-written DiskImages2 client. It needs diskimagesiod, which is denied by name, and
-  diskutil, which is one, is refused. Also not measured: whether a process under these profiles can get launchd to run
-  a job outside the sandbox through its API rather than the `launchctl` binary. The probe was not run in this session.
-  If launchd would run such a job, every guarantee here is moot, not only this one.
+  added there shows up; a new service nobody tries does not.
+- **Framework XPC services run outside the caller's profile.** An XPC service bundled in a framework is started by
+  launchd in a sandbox of its own (or none), so what it does for the caller is limited only by whether the caller may
+  look it up (Seatbelt matches the lookup by `global-name` as well as `xpc-service-name`, measured) and by the
+  service's own checks. Of the system's 471 `.xpc` bundles, those whose binaries reference mount or attach calls:
+  `com.apple.diskimagescontroller` (denied by name), `com.apple.filesystems.netfs.PlugInLibraryService` and
+  `com.apple.filesystems.lifs.userfsd.UVFSService` (under the `com.apple.filesystems.` prefix),
+  `com.apple.CSCMountService` and `com.apple.WorkflowKit.MacHelper` (their binaries reject a client without a private
+  entitlement), and two MobileSoftwareUpdate services (`CleanupPreparePathService`, `CryptegraftService`; not
+  inspected). None of the last four was exercised. `com.apple.mobile.storage_mounter` (MobileStorageMounter) and
+  cryptexd also mount, but behind private entitlements.
+- **Later rules win.** A capability fragment that allows `default`, `file-mount`, `file-unmount`, `file*`, `mach…`,
+  `iokit…` or `lsopen` after the base would reopen this. `test_no_mounts` checks that nothing after the block allows
+  them back, in any of those spellings, for every fragment in `capabilities/`. (`(allow file* (subpath <dir>))` after
+  the block was measured not to reopen a mount at `<dir>`.)
+- **Closed (11-15): raw disk devices.** An image the owner attaches gets `/dev/diskN` and `/dev/rdiskN` owned by the
+  owner, so a sandboxed process could read its blocks: an encrypted image's decrypted, and the files of a folder in
+  `deny_read` that the image is mounted over (measured: the file refused, the same bytes read from `/dev/rdiskNs1`).
+  `_isolation` now denies reading and writing `^/dev/r?disk[0-9]`; the test reads the device of an image it mounts
+  over a denied folder.
+- **Not measured here:** a hand-written client of the disk-image services other than diskimagescontroller (the
+  services it reaches from its own sandbox, diskimagesiod and diskimagespawner, are denied by name too). Also not
+  measured: whether a process under these profiles can get launchd to run a job outside the sandbox through its API
+  rather than the `launchctl` binary. The probe was not run in this session. If launchd would run such a job, every
+  guarantee here is moot, not only this one.
