@@ -1,7 +1,7 @@
 === nothing to push: brunna push proj main --yes
 [exit 0]
 --- stdout
-nothing to push: main has no commits the remote lacks
+nothing to push: the remote's main is already at <SHA>
 --- stderr
 
 === .github refused: brunna push proj main --yes

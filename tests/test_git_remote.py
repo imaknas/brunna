@@ -151,6 +151,42 @@ class Pushes(Base):
         self.assertIn("nothing to push", out)
         self.assert_untouched(before)
 
+    def test_a_ref_that_moves_to_commits_the_remote_has(self):
+        """An empty bundle is no "nothing to push": a new branch at a known commit, or an old branch fast-forwarded to
+        a commit already on the default branch, still moves the remote's ref."""
+        base = self.tip()
+        self.git(self.ws, "push", "-q", "origin", "main:feature")
+        new = self.commit(self.ws, "a.txt", "a\n", "add a")
+        self.assertEqual(self.push("main", "--yes")[0], 0)
+        self.git(self.ws, "branch", "-q", "fresh", "main")
+        code, _out, err = self.push("fresh", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.tip("refs/heads/fresh"), new)
+        self.git(self.ws, "branch", "-q", "-f", "feature", "main")
+        self.assertEqual(self.tip("refs/heads/feature"), base)
+        code, out, err = self.push("feature", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.tip("refs/heads/feature"), new)
+        self.assertIn("0 commits", out)
+
+    def test_a_branch_behind_the_remote_is_no_fast_forward(self):
+        old = self.tip()
+        self.commit(self.ws, "a.txt", "a\n", "add a")
+        self.assertEqual(self.push("main", "--yes")[0], 0)
+        self.git(self.ws, "reset", "-q", "--hard", old)
+        code, _out, err = self.push("main", "--yes")
+        self.assertEqual(code, git_remote.REFUSED, err)
+        self.assertIn("not a fast-forward", err)
+
+    def test_the_job_naming_a_commit_the_remote_lacks_is_refused(self):
+        before = self.tip()
+        lie = lambda project, cwd, argv, port=None: ["sh", "-c", "printf %s " + "ab" * 20 + "; exit 3"]  # noqa: E731
+        with mock.patch.object(isolation, "wrap", lie):
+            code, _out, err = self.push("main", "--yes")
+        self.assertEqual(code, git_remote.REFUSED, err)
+        self.assertIn("doesn't have", err)
+        self.assert_untouched(before)
+
     def test_safe_bare_repository_explicit_holds_for_the_owned_repo(self):
         self.commit(self.ws, "a.txt", "a\n", "add a")
         self.assertEqual(self.push("main", "--yes")[0], 0)
@@ -275,7 +311,7 @@ class Refusals(Base):
                               capture_output=True, text=True, check=True).stdout.strip()
         c = self.git(self.ws, "commit-tree", "-p", "HEAD", "-m", "a .git folder in the tree", tree).strip()
         self.git(self.ws, "update-ref", "refs/heads/main", c)
-        err = self.refused("main", "--yes", says="refused")
+        err = self.refused("main", "--yes", says="object checks")
         self.assertIn("hasDotgit", err)
         self.assertEqual(self.bare(self.owned(), "cat-file", "-t", c), "", "the commit never reached the owned repo")
         self.plain_push("main")   # control: the remote (no fsck of its own) takes it from plain git
@@ -352,18 +388,32 @@ class Canary(Base):
 
 @unittest.skipUnless(seatbelt.can_sandbox() is None, "needs Seatbelt (macOS)")
 class UnderSeatbelt(Base):
+    """The project's job under the real Seatbelt profile, without and with the git-dir fence (enforce.git: platform):
+    brunna push works for a sandboxed project switched on or not."""
+    fence = None
+
     def as_project(self, project, cwd, argv, port=None):
+        import policy
         self.wrapped.append(list(argv))
         pol = {"workspace": self.ws, "write": [], "other_projects": [], "deny_read": [], "credentials": [],
-               "credential_files": []}
+               "credential_files": [], "git_fence": policy.git_fence(self.docs["proj"], [self.ws])}
         return [seatbelt.SANDBOX_EXEC, "-p", seatbelt.service_profile(pol, [self.ws]), *argv]
 
-    def test_the_bundle_is_made_in_the_project_sandbox(self):
+    def check(self):
         new = self.commit(self.ws, "a.txt", "a\n", "add a")
         code, _out, err = self.push("main", "--yes")
         self.assertEqual(code, 0, err)
         self.assertEqual(self.tip(), new)
         self.assert_owner_git_only_in_owned_repos()
+
+    def test_the_bundle_is_made_in_the_project_sandbox(self):
+        self.check()
+
+    def test_and_under_the_git_dir_fence(self):
+        import policy
+        self.docs["proj"]["enforce"]["git"] = "platform"
+        self.assertIsNotNone(policy.git_fence(self.docs["proj"], [self.ws]))
+        self.check()
 
 
 class OverHttp(Base):
@@ -444,6 +494,59 @@ class OverHttp(Base):
             self.assertEqual(c.split()[1], "owner", c)
             self.assertEqual(pathlib.Path(c.split(" ", 2)[2]).resolve(), self.owned().parent.resolve(), c)
         self.assert_owner_git_only_in_owned_repos()
+
+
+class EndToEnd(unittest.TestCase):
+    """`brunna push` as the owner types it, in a throwaway instance: the registry entry read through its index (paths.origin,
+    enforce), the project's job through the real bin/sandboxed-run. Skipped where this machine can't sandbox."""
+
+    def test_the_cli(self):
+        tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        for d in ("home", "config/projects", "data", "secrets", "bus", "state", "ws"):
+            (tmp / d).mkdir(parents=True)
+        (tmp / "gitconfig").write_text("[safe]\n\tbareRepository = explicit\n")
+        (tmp / "config" / "hub.json").write_text(json.dumps({
+            "owner": {"name": "alex", "tag": "Alex"}, "bus_dir": str(tmp / "bus"), "registry_dir": "projects",
+            "workspace_root": str(tmp / "ws"), "memory_copies": str(tmp / "copies"), "services_root": str(tmp / "svc"),
+            "language": {"ui": "en", "content": "en"}}))
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith(("BRUNNA_", "AGENT_HUB_", "GIT_"))
+                  or k in ("AGENT_HUB_PYTHON", "BRUNNA_PYTHON")},
+               "AGENT_HUB_ROOT": str(ROOT), "HOME": str(tmp / "home"), "AGENT_HUB_CONFIG": str(tmp / "config"),
+               "AGENT_HUB_DATA": str(tmp / "data"), "AGENT_HUB_SECRETS": str(tmp / "secrets"),
+               "AGENT_HUB_STATE": str(tmp / "state"), "GIT_CONFIG_GLOBAL": str(tmp / "gitconfig"),
+               "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C", **IDENT}
+
+        def git(cwd, *args):
+            subprocess.run(["git", "-C", str(cwd), *args], env=env, capture_output=True, text=True, check=True)
+        remote, ws, seed = tmp / "remote.git", tmp / "ws" / "proj", tmp / "seed"
+        git(tmp, "init", "-q", "--bare", "-b", "main", str(remote))
+        git(tmp, "init", "-q", "-b", "main", str(seed))
+        (seed / "README").write_text("r\n")
+        git(seed, "add", "README")
+        git(seed, "commit", "-q", "-m", "init")
+        git(seed, "push", "-q", str(remote), "main")
+        git(tmp, "clone", "-q", str(remote), str(ws))
+        (ws / ".github" / "workflows").mkdir(parents=True)
+        (ws / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
+        git(ws, "add", ".github")
+        git(ws, "commit", "-q", "-m", "a workflow")
+        (tmp / "config" / "projects" / "proj.yaml").write_text(
+            f"v: 1\nname: proj\npaths:\n  workspace: {ws}\n  origin: {remote}\n"
+            "enforce:\n  sandbox: true\n  git_ci: true\n")
+        r = subprocess.run([sys.executable, str(BIN / "registry.py"), "check"], env=env, capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = subprocess.run([sys.executable, str(BIN / "agenthub"), "push", "proj", "main", "--yes"], env=env,
+                           capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
+        if "the sandbox refused" in r.stderr:
+            self.skipTest(f"this machine can't sandbox the project's job: {r.stderr.strip()[-200:]}")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        head = subprocess.run(["git", "-C", str(ws), "rev-parse", "HEAD"], env=env, capture_output=True, text=True).stdout
+        tip = subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"], env=env, capture_output=True,
+                             text=True).stdout
+        self.assertEqual(tip, head)
+        self.assertIn("allowed by enforce.git_ci", r.stdout)
+        self.assertTrue((tmp / "state" / "git-broker" / "proj" / "remote.git" / "HEAD").is_file())
 
 
 class Registry(unittest.TestCase):

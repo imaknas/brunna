@@ -218,16 +218,19 @@ def fetch_remote(owned: Owned, origin: str, default: str, branch: str, has: bool
                        why=visible(r.stderr.decode(errors="replace").strip()[-400:], lines=True)))
 
 
-def bundle_in(owned: Owned, project: str, ws: pathlib.Path, branch: str, have: list[str], tmp: pathlib.Path) -> str | None:
-    """The branch as the project's job bundles it, in the owned repo at INCOMING after fsck; its sha, or None when the
-    project has nothing the remote's tips don't reach."""
+def bundle_in(owned: Owned, project: str, ws: pathlib.Path, branch: str, have: list[str], tmp: pathlib.Path) -> str:
+    """The branch as the project's job bundles it, in the owned repo after fsck; its sha. When the remote's tips reach
+    all of it, the job says only the branch's commit id: one the owned repo already has, or it is refused."""
     bundle = tmp / "push.bundle"
     with bundle.open("wb") as fh:
         r = project_git.job(project, ws, "bundle-branch", ws, branch, *have, out=fh,
                             timeout=project_git.BUNDLE_TIMEOUT_S, cap=project_git.MAX_BUNDLE)
     why = visible(r.stderr.strip()[-300:])
     if r.returncode == NOTHING:
-        return None
+        tip = bundle.read_bytes()[:100].decode(errors="replace").strip()
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", tip) or owned.sha(tip) != tip:
+            raise Refused(_("the project's job named a commit the remote doesn't have: {sha}", sha=visible(tip[:64])))
+        return tip
     if r.returncode == NO_BRANCH:
         raise Refused(_("{project} has no branch {branch}", project=project, branch=visible(branch)))
     if r.returncode == project_git.EX_SANDBOX:
@@ -240,7 +243,9 @@ def bundle_in(owned: Owned, project: str, ws: pathlib.Path, branch: str, have: l
     stage.git("init", "-q", "--bare", "--template=", check=True)
     (stage.repo / "objects" / "info").mkdir(parents=True, exist_ok=True)
     (stage.repo / "objects" / "info" / "alternates").write_text(str(owned.repo.resolve() / "objects") + "\n")
-    r = stage.git(*SAFE, "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--", str(bundle),
+    # no checks here on purpose: the owned repo's fetch below is the one that checks, on every git version
+    r = stage.git(*SAFE, "-c", "transfer.fsckObjects=false", "-c", "fetch.fsckObjects=false", "fetch", "-q",
+                  "--no-tags", "--no-write-fetch-head", "--", str(bundle),
                   f"+refs/heads/{branch}:refs/heads/incoming")
     if r.returncode != 0:
         raise Refused(_("the project's bundle was refused: {why}", why=visible(r.stderr.decode(errors="replace").strip()[-400:], lines=True)))
@@ -372,8 +377,8 @@ def push(project: str, args: list[str]) -> int:
         tmp = pathlib.Path(tempfile.mkdtemp(prefix="hub-push-", dir=hubconf.private_tmp()))
         try:
             new = bundle_in(owned, project, ws, branch, have, tmp)
-            if new is None or new == old:
-                print(_("nothing to push: {branch} has no commits the remote lacks", branch=branch))
+            if new == old:
+                print(_("nothing to push: the remote's {branch} is already at {sha}", branch=branch, sha=new[:12]))
                 return OK
             if old and owned.git("merge-base", "--is-ancestor", old, new).returncode != 0:
                 raise Refused(_("{branch} is not a fast-forward of the remote's {old}: merge or rebase onto it in the "

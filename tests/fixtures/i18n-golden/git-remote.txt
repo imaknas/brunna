@@ -1,7 +1,7 @@
 === nothing to push: brunna push proj main --yes
 [exit 0]
 --- stdout
-沒東西要推:main 沒有遠端缺少的 commit
+沒東西要推:遠端的 main 已經在 <SHA>
 --- stderr
 
 === .github refused: brunna push proj main --yes

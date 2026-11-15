@@ -60,8 +60,8 @@ readable. Nothing here decides anything for the platform; the caller treats the 
   bundle-head <ws>                        stdout: a bundle of the checked-out branch
   bundle-branch <ws> <branch> [<sha>…]    stdout: a bundle of refs/heads/<branch> without what the given commits reach
                                           (the remote's tips, for brunna push: bin/git_remote.py); a sha this repo
-                                          lacks is left out of that. Exit 3: nothing the given commits don't reach,
-                                          4: no such branch
+                                          lacks is left out of that. Exit 3: nothing the given commits don't reach
+                                          (stdout: the branch's commit id instead), 4: no such branch
   set-origin <ws> <url> <branch>          origin = url, the branch tracking it
   tracked <repo> <name>…                  JSON [the tracked paths at or under one of the names, at any depth] (at
                                           most 200): what a sandboxed project tracks among the control names
@@ -597,10 +597,13 @@ def op_bundle_branch(ws: str, branch: str, *have: str) -> int:
         return NO_BRANCH
     known = [h for h in have if len(h) in (40, 64) and all(c in "0123456789abcdef" for c in h)
              and git(ws, "cat-file", "-e", f"{h}^{{commit}}").returncode == 0]
+    if out(ws, "rev-list", "--count", ref, "--not", *known, "--").strip() == "0":
+        # the remote has every commit (git's bundle would print its header before refusing an empty one): the ref
+        # may still have to move there, a new branch at a known commit, say
+        sys.stdout.write(out(ws, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}").strip())
+        return NOTHING
     r = git(ws, "bundle", "create", "-q", "-", ref, *(f"^{h}" for h in known), text=False, stdout=sys.stdout.buffer,
             stderr=subprocess.PIPE)
-    if r.returncode and b"empty bundle" in (r.stderr or b""):
-        return NOTHING
     sys.stderr.write((r.stderr or b"").decode(errors="replace"))
     return r.returncode
 

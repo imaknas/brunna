@@ -37,9 +37,10 @@
  "not pushed: {why}": "沒有推:{why}",
  "{flag}: brunna push makes only a fast-forward of one branch (no force, tags, deletes or mirrors)": "{flag}:brunna push 只對一個分支做 fast-forward(不強制推送、不推 tag、不刪分支、不做 mirror)",
  "another brunna push of this project is running": "這個專案已經有另一個 brunna push 在跑",
- "nothing to push: {branch} has no commits the remote lacks": "沒東西要推:{branch} 沒有遠端缺少的 commit",
+ "nothing to push: the remote's {branch} is already at {sha}": "沒東西要推:遠端的 {branch} 已經在 {sha}",
  "{branch} is not a fast-forward of the remote's {old}: merge or rebase onto it in the project first (brunna push never forces)": "{branch} 不是遠端 {old} 的 fast-forward:先在專案裡 merge 或 rebase 到它上面(brunna push 從不強制推送)",
  "{sha} changes .github/ against the remote's {default}: CI would run it with the repo's secrets; the owner allows that with enforce.git_ci: true in the registry": "{sha} 的 .github/ 跟遠端的 {default} 不一樣:CI 會拿 repo 的 secrets 跑它;{owner} 在登錄寫 enforce.git_ci: true 才允許",
  "git push failed: {why}": "git push 失敗:{why}",
- "unknown option {flag}": "不認得的選項 {flag}"
+ "unknown option {flag}": "不認得的選項 {flag}",
+ "the project's job named a commit the remote doesn't have: {sha}": "專案的 job 給了一個遠端沒有的 commit:{sha}"
 }

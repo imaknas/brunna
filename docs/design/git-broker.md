@@ -2716,15 +2716,17 @@ push over the broker socket still needs them and is not part of this.
    none, `(native)`, `ext::` / `fd::`, and a local path in a folder a sandboxed project writes.
 2. The branch is bundled as the project: `project-git-job.py bundle-branch` through `project_git.job`, sandboxed. It
    leaves out what the remote's tips reach, the ones the project has (a bundle's prerequisites must exist on both sides).
-   Its stdout lands in a file under `hubconf.private_tmp()`.
+   Its stdout lands in a file under `hubconf.private_tmp()`. When the remote already has every commit (a new branch at
+   a known commit, say), the job prints only the branch's commit id, and the push goes on only if the owned repo has
+   that commit.
 3. The owner's git runs only in `<state>/git-broker/<project>/remote.git`. That repo is made with
    `init --bare --template=`, its config is written by the platform, and it is named with `--git-dir` every time
    (`safe.bareRepository=explicit` holds). Its cwd is that folder. Its environment is built from scratch: the owner's
    HOME, PATH, global config, ssh agent and proxies, and nothing else. In order:
    - `ls-remote --symref` gives the default branch;
    - a fetch of the default branch and the pushed branch runs with hooks off, no submodules, no tags and fsck on;
-   - the bundle goes into a staging bare repo that borrows the owned repo's objects, and from there into the owned
-     repo over `file://`, with `transfer.fsckObjects`. A fetch of a bundle checks objects only on newer git; a fetch
+   - the bundle goes into a staging bare repo that borrows the owned repo's objects (no checks there), and from there
+     into the owned repo over `file://`, with `transfer.fsckObjects`. A fetch of a bundle checks objects only on newer git; a fetch
      over a transport does on every git. A `.git` tree entry is refused there (`hasDotgit`).
 4. **The policy:**
    - fast-forward only, with no force of any kind;
@@ -2772,4 +2774,6 @@ owner's way to push the default branch.
 - every owner-side git call is recorded at its one start point, and each one names an owned repo with `--git-dir`,
   from outside the workspace;
 - a canary planted in the project's `.git` never runs, with the control that the owner's git in the workspace runs it;
-- on macOS, the project's job runs under the real Seatbelt profile.
+- on macOS, the project's job runs under the real Seatbelt profile, with and without the git-dir fence;
+- one end-to-end run types `brunna push` in a throwaway instance: the registry entry read through its index and the
+  job through the real `sandboxed-run` (Seatbelt on macOS, Landlock in `bin/linux-test`).
