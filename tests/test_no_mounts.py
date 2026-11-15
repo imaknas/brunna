@@ -31,6 +31,12 @@ MAC = sys.platform == "darwin" and seatbelt.can_sandbox() is None
 HDIUTIL, DISKUTIL, MOUNT, UMOUNT = "/usr/bin/hdiutil", "/usr/sbin/diskutil", "/sbin/mount", "/sbin/umount"
 OPEN_ALL = "(version 1)\n(allow default)\n"   # the positive control: the same route with nothing denied
 CONTROL_S = 60   # how long a control may take to show (DiskImageMounter starting, an attach verifying the image)
+# Opening the image through LaunchServices really mounts it with DiskImageMounter, and Finder opens a window on the
+# owner's desktop: those two controls run only when asked (the routes' refusals run always, and mount nothing). Run
+# them by hand, with no Finder window in the way, when the mount rules change: BRUNNA_DESKTOP_TESTS=1.
+DESKTOP = os.environ.get("BRUNNA_DESKTOP_TESTS") == "1"
+LS_WATCH_S = 5.0   # how long a LaunchServices route's refusal is watched without its control (its control takes ~2 s)
+LS_ROUTES = {"open (LaunchServices, the binary)", "LSOpenCFURLRef (its own code)"}
 MARK = "fsmonitor = false"
 # LaunchServices asked from code the sandboxed process runs itself (not /usr/bin/open, which an exec deny stops before
 # LaunchServices is reached): opening a .dmg starts DiskImageMounter outside the sandbox
@@ -222,10 +228,13 @@ class Routes(unittest.TestCase):
             with self.subTest(route=name):
                 try:
                     self.ram_window(cmd)
-                    try:
-                        wait = self.control(name, cmd, lambda: any(self.seen()))
-                    finally:
-                        self.clean()
+                    if name in LS_ROUTES and not DESKTOP:
+                        wait = LS_WATCH_S   # no control: it would open a Finder window on the owner's desktop
+                    else:
+                        try:
+                            wait = self.control(name, cmd, lambda: any(self.seen()))
+                        finally:
+                            self.clean()
                     for kind in self.profiles:
                         with self.subTest(kind=kind):
                             self.ram_window(cmd)
