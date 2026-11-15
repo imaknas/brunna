@@ -2477,3 +2477,166 @@ The owner took every recommendation (the slices are already written to them):
   loudly.
 - **Point 21:** the `full` tier runs a few race rounds per operation; the 40-round run is opt-in, and one recorded
   40-round run per worktree-writing operation is part of slice b's done criterion.
+
+### Slice a as built (11-15)
+
+Built as the slice says, with the owner's decisions above. **No project is switched on;** every live project's renderings
+were compared before and after (below). The broker is started only by tests; no service is declared.
+
+**What landed:**
+- `bin/seatbelt.py`:
+  - `_isolation(..., temp=True)`;
+  - `exec_guard(git_paths)` (a path ending in `/` is a folder: git's exec-path);
+  - `git_writer_profile` (P1), `git_init_profile` and `materialiser_profile` (P2), as the slice lists them;
+  - `broker_socket_rules`, in `service_profile` for a switched-on project only.
+- `bin/policy.py`: `git_broker(doc, name, state=None)`, carried by `policy()` as `git_broker`.
+- `bin/sandboxed-run`: for a switched-on project, `bin/git-wrapper` first on PATH and the service socket named in
+  `<prefix>GIT_SOCKET`.
+- `bin/git_allow.py`: the allowlists, pure.
+- `bin/git_broker.py`: the library. `bin/git-broker.py`: the service's entry point. `bin/git_wrapper.py` with
+  `bin/git-wrapper/git`, and `brunna git`.
+- Doctor's switched-on row says "rebuilt <time>" or "not rebuilt", and stays `bad`.
+- `git_broker.timeout_s`, `long_timeout_s` and `concurrency` in `contracts/hub.v1.schema.json` (open point 17).
+
+**Measured** (`tests/test_git_broker.py`, real Seatbelt, real git 2.50.1). Every refused probe has a positive control,
+and each control lands:
+- **S-b's four reads** (`hash-object -w` of B's file, the same through a folder link, `commit -F` of it,
+  `apply --cached` of B's patch), each through the wrapper and the broker into P1:
+  - each one reached P1 (the log says so), failed there, and left nothing of B's in A's repo;
+  - the control, a test-only writer profile with no read denies, put B's secret into a fresh repo each time.
+- **P1:**
+  - it can't write the worktree, the temp area, `config` (`CONFIG.lock` too), `hooks/`, `info/attributes`,
+    `info/grafts`, `shallow`, either alternates file, `commondir` or `gitdir`;
+  - it can't connect to a TCP or Unix listener;
+  - it writes its git dir;
+  - controls: each write and connect lands with no profile, and each connect also lands under the service profile.
+- **The exec guard:** git run directly under P1 (no argument filter): `grep -O<cmd>` and a `!` alias ran no canary.
+  P1 without the guard ran both.
+- **The init profile:** `make_repo`'s config holds only allowlisted keys plus the preset, it has no hooks folder, and it
+  has the platform folder. A write outside the new `.git` is refused under the profile and lands with none.
+- **B2:**
+  - `apply --cached` of `x/HEAD`, `x/head` and a spelling with an ignorable character is refused; the index and HEAD
+    are unchanged, and no copy or lock is left;
+  - a commit of an index holding `x/HEAD` (put there by the owner) is refused, with nothing changed;
+  - control: the owner's plain git takes both.
+- **The environment:** a canary `http.extraHeader` in the broker's own environment (`GIT_CONFIG_COUNT`/`KEY_0`/
+  `VALUE_0`) isn't seen by P1's `git config --get`. Plain git with the same environment sees it.
+- **Identity:**
+  - another project's service socket is refused under the socket rule; without the rule it connects;
+  - the project's own session socket is refused directly, through a symbolic link it made, and through a hard link it
+    tried to make (see the deviations for that control);
+  - an unrelated Unix socket stays reachable;
+  - no proof, and the nonce in another project's folder, are each refused; the same nonce in the right folder is
+    accepted;
+  - a sandboxed process connected to another project's socket can't write that project's nonce (the wrapper says so);
+    that project's own service can;
+  - a FIFO or a link at `.hub-run` or `git` is refused at once;
+  - a nested workspace, a nonce folder in another project's `allow_write`, and a shared root are each not served; the
+    same project with no overlap is served;
+  - a cwd or `-C` outside the project's folders is refused, and told to use a worktree inside the project.
+- **The answers:** not switched on; switched on but not rebuilt (no record, and a `.git` replaced since). Nothing runs
+  for either.
+- **The wrapper:**
+  - outside a sandbox, argv, environment and exit status pass unchanged;
+  - inside, reads run in place (no broker call);
+  - a selecting environment runs in place and its write fails loudly;
+  - with the broker down, a write says so (exit 2) and a read works.
+- **The config op:**
+  - refused: `core.fsmonitor`, `core.bare=true`, a filter, `remote.*.pushurl`, another URL, `branch.main.merge`,
+    `submodule.*`, `--global`, a remote with an undeclared URL, and unsetting `core.repositoryformatversion`;
+  - lands: `user.name`, `remote add` of the registry's URL, an upstream on a non-default branch, `--unset`, and
+    `remote remove` (its tracking refs go too);
+  - with an existing `config.lock` it exits 255 and leaves the owner's lock and the config as they were;
+  - a FIFO include doesn't hang it.
+- **This slice's operations end to end,** through the wrapper from inside the fenced service profile: `add`,
+  `commit -m`, `commit -F -`, `commit -a`, `hash-object -w --stdin` (300 KB of binary), `apply --cached` (from stdin
+  and from a file), `rm --cached`, `notes add -m`, `gc`. The repo fscks clean afterwards. The other forwarded
+  subcommands answer "not built yet".
+- **The owner's canaries:**
+  - the section 6 plants were written from inside, through `git` (the wrapper) and directly: a filter with
+    `.gitattributes`, `core.fsmonitor`, a `post-index-change` hook, `info/attributes`, a nested repo with its own
+    fsmonitor;
+  - the owner's `status`, `add`, `commit`, `diff` and the nested `status` then ran none of them;
+  - control: the same plants written unfenced, without the wrapper, ran all four.
+- **Limits:**
+  - a call over the timeout exits 124 and leaves no process;
+  - with the cap at 1, a second call waits until the first ends;
+  - the owner's `index.lock` makes `add` and `apply --cached` fail with exit 128 and git's message;
+  - the log holds project, socket, subcommand, path, exit and duration, and no argument value.
+
+The profile text (`tests/test_git_broker_profiles.py`, any OS):
+- P1 holds every line of `_isolation` (but its write allow), each of `mount_denies()`, the raw-disk deny,
+  `(deny lsopen)`, the Keychain deny and the network denies;
+- P1 has no temp area and no fence rule, its denied names and pins, and the guard last;
+- P1 and the init profile refuse a policy without the read rules;
+- P2 is the service profile plus the guard;
+- the socket rule renders only for a switched-on project, and sandboxed-run's environment changes only for one;
+- with nothing switched on, `_isolation` and `service_profile` match a golden written from the code before this slice,
+  at fake paths, so it reads the same on any machine and OS.
+
+The allowlists: `tests/test_git_allow.py`. The refusal texts: `tests/test_i18n_golden_git_broker.py` (zh-Hant and en).
+
+**Live check (11-15, this machine).** For each of the 29 registered projects, compared before and after:
+- the Seatbelt service profile (each declared port) and cap-run profile (each capability);
+- the Claude settings and env, and the policy's env;
+- `sandboxed-run`'s environment (`env` run in each existing sandboxed workspace);
+- `render-project-settings --report`'s output and exit code (1 before and after, with the same output: a project's
+  drift unrelated to this change).
+
+All were byte-identical. The policy dict gained only the `git_broker` key, `None` for every project.
+
+**Deviations from the text above, each the safer reading:**
+- **Socket paths over macOS's 104 bytes** are bound and reached by their name from their folder (`unix_bind`,
+  `unix_connect`) instead of being refused.
+  - The tests' temp folders (and `brunna test`'s) go past it, and a long instance path could.
+  - Measured: the sandbox's socket rule still matches the full path, and a sandboxed process can `chdir` into the
+    read-denied state folder to connect. So the rule holds as written.
+- **The broker's global config, its empty hooks folder and its `HOME`** are in the shared platform state
+  (`hubconf.shared()/git-broker/`), not in `.state`.
+  - P1 must read them, and `read_denies` denies `.state` whole.
+  - `shared()` is already in `policy.read`, so P1 reads them under the project's own rules, with no widening.
+  - What they hold: the owner's `user.name` and `user.email` (which the project's commits carry anyway, and which
+    `~/.gitconfig`, readable by every sandbox, holds) and fixed keys.
+- **B2 for `commit`** checks the index the commit is written from, read through the git dir's descriptor, instead of a
+  `write-tree` and `commit-tree` pair.
+  - `commit -a` and a pathspec commit add no path the index lacks.
+  - The index is written only by git, through the broker (checked) or by the owner.
+  - So the paths are the same, and `commit` keeps git's own semantics (`--amend`, message cleanup, the reflog).
+- **The nonce walk** opens `.hub-run` and `git` with `O_NONBLOCK` as well as `O_NOFOLLOW` (its own opener). `nofollow`'s
+  doesn't, and a FIFO there must not block.
+- **The hard-link control.** Measured: `link()` of the session socket into the workspace is refused under every profile
+  of the project, with or without the socket rule or the read deny, because the source is outside its writes. So the
+  hard link's control is no profile at all, where it is made and connects. The symbolic link's and the direct
+  connect's controls are the service profile without the rule.
+- **The repo the broker checked is pinned:** P1 runs with `GIT_DIR` and `GIT_WORK_TREE` set to it, and every `-C` is
+  resolved by the broker. Git's own discovery is not used.
+- **A process given no socket** (no `<prefix>GIT_SOCKET`) runs git in place. Its writes then fail under the fence, or
+  land for a project that isn't switched on, as without the wrapper.
+- **The environment the wrapper sends** is `git_allow.relevant_env`: every `GIT_*`, `LC_*`, the passed-on names and the
+  editors. Ignored, said in `git_allow`'s header: `GIT_PAGER`, `PAGER`, `GIT_TERMINAL_PROMPT`, `GIT_PROGRESS_DELAY`,
+  `GIT_FLUSH`, `GIT_OPTIONAL_LOCKS`, `GIT_ADVICE`, and two the broker sets itself. `GIT_TRACE*` to stderr is passed on.
+  Any other `GIT_*` refuses a forwarded call.
+- **A caller's editor** is refused only where git would open one: a commit with no message source, `-e`, `-c`,
+  `--squash`, `--fixup=amend:`/`reword:`, and notes without `-m`. An `EDITOR` that is set changes nothing else.
+- **"Protected" for `branch.*.merge`:** `main`, `master`, the broker's `init.defaultBranch`, and the registry's
+  `paths.branch` when it names one.
+- **`remote remove`:**
+  - the config section is removed by the config op;
+  - the tracking refs are deleted under P1 (`for-each-ref`, then `update-ref --stdin`);
+  - `branch.*.remote` entries naming it are left.
+- **`config --unset`** refuses `extensions.*` and `core.repositoryformatversion`, which say how the repo is stored.
+- **Linked worktrees** are served when their pointers agree (`gitdirs.confirmed`) and their common dir is recorded.
+  P1 writes the common dir, which holds the admin dir.
+- **`repos.json`** keeps `{git, dev, ino, workspace, at}` per repo. `workspace: true` marks the workspace's own repo,
+  which doctor reads.
+- **Not built here** (their slices): `fetch_profile` (slice d), and the one bundle P1 may read for a call (slices b–d:
+  no slice-a operation reads one).
+- **`brunna git`** is in the CLI's command table but not in its `--help` text. That text is translated and pinned by
+  goldens, and the command is the wrapper's, not a session subcommand until step 4.
+- **The nonce folder** `.hub-run/git/` stays in the workspace, empty, after a call. Git doesn't show an empty folder,
+  and cap-runner's exclude covers `.hub-run/` for the projects it serves.
+
+**Open for the owner (not blocking):** the broker's global config lives in the shared platform state (above). It holds
+the owner's name and email, which the projects already see, and nothing private. Say if it should hold the identity
+elsewhere: for example, the identity passed with `-c` per call. That changes git's precedence, since the project's own
+config could no longer set it.

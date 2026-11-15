@@ -107,7 +107,11 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      platform folder (it was swappable by another project), git state no plumbing writes is the broker's, bundles only
      in the private temp folder, the broker's git environment built from scratch, scratch repos only where the project
      alone writes; new owner points: a `HEAD` folder P2 can't remove, worktrees outside the records at the rebuild,
-     what the `.github/**` check compares and what "own branches" means. Still open: B-1's option 4.
+     what the `.github/**` check compares and what "own branches" means. The owner took every recommendation (11-15).
+     Slice a built 11-15 ("Slice a as built"): the sockets and nonce, P1, the init profile and P2's profile, the
+     allowlists, the config op, B2's check for commit and apply --cached, the wrapper and `brunna git`; the broker is
+     started only by tests, no service is declared, no project is switched on, and every live rendering is unchanged.
+     Left: slices b, c, d, then steps 3–6. Still open: B-1's option 4.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
