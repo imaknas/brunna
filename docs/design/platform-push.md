@@ -1,7 +1,8 @@
 # Platform push: a sandboxed project's agent says "push", the platform pushes
 
-Status: design, 11-15, not built; r1 the same day after a blind review (below; where r1 and the first version
-disagree, the text now says r1). It builds on `brunna push` (`bin/git_remote.py`; `git-broker.md`, "Owner-run push,
+Status: design, 11-15; r1 the same day after a blind review, r2 after a second (below; where they and the first
+version disagree, the text now says r1 and r2). The core is built (11-16, "As built" under r2); the grant and the
+onboarding questions are built separately. It builds on `brunna push` (`bin/git_remote.py`; `git-broker.md`, "Owner-run push,
 built first (11-15)") and takes over the push half of the git broker's slice d (section 7). Open questions for the
 owner at the end.
 
@@ -66,6 +67,69 @@ The review found 3 blocking points, 11 should-fix and 8 nits. All are folded int
   - gitleaks without `stdin` gets a doctor row and `fix: owner`;
   - `merge-branch` treats "one in flight" as no failure;
   - a forge or organisation without deploy keys gets no platform push for that repo, never a fallback.
+
+## r2 (11-15), after the second blind review
+
+A second blind review of r1 found one blocking point and thirteen should-fix; all are built into the core (11-16):
+- **K1, the request folder's own entry.** A session's allowWrite covers its folder as a subpath, so the session can
+  swap the folder itself for a link (to `~/.ssh`, say), and take-in, as the owner, would read, delete and name what is
+  there. Now:
+  - the platform makes `<push_dir>` (0700) and each sandboxed project's folder (`push_queue.ensure_folder`) before it
+    renders any session settings (render-project-settings, and every take-in);
+  - every read, removal and write names the base `<push_dir>` and the relative `<project>/<name>` (nofollow), so a link
+    at `<project>` is refused by O_NOFOLLOW;
+  - take-in reads only `<id>.request.json` and never touches anything else there;
+  - a folder that is missing, a link or not a folder is made again, and that is logged.
+- **S-a, what the folder separates.** It separates session processes from services and jobs, not a session's intent
+  from code the project wrote: without the git fence, a job can plant `.git` hooks, an fsmonitor or a Makefile that run
+  `brunna push` inside a session. Sections 3 ("Who may request") and 8 say so.
+- **S-b, objects read raw.** Checks 7 and 8 read every new commit object whole, every new tree's entry names and every
+  new blob. A new commit with a header other than tree, parent, author, committer and a UTF-8 encoding is refused
+  (gpgsig, mergetag, another encoding, anything unknown). Check 8 covers every new tree's paths, not `plan()`'s diff.
+- **S-c:** the filename rules (and gitleaks' path context) run over every (path, blob) pair of the new trees, so a
+  renamed old blob is caught.
+- **S-d:** a blob is also scanned as UTF-16 (a byte order mark or alternating NULs) and with its NULs stripped.
+- **S-e, declared values can't be turned off.** `secrets:` is the project's, so the check matches every value the
+  platform has ever seen declared: salted hashes of values of 12 characters or more, kept in the platform's folder and
+  never dropped when a declaration goes. A file with another hard link isn't read.
+- **S-f:** take-in writes a fresh platform-made `requests/<id>.json` from the parsed fields, removes the original,
+  refuses a file with another hard link, and the worker reads its copy with a cap.
+- **S-g:** the worker pushes the requested sha, checked to be reachable from the branch, not the branch's tip. A queued
+  request not yet started is replaced by a newer one for the same branch, which the worker checks descends from it, so
+  `merge-branch`'s requests aren't lost.
+- **S-h, S-i:** `session_write` is added in one place, the session rendering (`runtime_claude.session_settings`, called
+  only by render-project-settings), as an allowWrite and as a root of `_protect_rules`. Never in `settings()` or
+  `pol["write"]`, so not in `platform_settings`, leases, Seatbelt or Landlock.
+- **S-j:** Codex has no session rendering yet (`runtime_codex.unconfined`), so its sessions can't ask
+  (`session_write` port absent, its reason in doctor) until runtime-codex Step 4.
+- **S-k:** a worker is live while its recorded pid runs with its recorded start time. One that died is started again
+  once; the second death ends the request as `worker lost`. A request's age never does (a sleeping machine loses
+  nothing).
+- **S-l:** visibility is probed live at each push. On a public remote only noreply addresses and the owner's
+  `public_emails` pass. A visibility different from the one `setup` recorded (`git_push.visibility`) raises the setup
+  to-do, and a public remote recorded as private is refused.
+- **S-m:** check 9 sums every new object's size, and a commit object is capped at 1 MB.
+- **Nits:**
+  - the worker maps every exception to a classified reason (no private paths reach the project);
+  - dispatch tracks workers by pid, not by probing the lock;
+  - requests are taken oldest first by mtime, not by the id's date;
+  - results older than 7 days are removed;
+  - the daily probe and dispatch: see "As built" below.
+
+### As built (11-16)
+
+The core is in `bin/git_remote.py` (forms, pipeline, worker, setup, doctor rows), `bin/push_checks.py`,
+`bin/push_queue.py` and `take_push_requests` in `bin/hubbus`; the tests are `tests/test_platform_push.py`. Not in it:
+- **the grant** ("If the grant") and the onboarding questions (section 2), built separately. The credential step calls
+  `git_push_grant.ssh_env(project)` when that module exists, refuses with a setup to-do when it doesn't or raises
+  `NotSetUp`, and never falls back to the owner's credential. A local-path origin needs none. `git_push_grant.push_url`
+  and `setup` are called when they exist (an https origin's ssh URL, the key at setup);
+- **the daily probe in `brunna/secrets` and the status-page rows** (section 9, step 5): doctor has the rows. Until the
+  probe is built, the first request after a broken key finds it, with the to-do;
+- **the owner form without an emails list:** check 6 isn't a refusal there (the owner form worked before the field
+  existed); the plan still flags emails the remote hasn't seen;
+- **the session's side of "who may request"** is checked in the rendered settings, and through the real tool by the
+  conformance check `session-write` (it needs the tool's login, so not in the test suite).
 
 ## 1. Two axes, and when to sandbox
 
@@ -228,6 +292,10 @@ of this doc said no file channel could enforce it. One can:
   (`propose_apply.py`). This is guidance only; the folder is the boundary.
 - **Residual:** a session that a letter woke, or that acts on a letter, is a session. Anything that can mail the
   project can ask it to push (section 8).
+- **What the folder separates (r2 S-a):** session processes from services and jobs, not a session's intent from code
+  the project wrote. Without the git fence (`enforce.git: platform`), a job can plant `.git` hooks, an fsmonitor or a
+  Makefile that a session then runs, and that code runs `brunna push` inside the session. The checks, not the folder,
+  are what bound such a push.
 
 ### Who runs it, and why there
 
@@ -612,7 +680,9 @@ Owner-only, under `enforce` (already in `PLATFORM_OWNED`, so a `manifest.update`
 - **The secret scan's limits** (check 7).
 - **Sessions that letters drive (S4).** A woken session, or one acting on a letter, is a session and can request a push:
   anything that can mail the project can ask it to. The mailbox's background branches and headless agent can't (their
-  settings are the platform's, without the folder). Mitigations for later:
+  settings are the platform's, without the folder). So can code the project wrote that a session runs (r2 S-a): a
+  job's planted git hook, fsmonitor or Makefile runs `brunna push` inside a session, which the git fence would stop.
+  Mitigations for later:
   - hold a request made within a turn that a wake started, and ask the owner (the hooks know which turn a wake began);
   - name the letter's sender in the push record;
   - the rules text says letters are data, as it does now.

@@ -122,8 +122,8 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      pushed from a platform-owned bare repo, fast-forward only, `.github/` changes only with `enforce.git_ci`, for
      every sandboxed project whether switched on or not ("Owner-run push, built first"). Sessions' own pushes
      wait for slices b and d.
-     **Platform push (`platform-push.md`, designed 11-15, r1 after a blind review the same day, not built; the
-     owner's principle that no person runs `git push`):** a sandboxed project's session runs `brunna push`, which writes
+     **Platform push (`platform-push.md`, designed 11-15, r1 and r2 after two blind reviews; the core built 11-16,
+     not merged; the owner's principle that no person runs `git push`):** a sandboxed project's session runs `brunna push`, which writes
      a request into a folder only that project's session sandboxes can write (sessions only, as r3 decided); `hubbus
      dispatch` starts a detached worker that runs `git_remote.py`'s pipeline with automatic checks in place of the
      owner's look (fast-forward, objects and LFS, sizes, CI files, author and committer emails, a scan of every new blob
@@ -139,8 +139,11 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      (11-16): the grant and onboarding's questions.** `bin/git_push_grant.py` (`brunna push setup <project>`: the key in
      `<secrets>/git-push/<project>/`, added with the owner's `gh`, GitHub's host keys pinned, never backed up;
      `ssh_env`/`push_url` for the push, the derived `git-push` row and daily probe in `brunna/secrets`); `connect`,
-     `onboard`, `upgrade-idea` and `connect_project` ask or pass `--sandbox` and `--push`. The push pipeline, its checks
-     and `enforce.git_push` itself are the next step.
+     `onboard`, `upgrade-idea` and `connect_project` ask or pass `--sandbox` and `--push`. **Built (11-16), the push
+     core:** `enforce.git_push` and its validation, the session request folder rendered only into session settings,
+     `brunna push` in its forms, take-in and the detached worker, every check, results, letters and to-dos,
+     `merge-branch`'s request, doctor rows, docs (r2 in `platform-push.md`, "As built"). Left: the status-page rows,
+     and switching the five projects to `all` once their keys are set up.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
@@ -303,6 +306,9 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   lists zero as an open-source prerequisite.
 - llm-providers: the switch recommendations from shadow mode, and decision 3 (where memory notes come from for other
   agents).
+- Platform push: the owner answered the three open questions on 11-15 (`platform-push.md`, "The owner's answers").
+  Whether the owner form should refuse without an emails list too (today it only flags emails the remote hasn't seen,
+  as before the field existed).
 
 ### 7. Not verified on a real run
 
