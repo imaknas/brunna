@@ -214,7 +214,7 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   the desktop apps' own copies stay theirs. A user-level change, so only the user turns it on.
 - **A project model call's own time limit:** `models:` takes only `tier`, and a project's call stops at the platform's
   600 s; long prompts on the strong tier hit it (reported 11-15). A `timeout_s` per call point, under a platform cap.
-  Designed as step 2 of `generation-controls.md` (`models.<point>.timeout`).
+  Designed as step 2 of `generation-controls.md` (`models.<point>.timeout`, up to `cap_runner.max_timeout_s`).
 
 ### 6. Waiting on the owner
 

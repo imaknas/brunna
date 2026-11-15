@@ -56,7 +56,7 @@ reference, not run" below).
 | Reasoning | Hidden `--thinking disabled|adaptive`, `--max-thinking-tokens`, `CLAUDE_CODE_DISABLE_THINKING`, `MAX_THINKING_TOKENS=0`, `--effort low…max` | Expressible; what the model then accepts is per model (below) |
 | Turn limit | Hidden `--max-turns N` (and `CLAUDE_CODE_MAX_TURNS`); the result's `subtype` says the limit ended it. lease-runner already passes it | **Yes**, behind a conformance check (hidden flags can change) |
 | System prompt | `--system-prompt` replaces the default, `--append-system-prompt` adds to it (the platform's completion uses the latter). Tool definitions, and the reminders the tool attaches to messages, stay | **No** for "the benchmark's prompt and nothing else" |
-| The project's rules file | `--restricted` (every confined run and every completion uses it) loads no user, project or local settings and no rules file (real runs recorded in `mailbox-session-first.md`) | Yes, already |
+| The project's rules file | `--restricted` (every confined run and every completion uses it) loads no user, project or local settings. A real run recorded in `mailbox-session-first.md` shows a **completion** in its own folder, with a rules file above it, not reading it; a `settings: platform` **agent run in a project's folder** (where the rules file is in the folder itself) is not recorded | Completions: yes. Agent runs: **not verified**; step 1 probes it |
 | Tool servers | `--strict-mcp-config` (`tool_servers: none`) | Yes, already |
 | Skills and commands | `--disable-slash-commands` exists; confined runs don't pass it today | Expressible |
 | Advisor | A server-side tool. Off when `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` is set. Otherwise on when the provider is Anthropic's own, an account feature flag (or `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL`) enables it, and either the `advisorModel` setting names a model or a "standby" path picks one with **no setting at all**. It adds its own section to the system prompt | See below |
@@ -67,8 +67,10 @@ name an advisor model, and a session loads them. A platform run (`project-agent`
 completion) passes `--restricted`, which ignores the user's settings file, so that setting doesn't reach it. The standby
 path doesn't need the setting, and nothing read here shows `--tools`, `--strict-mcp-config` or `--restricted` turning
 it off. **Not verified live**: whether a platform run gets an advisor today. It would not show in the init event's
-tools (a server-side tool); it would show as a second model in the result's `modelUsage` or as advisor iterations in
-the usage. Step 1 turns it off and probes it.
+tools (a server-side tool); it would show as advisor iterations in the usage (the binary counts iterations of type
+`advisor_message`) and as the advisor's model in the result's `modelUsage`. A second model there alone proves nothing:
+`evaluators.md`'s sealing table reports a single model only as a result of full sealing, so an unsealed run may list a
+small side model the tool uses for itself. Step 1 turns the advisor off and probes it.
 
 ### What else Claude Code adds (why "empty harness" is out of reach there)
 
@@ -85,15 +87,19 @@ default is fixed in step 1 (said, not enforced: the runtime can't enforce it).
 
 ### The API providers (this repo's adapters, plus the bundled reference)
 
+Cells marked † are neither in this repo's adapters nor in the bundled reference: from general knowledge of those APIs,
+**not measured**. Steps 3 and 4 check each against the live backend (a fixture recorded from a real reply) before
+relying on it.
+
 | Control | Anthropic Messages API (`provider_anthropic`) | OpenAI-compatible (`provider_openai`) | Ollama native (`provider_ollama`) |
 |---|---|---|---|
 | Output tokens | `max_tokens` (always sent today); `stop_reason: max_tokens` | `max_tokens` or `max_completion_tokens` (`max_tokens_field`); `finish_reason: length` | `options.num_predict` (sent today); `done_reason: length` |
-| Temperature | `temperature`. Bundled reference, not run: current models refuse a non-default value (400); some older models accept it, and from API version 2026-10-21 no model does. The adapter sends `anthropic-version: 2023-06-01` | `temperature`; reasoning models commonly refuse anything but the default; a generic endpoint may accept and ignore it | `options.temperature` (greedy at 0) |
-| Reasoning | `thinking` / `output_config.effort`. Bundled reference, not run: whether "off" exists is per model (Opus 5.5 can't, Sonnet 5.5 only as `between_tools`, Haiku 5.5 and Opus 4.8 can, Fable can't) | `reasoning_effort` on reasoning models; what "off" means differs by vendor | `think: false` (already sent for thinking models), `think: "low"…` only for some models; `message.thinking` comes back separately |
+| Temperature | `temperature`. Bundled reference, not run: current models refuse a non-default value (400); some older models accept it, and from API version 2026-10-21 no model does. The adapter sends `anthropic-version: 2023-06-01` | `temperature`; reasoning models commonly refuse anything but the default †; a generic endpoint may accept and ignore it | `options.temperature` (greedy at 0) |
+| Reasoning | `thinking` / `output_config.effort`. Bundled reference, not run: whether "off" exists is per model (Opus 5.5 can't, Sonnet 5.5 only as `between_tools`, Haiku 5.5 and Opus 4.8 can, Fable can't) | `reasoning_effort` on reasoning models †; what "off" means differs by vendor † | `think: false` (already sent for thinking models), `think: "low"…` only for some models †; `message.thinking` comes back separately † |
 | System prompt | `system` (sent only when given) | a `system` message | a `system` message |
-| Tools | `tools`; `tool_use` / `tool_result` blocks | `tools`; `tool_calls`, role `tool` | `tools` (models listing the `tools` capability in `/api/show`); `message.tool_calls`, role `tool` |
+| Tools | `tools`; `tool_use` / `tool_result` blocks | `tools`; `tool_calls`, role `tool` † | `tools` (models listing the `tools` capability in `/api/show`); `message.tool_calls`, role `tool` † |
 | Extra tools | none unless sent (the advisor is a tool the request must declare) | none unless sent | none unless sent |
-| Per-response tokens | `usage.input_tokens/output_tokens` (+ cache fields) | `usage.prompt_tokens/completion_tokens` (+ `completion_tokens_details.reasoning_tokens` on some) | `prompt_eval_count` / `eval_count` |
+| Per-response tokens | `usage.input_tokens/output_tokens` (+ cache fields) | `usage.prompt_tokens/completion_tokens` (+ `completion_tokens_details.reasoning_tokens` on some †) | `prompt_eval_count` / `eval_count` |
 
 Also found: `provider_anthropic` gets structured output by forcing a tool (`tool_choice: {type: tool}`). Bundled
 reference, not run: several current models refuse a forced `tool_choice` with a 400. That is a separate fix
@@ -116,7 +122,7 @@ models:
   editor:
     tier: standard
     interface: messages             # prompt (default, today's) | messages (C4)
-    timeout: 5m                     # the backlog's per-point time limit, under {settings} cap_runner.timeout_s
+    timeout: 20m                    # the backlog's per-point time limit: 1 s .. {settings} cap_runner.max_timeout_s (1800)
     generation:                     # optional; every key optional
       max_output_tokens: 4096       # 1 .. {settings} llm.project_max_output_tokens (default 32768)
       temperature: 0                # 0 .. 2
@@ -242,7 +248,7 @@ per turn (`contracts/call-record.v1.schema.json`):
   own project only). The usage row gains `controls` and the record's id.
 - **Agent calls.** The Claude runtime's agent runs move to stream-json (as its completions already did): each
   `assistant` event is one model response, with its `usage` and its `tool_use` names; `modelUsage` at the end names
-  every model that ran. A second model there (an advisor) refuses the result (C7). The records go beside stdout in the
+  every model that ran. Advisor iterations in the usage refuse the result (C7); every model listed is recorded. The records go beside stdout in the
   job folder (`.hub-run/jobs/<id>/turns.jsonl`, written by cap-runner, which the run can't write) and into the platform's
   copy. A runtime that can't report turns says so in the record (`turns: unsupported`); it doesn't make them up.
 
@@ -264,10 +270,13 @@ second, stronger model the declared tier never named (a cost and a model choice 
 - The Claude adapter sets `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1` in every platform run's environment and
   `advisorModel: ""` in every `--settings` it writes (as `evaluators.md` step 0 already proposed for sealed runs), and
   passes `--disable-slash-commands` on confined runs and completions. Only in `runtime_claude.py`.
-- A conformance check per new version (`conformance_claude`): a run with the platform's flags names one model in
-  `modelUsage` and no advisor iteration; `--max-turns 1` ends a two-step task with the limit's subtype. A failure holds
+- A conformance check per new version (`conformance_claude`): a run with the platform's flags shows no advisor
+  iteration and no advisor model, and a `settings: platform` agent run in a folder holding a rules file doesn't read
+  it; `--max-turns 1` ends a two-step task with the limit's subtype. A failure holds
   the version back (`runtime-versions.md`), as the other checks do.
-- On every agent run's result: a model in `modelUsage` that isn't the run's own refuses the result and alerts once.
+- On every agent run's result: advisor iterations in the usage refuse the result and alert once. Other models in
+  `modelUsage` (a side model the tool uses for itself) are recorded, not refused; refusing them waits for evidence of
+  what they are.
 - API providers send only what the request names; nothing to turn off.
 
 ### C8. Agent calls: `max_turns`, and nothing else in v1
@@ -301,8 +310,9 @@ change (a new pin, a different runtime) is never held back by a project's declar
 - **Metered.** A call that resolves to a pay-per-use provider still needs `metered_models: true` and counts toward
   `llm.budget.daily_usd`. A 64-turn run resends the conversation every turn, so a run's total input tokens grow with the
   square of its turns; doctor shows a point's last day's tokens.
-- **Time.** Each turn is one cap-runner `complete` job, under the point's `timeout` (≤ `cap_runner.timeout_s`, less the
-  30 s margin). Model calls have no minutes ledger (agent calls do); a long benchmark is bounded per turn and by the
+- **Time.** Each turn is one cap-runner `complete` job, under the point's `timeout` (default `cap_runner.timeout_s`, at
+  most `cap_runner.max_timeout_s`, as a `cap-run` job already may; cap-runner gives the job that timeout and the call
+  ends 30 s before it). Model calls have no minutes ledger (agent calls do); a long benchmark is bounded per turn and by the
   budget, not per day. O4 asks whether `complete` jobs get a daily ceiling too.
 - **Queue.** One job per project per pool: a project's turns run one after another, and a project's `cap-run` job (a
   GPU job included) waits behind or ahead of them in the same pool. The platform doesn't schedule the GPU: a local model
@@ -329,7 +339,7 @@ change (a new pin, a different runtime) is never held back by a project's declar
   every refusal path writes `job.failed` and the usage row.
 - **Claude adapter:** the advisor variable and `advisorModel: ""` in every platform run's environment and settings
   (goldens updated); `--disable-slash-commands`; `--max-turns` from `Task.max_turns`; stream-json turns parsed into
-  records; a second model in `modelUsage` refuses the result. `test_runtime_boundary` keeps every one of those names in
+  records; advisor iterations refuse the result, another model in `modelUsage` is only recorded. `test_runtime_boundary` keeps every one of those names in
   `runtime_claude.py`.
 - **Conformance:** the advisor probe and the turn-limit probe (C7).
 - **cap-runner:** the request size limit; `--messages` requests; turns written beside stdout.
@@ -339,8 +349,9 @@ change (a new pin, a different runtime) is never held back by a project's declar
 ## Steps
 
 1. **C7 and the probe.** Advisor off and slash commands off in every platform run of Claude Code; the conformance probes;
-   the `modelUsage` check on agent results; say on the runtime's completion that `max_tokens` isn't held. The probe
-   also answers what the measurements couldn't: whether a platform run had an advisor before.
+   the advisor check on agent results; say on the runtime's completion that `max_tokens` isn't held. The probe
+   also answers what the measurements couldn't: whether a platform run had an advisor before, and whether a
+   confined agent run in a project's folder reads its rules file.
 2. **C1, C2, C9.** The registry shape, `generation_support` on every adapter, doctor, `schedulectl models`, the config
    check's warning, the manifest.update note, the run-time refusal. The per-point `timeout` lands here (the direction.md
    backlog item).
