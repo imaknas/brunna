@@ -15,7 +15,6 @@
  "{where}: {key} must be a positive integer": "{where}:{key} 要是正整數",
  "{where}: backup must be true/false": "{where}:backup 要是 true/false",
  "{where}: backup: false needs a why (why it needs no backup)": "{where}:backup: false 要寫 why(為什麼不用備份)",
- "enforce can only be {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform, git_ci: true|false}}": "enforce 只能是 {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform, git_ci: true|false}}",
  "enforce.git can only be platform (or left out)": "enforce.git 只能是 platform(或不寫)",
  "enforce.git needs enforce.sandbox: true": "enforce.git 要搭配 enforce.sandbox: true",
  "enforce.git can't be on for a project in service_sandbox_exempt: its services and jobs run with no sandbox": "service_sandbox_exempt 裡的專案不能開 enforce.git:它的服務和工作完全沒有沙盒",
@@ -204,5 +203,15 @@
  "its credentials can't be given on this runtime: {why}": "在這個 runtime 上給不了它的憑證:{why}",
  "credentials: is not for the platform's own jobs (their rules may write the platform's state)": "credentials: 不給平台自己的 job(它們的規則可能寫到平台的狀態)",
  "enforce.git_ci must be true or false": "enforce.git_ci 要是 true 或 false",
- "enforce.git_ci needs enforce.sandbox: true": "enforce.git_ci 要搭配 enforce.sandbox: true"
+ "enforce.git_ci needs enforce.sandbox: true": "enforce.git_ci 要搭配 enforce.sandbox: true",
+ "enforce can only be {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform, git_ci: true|false, git_push: {{…}}}}": "enforce 只能是 {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform, git_ci: true|false, git_push: {{…}}}}",
+ "enforce.git_push can only be {{branches: none|others|all, emails: [..], public_emails: [..], max_file_mb: 1-100, visibility: public|private}}": "enforce.git_push 只能是 {{branches: none|others|all, emails: [..], public_emails: [..], max_file_mb: 1-100, visibility: public|private}}",
+ "enforce.git_push can't be on for a project in service_sandbox_exempt: its jobs, the push's bundler included, run with no sandbox": "service_sandbox_exempt 裡的專案不能開 enforce.git_push:它的 job(包括推送用的打包 job)都沒有沙盒",
+ "enforce.git_push needs a paths.origin brunna push contacts (a URL, host:path or an absolute path)": "enforce.git_push 需要一個 brunna push 會連的 paths.origin(URL、host:path 或絕對路徑)",
+ "enforce.git_push needs enforce.sandbox: true (an unsandboxed project pushes with git as usual)": "enforce.git_push 需要 enforce.sandbox: true(沒有沙盒的專案照常用 git 推)",
+ "enforce.git_push.branches must be none, others or all": "enforce.git_push.branches 只能是 none、others 或 all",
+ "enforce.git_push.max_file_mb must be a whole number from 1 to 100": "enforce.git_push.max_file_mb 必須是 1 到 100 的整數",
+ "enforce.git_push.public_emails must also be in enforce.git_push.emails": "enforce.git_push.public_emails 裡的也必須在 enforce.git_push.emails 裡",
+ "enforce.git_push.visibility must be public or private": "enforce.git_push.visibility 只能是 public 或 private",
+ "enforce.git_push.{key} must be a list of email addresses (local@domain, one line each)": "enforce.git_push.{key} 必須是 email 位址的清單(local@domain,每個一行)"
 }

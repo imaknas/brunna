@@ -30,7 +30,7 @@ schema v1 (contracts/project.v1.md has the full description):
   publishes: [{kind, path, contract, v}]
   provides:  [{contract, v, schema}]           schema relative to workspace
   services:  [{name, run, label?, keepalive?, throttle_s?, env?, cwd?, expose?}]
-  enforce: {sandbox: false, capabilities: [], work: false, git: platform?, git_ci: false}
+  enforce: {sandbox: false, capabilities: [], work: false, git: platform?, git_ci: false, git_push?}
                                   phase two: sandbox true = render-project-settings.py writes the sandbox +
                                   permission rules; capabilities = platform capabilities ({settings} capabilities,
                                   e.g. gpu), needs sandbox: true; inside the sandbox, hub-run --cap <capability> runs
@@ -44,6 +44,14 @@ schema v1 (contracts/project.v1.md has the full description):
                                   git_ci: true = brunna push (bin/git_remote.py) may push a commit whose .github/
                                   differs from the remote default branch's (CI runs with the repo's secrets); needs
                                   sandbox: true.
+                                  git_push: {branches: none|others|all, emails: [..], public_emails?: [..],
+                                  max_file_mb?: 1-100, visibility?: public|private}: what the platform pushes on its
+                                  sessions' request (`brunna push`, docs/design/platform-push.md section 5): none (or
+                                  absent) nothing, others every branch but the default, all the default too; anything
+                                  but none needs sandbox: true, a paths.origin brunna push contacts and the project
+                                  out of service_sandbox_exempt. emails: what a pushed commit's author and committer
+                                  may be; on a public remote only noreply ones and those in public_emails.
+                                  visibility: what `brunna push setup` saw (a live probe that differs is a to-do).
                                   The record of the owner's explicit authorization (10-25): written when an idea
                                   sandbox is created, carried over on upgrade; other projects add it only with the
                                   owner's consent
@@ -374,10 +382,10 @@ def validate_enforce(doc: dict) -> list[str]:
     enf = doc.get("enforce")
     if enf is None:
         return []
-    if not isinstance(enf, dict) or set(enf) - {"sandbox", "capabilities", "work", "git", "git_ci"} \
+    if not isinstance(enf, dict) or set(enf) - {"sandbox", "capabilities", "work", "git", "git_ci", "git_push"} \
             or not isinstance(enf.get("sandbox", False), bool):
         return [_("enforce can only be {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform, "
-                  "git_ci: true|false}}", cap=_("capability"))]
+                  "git_ci: true|false, git_push: {{…}}}}", cap=_("capability"))]
     # git through the platform (docs/design/git-broker.md, "Rollout per project"): no sandbox of it writes a git dir.
     # Owner-only like the rest of enforce; a sandbox is what the fence is rendered into
     if "git" in enf and enf["git"] != "platform":
@@ -393,6 +401,8 @@ def validate_enforce(doc: dict) -> list[str]:
         return [_("enforce.git_ci must be true or false")]
     if enf.get("git_ci") and not enf.get("sandbox"):
         return [_("enforce.git_ci needs enforce.sandbox: true")]
+    if "git_push" in enf and (errs := validate_git_push(doc, enf)):
+        return errs
     work = enf.get("work", False)
     if not isinstance(work, bool):
         return [_("enforce.work must be true or false")]
@@ -414,6 +424,53 @@ def validate_enforce(doc: dict) -> list[str]:
     # project's own manifest.update can't change (PLATFORM_OWNED); what a capability can do is decided by the
     # platform's Seatbelt profile, regardless of what kind of project it is
     return errs
+
+
+GIT_PUSH_KEYS = {"branches", "emails", "public_emails", "max_file_mb", "visibility"}
+GIT_PUSH_BRANCHES = ("none", "others", "all")
+EMAIL = re.compile(r"[^@\s]+@[^@\s]+\.[^@\s]+")
+
+
+def origin_pushable(origin) -> bool:
+    """paths.origin in a spelling brunna push contacts (git_remote.check_origin's syntax; where a local one is, that
+    checks at push time)."""
+    if not isinstance(origin, str) or not origin or origin == "(native)" or origin.startswith("-") \
+            or re.match(r"^(ext|fd)::", origin) or not origin.isprintable():
+        return False
+    if "://" in origin:
+        return not origin.lower().startswith("file://") or origin[len("file://"):].startswith("/")
+    return bool(re.match(r"^[^/]+:", origin)) or origin.startswith(("/", "~/"))
+
+
+def validate_git_push(doc: dict, enf: dict) -> list[str]:
+    """enforce.git_push (docs/design/platform-push.md section 5), owner-only like the rest of enforce."""
+    gp = enf.get("git_push")
+    if not isinstance(gp, dict) or set(gp) - GIT_PUSH_KEYS:
+        return [_("enforce.git_push can only be {{branches: none|others|all, emails: [..], public_emails: [..], "
+                  "max_file_mb: 1-100, visibility: public|private}}")]
+    if gp.get("branches", "none") not in GIT_PUSH_BRANCHES:
+        return [_("enforce.git_push.branches must be none, others or all")]
+    for key in ("emails", "public_emails"):
+        v = gp.get(key, [])
+        if not isinstance(v, list) or not all(isinstance(e, str) and e.isprintable() and EMAIL.fullmatch(e) for e in v):
+            return [_("enforce.git_push.{key} must be a list of email addresses (local@domain, one line each)", key=key)]
+    if set(gp.get("public_emails") or []) - set(gp.get("emails") or []):
+        return [_("enforce.git_push.public_emails must also be in enforce.git_push.emails")]
+    mb = gp.get("max_file_mb", 10)
+    if not isinstance(mb, int) or isinstance(mb, bool) or not 1 <= mb <= 100:
+        return [_("enforce.git_push.max_file_mb must be a whole number from 1 to 100")]
+    if gp.get("visibility") not in (None, "public", "private"):
+        return [_("enforce.git_push.visibility must be public or private")]
+    if gp.get("branches", "none") == "none":
+        return []
+    if enf.get("sandbox") is not True:
+        return [_("enforce.git_push needs enforce.sandbox: true (an unsandboxed project pushes with git as usual)")]
+    if not origin_pushable((doc.get("paths") or {}).get("origin")):
+        return [_("enforce.git_push needs a paths.origin brunna push contacts (a URL, host:path or an absolute path)")]
+    if doc.get("name") in (hubconf.get("service_sandbox_exempt", []) or []):
+        return [_("enforce.git_push can't be on for a project in service_sandbox_exempt: its jobs, the push's bundler "
+                  "included, run with no sandbox")]
+    return []
 
 
 def validate_models(doc: dict) -> list[str]:

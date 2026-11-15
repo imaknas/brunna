@@ -319,6 +319,23 @@
       },
       "description": "the git broker's limits (docs/design/git-broker.md, open point 17)"
     },
+    "push_dir": {
+      "type": "string",
+      "description": "the root of the sandboxed projects' push request folders (<push_dir>/<project>/, written only by that project's sessions; docs/design/platform-push.md); default ~/.local/state/brunna-push, outside every workspace, the hub and the instance"
+    },
+    "git_push": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "requests_per_day": {"type": "integer", "minimum": 1, "description": "push requests per project per day, refusals included (default 20)"},
+        "concurrency": {"type": "integer", "minimum": 1, "description": "push workers at once across projects, one per project (default 2)"},
+        "max_commits": {"type": "integer", "minimum": 1, "description": "new commits one push may carry (default 500)"},
+        "max_total_mb": {"type": "integer", "minimum": 1, "description": "all new objects of one push together (default 200)"},
+        "scan_timeout_s": {"type": "integer", "minimum": 1, "description": "the secret scan's limit (default 300); past it the push is refused"},
+        "wait_s": {"type": "integer", "minimum": 0, "description": "how long brunna push waits for its answer in a session (default 90)"}
+      },
+      "description": "the platform push's limits (docs/design/platform-push.md, section 5)"
+    },
     "status_page": {
       "type": "object",
       "properties": {"url": {"type": "string"}},

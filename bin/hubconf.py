@@ -629,6 +629,18 @@ def test_slots() -> pathlib.Path:
     return moved_from_state(shared() / TEST_SLOTS_DIR)
 
 
+def push_dir() -> pathlib.Path:
+    """The root of the sandboxed projects' push request folders (hub.json push_dir; docs/design/platform-push.md, "Who
+    may request"): <push_dir>/<project>/ is written only by that project's sessions. Outside every workspace, the hub
+    and the instance. Default ~/.local/state/<cli>-push beside the bus's usual folder; a throwaway state (an override, a
+    test's) keeps its own inside it. Taken at call time."""
+    if get("push_dir"):
+        return p("push_dir")
+    if pathlib.Path(STATE) != MAIN / ".state":
+        return pathlib.Path(STATE) / "push-requests"
+    return pathlib.Path.home() / ".local" / "state" / f"{names.current('cli')}-push"
+
+
 # The event bus has its own directory (hub.json bus_dir), in no project's sandbox: a sandboxed project's letters go
 # through its outbox (docs/design/bus-sender.md), and the hooks that deliver letters run outside the sandbox.
 BUS_DIR = p("bus_dir", ".state/bus")
