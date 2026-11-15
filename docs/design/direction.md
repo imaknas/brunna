@@ -92,10 +92,13 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      otherwise plants files in `.git`), and `safe.bareRepository=explicit` in the owner's git config is a checked
      precondition (set 11-14). r3 after a second blind review (11-14): an unsandboxed checkout (the owner's, or an
      agent tool's worktree mode) can be raced by any running project process into writing anywhere the owner can
-     write. This is true today, with or without the broker. The broker isn't built. B-1's option 3 is built (11-14);
-     option 2 was built and then removed by the owner (11-15): a folder holding a link could still be moved in, so it
-     was friction, not a boundary. Open for the owner: option 4, push policy, signing, Codex app worktrees, submodules,
-     who switches a project on.
+     write. This is true today, with or without the broker. B-1's option 3 is built (11-14); option 2 was built and
+     then removed by the owner (11-15): a folder holding a link could still be moved in, so it was friction, not a
+     boundary. Approved by the owner 11-15 with r3's other five recommendations (push policy, signing, Codex app
+     worktrees, submodules, the owner switches each project on). Step 1 built 11-15: the fence (`policy.git_fence`,
+     Seatbelt for services, jobs and cap-run) behind `enforce.git: platform`, and doctor's `safe.bareRepository`
+     precondition; no project switched on, and none should be before steps 2–5 (the broker, the hook forwarder, the
+     runtimes' renderings, brunna's own git flows). Still open: B-1's option 4.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
