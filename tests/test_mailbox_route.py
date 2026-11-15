@@ -230,6 +230,43 @@ class Harness(tmt.Base):
                        (tms.ago(minutes), mid))
 
 
+class BusyHolder(Harness):
+    """A letter and a session busy with other work (11-15: a request sat 45 minutes with a session whose post-tool hook told it
+    while it ran long background agents, until the owner noticed)."""
+
+    def age_all(self, mid, minutes):
+        """The letter, its tellings and its routes, all this long ago."""
+        self.age_state(mid, minutes)
+        self.c.execute("UPDATE events SET ts=? WHERE id=?", (tms.ago(minutes), mid))
+
+    def told_while_busy(self):
+        self.open("S1", "S2")
+        self.rt.statuses["S1"] = "busy"
+        self.send("m1", "proj", "request")
+        self.assertIn("[m1]", self.hook("post-tool", "S1"))
+        self.assertEqual(self.by("m1"), [("S1", "hook")])
+
+    def test_today_a_busy_holder_told_by_its_hook_keeps_it_for_the_window(self):
+        self.told_while_busy()
+        self.age_all("m1", self.m.TAKE_TIMEOUT_MIN - 1)
+        self.dispatch()
+        self.assertEqual((self.ended_why("m1"), self.woken()), ([], []), "the idle session is never asked")
+        self.age_all("m1", self.m.TAKE_TIMEOUT_MIN + 1)
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), ["window"])
+        self.assertEqual(self.by("m1")[-1], ("S2", "only"))
+        self.assertEqual(self.woken(), ["S2"])
+
+    def test_today_the_most_recent_is_picked_busy_or_not(self):
+        self.open("S1", "S2")
+        self.seen("S1", minutes_ago=1)
+        self.rt.statuses["S1"] = "busy"
+        self.send("m1", "proj", "request")
+        self.dispatch()
+        self.assertEqual(self.by("m1"), [("S1", "recent")])
+        self.assertEqual(self.woken(), [])
+
+
 class Tick(Harness):
     """Each branch of the tick, in order."""
 
