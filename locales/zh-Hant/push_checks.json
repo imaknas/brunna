@@ -31,10 +31,10 @@
  "the new trees nest deeper than {n} folders": "新 tree 的資料夾巢狀超過 {n} 層",
  "the new trees took too long to read: push in parts": "新 tree 讀太久了:請分批推",
  "a new commit's message, file or path names a private project and the remote is public; the owner has the details": "新 commit 的訊息、檔案或路徑提到私有專案,而遠端是公開的;細節在擁有者那邊",
- "a new path is longer than {n} characters": "有新路徑超過 {n} 個字元",
  "a new tree is {mb} MB as an object: push in parts": "有個新 tree 物件有 {mb} MB:請分批推",
  "the new trees come to more than {mb} MB: push in parts": "新 tree 合計超過 {mb} MB:請分批推",
  "the new trees' paths come to more than {mb} MB: push in parts": "新 tree 的路徑合計超過 {mb} MB:請分批推",
  "the platform's record of this project's declared secrets can't be read whole ({why})": "平台記錄這個專案宣告過的機密,讀不到完整內容({why})",
- "this project has declared more than {n} secret values; the owner looks at its secrets: entries": "這個專案宣告的機密值超過 {n} 個;要由擁有者看看它的 secrets: 項目"
+ "this project has declared more than {n} secret values; the owner looks at its secrets: entries": "這個專案宣告的機密值超過 {n} 個;要由擁有者看看它的 secrets: 項目",
+ "a new path is longer than {n} bytes": "有新路徑超過 {n} 個位元組"
 }

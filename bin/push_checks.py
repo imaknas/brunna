@@ -55,7 +55,7 @@ CHUNK = 4 << 20                # blobs joined for one gitleaks run
 BATCH = 16 << 20               # blobs read at once
 MAX_ENTRIES = 200_000          # tree entries walked in one push (review B2)
 MAX_DEPTH = 256                # folders deep
-MAX_PATH = 4096                # one path's characters
+MAX_PATH = 4096                # one path's bytes
 MAX_PATH_BYTES = 32 << 20      # every new tree's paths together
 MAX_TREE = 16 << 20            # one tree object (about 400 000 entries)
 MAX_TREES = 64 << 20           # every new tree object together
@@ -192,7 +192,7 @@ class Objects:
         if sum(self.sizes[t] for t in self.trees) > MAX_TREES:
             raise Failure("size", _("the new trees come to more than {mb} MB: push in parts", mb=MAX_TREES >> 20),
                           fix="project")
-        self.read(self.trees)   # every new tree in one batch, bounded just above
+        self.read([*self.trees, *self.commits])   # every new tree and commit in one batch, bounded just above
         new_trees, entries, seen, first, path_bytes = set(self.trees), [], set(), {}, 0
         stack = [(self.commit_header(c, "tree")[0], "", c, 0) for c in reversed(self.commits)]
         while stack:
@@ -206,10 +206,12 @@ class Objects:
                 raise Failure("size", _("the new trees took too long to read: push in parts"), fix="project")
             for mode, name, oid in self.tree_entries(tree):
                 path = f"{prefix}{name}"
-                # the paths are as long as the project makes them, nested: counted as they are built
-                if len(path) > MAX_PATH:
-                    raise Failure("size", _("a new path is longer than {n} characters", n=MAX_PATH), fix="project")
-                path_bytes += len(path)
+                # the paths are as long as the project makes them, nested: counted in bytes as they are built (a
+                # character can be four; the third re-review's S-4)
+                n = len(path.encode("utf-8", errors="surrogatepass"))
+                if n > MAX_PATH:
+                    raise Failure("size", _("a new path is longer than {n} bytes", n=MAX_PATH), fix="project")
+                path_bytes += n
                 if path_bytes > MAX_PATH_BYTES:
                     raise Failure("size", _("the new trees' paths come to more than {mb} MB: push in parts",
                                             mb=MAX_PATH_BYTES >> 20), fix="project")
@@ -250,10 +252,19 @@ def short(oid: str) -> str:
 
 # ---------- the checks ----------
 
-def objects_check(objs: Objects, entries, gitlinks) -> list[Finding]:
+def objects_check(objs: Objects, entries, gitlinks, deadline: float | None = None) -> list[Finding]:
+    """Commit headers, gitlinks and Git LFS. Every object it reads is read in one batch (one git process, not one per
+    object: the third re-review's S-3), and it stops at the deadline."""
+    import time
     out = []
+    paths = blob_paths(entries)
+    lfs = [o for o in objs.blobs if objs.sizes.get(o, 0) < 1024
+           or any(p.rsplit("/", 1)[-1] == ".gitattributes" for p in paths.get(o, ()))]
+    objs.read([*objs.commits, *lfs])
+    if deadline is not None and time.monotonic() > deadline:
+        raise Failure("secrets", _("the scanner failed: it ran past its time limit"))
     for c in objs.commits:
-        raw = objs.read([c])[c]
+        raw = objs.raw[c]
         for k, v in commit_headers(raw):
             if k in HEADERS:
                 continue
@@ -266,13 +277,13 @@ def objects_check(objs: Objects, entries, gitlinks) -> list[Finding]:
     for p in sorted(gitlinks):
         out.append(Finding("objects", _("{path} is a gitlink (a submodule): the platform pushes no submodules",
                                         path=p[:200])))
-    paths = blob_paths(entries)
-    for oid in objs.blobs:
+    for oid in lfs:
+        data = objs.raw[oid]
         for p in sorted(paths.get(oid, ())):
-            if objs.sizes.get(oid, 0) < 1024 and objs.read([oid])[oid].startswith(LFS):
+            if objs.sizes.get(oid, 0) < 1024 and data.startswith(LFS):
                 out.append(Finding("objects", _("{path} is a Git LFS pointer: LFS objects don't travel with the platform's "
                                                 "push", path=p[:200])))
-            elif p.rsplit("/", 1)[-1] == ".gitattributes" and b"filter=lfs" in objs.read([oid])[oid]:
+            elif p.rsplit("/", 1)[-1] == ".gitattributes" and b"filter=lfs" in data:
                 out.append(Finding("objects", _("{path} turns on Git LFS (filter=lfs): LFS objects don't travel with the "
                                                 "platform's push", path=p[:200])))
     return out
@@ -401,7 +412,8 @@ def _sha(text: str) -> str:
 
 def _load(project: str) -> list[dict]:
     """The whole store, or Failure (fail closed: a store that can't be read whole never lets a push through, and is
-    never rewritten from a partial read)."""
+    never rewritten from a partial read). Split on b"\n" only: the records are written ASCII-only, so no character a
+    name holds (U+2028, U+0085…) can split one (the third re-review's B-2)."""
     f = declared_file(project)
     try:
         raw = nofollow.read(f.parent, f.name, STORE_CAP) if f.parent.is_dir() else None
@@ -409,33 +421,57 @@ def _load(project: str) -> list[dict]:
         raise Failure("secrets", _("the platform's record of this project's declared secrets can't be read whole "
                                    "({why})", why=e.strerror or type(e).__name__), cause="declared-store") from None
     out = []
-    for line in (raw or b"").decode("utf-8", errors="replace").splitlines():
+    for line in (raw or b"").split(b"\n"):
+        if not line.strip():
+            continue
         try:
             rec = json.loads(line)
         except ValueError:
-            continue   # a line cut by a crash mid-append: the ones before it stand
+            continue   # a line cut by a crash mid-append: the ones before and after it stand
         if isinstance(rec, dict) and (isinstance(rec.get("v"), str) or isinstance(rec.get("h"), str)):
             out.append(rec)
     return out
 
 
-def _dotenv(line: str) -> tuple[str, str] | None:
-    """(key, value) of one dotenv line: a quoted value is what is inside its quotes; an unquoted one ends at
-    whitespace followed by # (an inline comment), as dotenv reads it."""
-    k, sep, v = line.strip().removeprefix("export ").partition("=")
-    if not sep:
-        return None
-    v = v.strip()
-    if v[:1] in ("'", '"') and v.find(v[0], 1) > 0:
-        return k.strip(), v[1:v.find(v[0], 1)]
-    return k.strip(), re.split(r"\s+#", v, maxsplit=1)[0].strip()
+def dotenv_values(text: str) -> dict[str, str]:
+    """KEY=value pairs as dotenv reads them: `export` and whitespace before a key, a single-quoted value literal, a
+    double-quoted one with its escapes (\\" \\\\ \\n) and across lines, an unquoted one up to whitespace before #."""
+    out, i, n = {}, 0, len(text)
+    line_rx = re.compile(r"[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*=[ \t]*")
+    while i < n:
+        m = line_rx.match(text, i)
+        end = text.find("\n", i)
+        end = n if end < 0 else end
+        if not m or m.end() > end:
+            i = end + 1
+            continue
+        key, j = m.group(1), m.end()
+        q = text[j:j + 1]
+        if q == "'":
+            close = text.find("'", j + 1)
+            close = n if close < 0 else close
+            out[key], i = text[j + 1:close], text.find("\n", close)
+        elif q == '"':
+            k, val = j + 1, []
+            while k < n and text[k] != '"':
+                if text[k] == "\\" and k + 1 < n:
+                    val.append({"n": "\n", "t": "\t", "r": "\r"}.get(text[k + 1], text[k + 1]))
+                    k += 2
+                else:
+                    val.append(text[k])
+                    k += 1
+            out[key], i = "".join(val), text.find("\n", k)
+        else:
+            out[key], i = re.split(r"[ \t]+#", text[j:end], maxsplit=1)[0].strip(), end
+        i = n if i < 0 else i + 1
+    return out
 
 
 def _values(raw: bytes, env_key: str | None) -> list[str]:
     text = _nfc(raw.decode("utf-8", errors="replace"))
     if env_key:
-        out = [kv[1] for line in text.splitlines() if (kv := _dotenv(line)) and kv[0] == env_key]
-        return [v for v in out if len(v) >= MIN_SECRET]
+        v = dotenv_values(text).get(env_key)
+        return [v] if v and len(v) >= MIN_SECRET else []
     whole = text.strip()
     if whole and "\n" not in whole:
         return [whole] if len(whole) >= MIN_SECRET else []
@@ -443,13 +479,32 @@ def _values(raw: bytes, env_key: str | None) -> list[str]:
     return [t for t in TOKEN.findall(text) if len(t) >= 20 and re.search(r"[A-Za-z]", t) and re.search(r"\d", t)]
 
 
+def _head(v: str, n: int) -> str:
+    return v.encode("utf-8")[:n].decode("utf-8", errors="ignore")
+
+
+def _tail(v: str, n: int) -> str:
+    return v.encode("utf-8")[-n:].decode("utf-8", errors="ignore")
+
+
+def _records(v: str, name: str) -> list[dict]:
+    """What the store keeps of one value: itself up to MAX_VALUE bytes; a longer one as its hash (a whole file or a long
+    word) and its first and last MAX_VALUE bytes as plain values, so it is found inside a longer word too (KEY=…, ?k=…;
+    the third re-review's S-2)."""
+    if len(v.encode("utf-8")) <= MAX_VALUE:
+        return [{"v": v, "name": name}]
+    return [{"h": _sha(v), "name": name}, {"v": _head(v, MAX_VALUE), "name": name},
+            {"v": _tail(v, MAX_VALUE), "name": name}]
+
+
 def remember_declared(project: str, doc: dict, log=None) -> None:
     """Add the project's declared secret values as they are now to what the platform has seen (never dropped when a
     declaration goes: the project can change secrets:, so it can't turn the check off; r2 S-e). Only entries without kind
     whose path is relative, read with nofollow from its own workspace or runtime folder: no link followed, regular
     single-link files only, at most SECRET_CAP. Anything else is skipped, said only to the owner's log (S3: a refusal
-    must not tell the project anything about files it can't read). A value is kept as itself up to MAX_VALUE bytes, as
-    its hash beyond; at most MAX_VALUES in all, past which the push is refused for the owner (never one dropped)."""
+    must not tell the project anything about files it can't read). At most MAX_VALUES records in all, past which the push
+    is refused for the owner (never one dropped). Each record one ASCII-only line (ensure_ascii), after a newline when the
+    file doesn't end with one (a crash mid-append costs only its own line)."""
     import registry
     d = registry.dirs({**doc, "name": project})
     bases = [b for b in (d.get("workspace"), d.get("runtime")) if b]
@@ -474,11 +529,11 @@ def remember_declared(project: str, doc: dict, log=None) -> None:
             if raw is None:
                 continue
             for v in _values(raw, sec.get("env_key")):
-                rec = {"v": v, "name": name} if len(v.encode()) <= MAX_VALUE else {"h": _sha(v), "name": name}
-                key = rec.get("v") or rec.get("h")
-                if key not in seen:
-                    seen.add(key)
-                    new.append(rec)
+                for rec in _records(v, name):
+                    key = rec.get("v") or rec.get("h")
+                    if key not in seen and (rec.get("h") or len(key) >= MIN_SECRET):
+                        seen.add(key)
+                        new.append(rec)
     if not new:
         return
     if len(have) + len(new) > MAX_VALUES:
@@ -487,44 +542,54 @@ def remember_declared(project: str, doc: dict, log=None) -> None:
     f = declared_file(project)
     f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     os.chmod(f.parent, 0o700)
-    fd = os.open(f, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-    with os.fdopen(fd, "a") as fh:
-        for rec in new:
-            fh.write(json.dumps({**rec, "at": datetime.date.today().isoformat()}, ensure_ascii=False) + "\n")
+    fd = os.open(f, os.O_RDWR | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "r+b") as fh:
+        size = os.fstat(fd).st_size
+        lead = b""
+        if size:
+            fh.seek(size - 1)
+            lead = b"" if fh.read(1) == b"\n" else b"\n"
+        fh.write(lead + b"".join(json.dumps({**rec, "at": datetime.date.today().isoformat()}).encode() + b"\n"
+                                 for rec in new))
 
 
-def _trie_pattern(values: list[str]) -> str:
-    """One regex for many literals, factored as a trie: alternatives share their prefixes, so a position that starts no
-    value is left after a character or two."""
+def _trie_pattern(keys: list[str]) -> str:
+    """One regex for many literals of one length, factored as a trie (as deep as the keys are long): a position that
+    starts no key is left after a character or two."""
     trie: dict = {}
-    for v in values:
+    for k in keys:
         node = trie
-        for ch in v:
+        for ch in k:
             node = node.setdefault(ch, {})
-        node[""] = True
 
     def emit(node: dict) -> str:
-        alts = [re.escape(ch) + emit(sub) for ch, sub in sorted(node.items()) if ch]
-        end = "" in node
-        if not alts:
-            return ""
-        body = alts[0] if len(alts) == 1 else "(?:" + "|".join(alts) + ")"
-        return f"(?:{body})?" if end else body
+        alts = [re.escape(ch) + emit(sub) for ch, sub in sorted(node.items())]
+        return "" if not alts else alts[0] if len(alts) == 1 else "(?:" + "|".join(alts) + ")"
     return emit(trie)
 
 
 class Declared:
-    """Every value the platform has seen the project declare: a short one matched as a substring of a text (one
-    trie-factored regex, in chunks, checking the deadline), a long one by the hash of a whole new file. → the declared
-    names found, never the values."""
+    """Every value the platform has seen the project declare: a short one matched as a substring of a text, a long one
+    by the hash of a whole new file or a long word in one (and its first and last bytes as short ones). → the declared
+    names found, never the values.
+    The match can't fail on what the values are (the third re-review's S-1: a regex of them nests as deep as they share
+    prefixes): each value is keyed by its first KEY characters, one shallow regex finds where any key starts
+    (overlapping, by a lookahead), and each place is checked against the values with that key. Chunks check the
+    deadline."""
     CHUNK = 1 << 20
+    KEY = MIN_SECRET
 
     def __init__(self, project: str):
         recs = _load(project)
-        self.names = {_nfc(r["v"]): r.get("name", "?") for r in recs if r.get("v")}
+        self.names = {_nfc(r["v"]): r.get("name", "?") for r in recs if r.get("v") and len(r["v"]) >= self.KEY}
         self.hashes = {r["h"]: r.get("name", "?") for r in recs if r.get("h")}
+        self.by_key: dict[str, list[str]] = {}
+        for v in self.names:
+            self.by_key.setdefault(v[:self.KEY], []).append(v)
         self.longest = max((len(v) for v in self.names), default=0)
-        self.rx = re.compile(_trie_pattern(sorted(self.names))) if self.names else None
+        # the keys as a trie (as deep as KEY, never as deep as a value): shared prefixes leave a position fast
+        self.rx = re.compile("(?=(" + _trie_pattern(sorted(self.by_key)) + "))") \
+            if self.by_key else None
 
     def hits(self, texts: list[str], deadline: float | None = None) -> list[str]:
         import time
@@ -537,13 +602,15 @@ class Declared:
                     out.add(self.hashes[h])
             if not self.rx:
                 continue
-            step, over = self.CHUNK, max(0, self.longest - 1)
+            step = self.CHUNK
             for i in range(0, max(len(t), 1), step):
                 if deadline is not None and time.monotonic() > deadline:
                     raise Failure("secrets", _("the scanner failed: it ran past its time limit"))
-                for m in self.rx.finditer(t, i, min(len(t), i + step + over)):
-                    if m.group(0) in self.names:
-                        out.add(self.names[m.group(0)])
+                for m in self.rx.finditer(t, i, min(len(t), i + step + self.KEY - 1)):
+                    pos = m.start()
+                    for v in self.by_key[m.group(1)]:
+                        if t.startswith(v, pos):
+                            out.add(self.names[v])
         return sorted(out)
 
 
@@ -662,7 +729,7 @@ def run(git, *, project: str, doc: dict, new: str, tips: list[str], default_tip:
     if size:
         return size
     entries, gitlinks, first = objs.walk(deadline)
-    found = objects_check(objs, entries, gitlinks)
+    found = objects_check(objs, entries, gitlinks, deadline)
     found += ci_check(git, new, default_tip, enf.get("git_ci") is True)
     if not (owner_form and not gp.get("emails")):
         found += identity_check(objs, gp, public)
