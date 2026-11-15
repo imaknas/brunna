@@ -1241,13 +1241,27 @@ def routed(c, r, session, by, **extra) -> None:
             {"session": session, "by": by, **extra})
 
 
+def ended_busy(c, mid, session) -> bool:
+    """A route of this session's for this letter ended because it was busy with other work: told later, it doesn't hold the
+    letter again (its hook would fire soon after the end, and the next session would lose it to a session still busy)."""
+    last = None
+    for e in c.execute("SELECT payload FROM events WHERE type='message.routed' AND ref=? ORDER BY seq", (mid,)):
+        p = json.loads(e["payload"] or "{}")
+        if p.get("session"):
+            last = p["session"]
+        elif p.get("ended") == "busy" and last == session:
+            return True
+    return False
+
+
 def tell(c, rows, session, via, live) -> None:
     """These letters went to this session (inside the caller's transaction). For a request or question the first session
-    told holds it (by: hook), and nobody pre-empts a holder. A platform run marks nothing and holds nothing."""
+    told holds it (by: hook), and nobody pre-empts a holder; one whose route ended for being busy doesn't hold it again. A
+    platform run marks nothing and holds nothing."""
     if platform_run():
         return
     for r in rows:
-        hold_it = session and actionable(r) and not letter_state(c, r, live).held
+        hold_it = session and actionable(r) and not letter_state(c, r, live).held and not ended_busy(c, r["id"], session)
         mark_delivered(c, [r], session, via)
         if hold_it:
             routed(c, r, session, "hook")
@@ -3054,11 +3068,12 @@ def busy_hold_over(c, r, route) -> bool:
     return now() >= start + datetime.timedelta(minutes=BUSY_HOLD_MIN)
 
 
-def end_route(c, r, st, proj) -> bool:
+def end_route(c, r, st, proj, alive) -> bool:
     """Record that a route ended (a row with no session), so it never revives; said once per letter when it ended
-    untaken. False when a hook moved the letter meanwhile: nothing written, the caller reads it again next tick."""
+    untaken. False when a hook moved the letter meanwhile, or someone took it since it was judged (an ack writes no route
+    row, and asking what sessions are doing can take seconds): nothing written, the caller reads it again next tick."""
     c.execute("BEGIN IMMEDIATE")
-    same = route_of(c, r) == st.route
+    same = route_of(c, r) == st.route and (st.ended == "taken" or not taken_how(c, r, alive))
     if same:
         first = c.execute("SELECT 1 FROM events WHERE type='message.routed' AND ref=? AND"
                           " json_extract(payload,'$.session') IS NULL", (r["id"],)).fetchone() is None
@@ -3161,7 +3176,7 @@ def dispatch(c, rt=None, wakes: list | None = None) -> int:
                 st = st._replace(held=False, holder=None, ended="busy")
             # taken for good needs no end recorded: it can't come back. Taken for now can (an ack's session closing, a
             # fork's time running out), and the route it ended mustn't revive then
-            if st.route and st.ended and st.taken != "good" and not end_route(c, r, st, proj):
+            if st.route and st.ended and st.taken != "good" and not end_route(c, r, st, proj, alive):
                 waiting += 1
                 continue
             if st.taken:

@@ -186,21 +186,24 @@ class Pick(Harness):
         self.assertEqual(self.by("m1"), [("S2", "recent")])
         self.assertEqual([p["job"] for _i, p in self.failures()], ["mailbox-route:proj"])
 
+    def pick_gone(self, since):
+        self.open("S3", seen=50)
+        self.two()
+        self.dispatch()
+        self.answer("m1", "S1")
+        self.rt.statuses["S1"] = since
+        self.dispatch()
+        self.assertEqual(self.by("m1"), [("S2", "recent")])
+        self.assertIn(self.m._("{project}: the session mailbox-route picked for a letter has closed, opened a dialog or got busy "
+                               "since; the most recently active session was picked", project="proj"), self.logged)
+        self.assertFalse(any("no usable answer" in m for m in self.logged))
+        self.assertEqual(self.failures(), [])
+
     def test_a_pick_no_longer_free_is_said_so_and_isnt_a_failure(self):
-        for since in ("waiting", "busy"):   # a dialog opened, or it got busy, since the call started
-            with self.subTest(since=since):
-                self.setUp()
-                self.open("S3", seen=50)
-                self.two()
-                self.dispatch()
-                self.answer("m1", "S1")
-                self.rt.statuses["S1"] = since
-                self.dispatch()
-                self.assertEqual(self.by("m1"), [("S2", "recent")])
-                self.assertIn(self.m._("{project}: the session mailbox-route picked for a letter has closed, opened a dialog or "
-                                       "got busy since; the most recently active session was picked", project="proj"), self.logged)
-                self.assertFalse(any("no usable answer" in m for m in self.logged))
-                self.assertEqual(self.failures(), [])
+        self.pick_gone("waiting")   # a dialog opened since the call started
+
+    def test_a_pick_busy_since_goes_to_an_idle_one(self):
+        self.pick_gone("busy")
 
     def test_a_miss_is_said_in_fixed_words_once_until_one_answers(self):
         miss = self.m._("{project}: mailbox-route gave no usable answer for a letter; the most recently active session was picked",

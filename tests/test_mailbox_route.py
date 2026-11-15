@@ -280,6 +280,38 @@ class BusyHolder(Harness):
         self.assertEqual(self.handled, [("proj", ["m1"])], "a runtime with a wake port gets no fork: triage")
         self.assertEqual(self.woken(), [])
 
+    def test_its_own_hook_after_a_busy_end_tells_it_but_doesnt_hold_it(self):
+        """Routed while busy and never told: its post-tool hook comes soon after the end, and mustn't take the letter back from
+        the next session or a run already started (the cold review's finding)."""
+        self.open("S1")
+        self.rt.statuses["S1"] = "busy"
+        self.send("m1", "proj", "request")
+        self.dispatch()
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 1)
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), ["busy"])
+        self.assertIn("[m1]", self.hook("post-tool", "S1"), "it may read it, and ack it")
+        self.assertEqual(self.by("m1"), [("S1", "only"), (None, None)], "no new route")
+        self.assertFalse(self.state("m1").held)
+        self.ack("m1", "S1")
+        self.assertEqual(self.state("m1").taken, "now", "an ack still takes it")
+
+    def test_an_ack_while_dispatch_asks_whats_going_on_isnt_overruled(self):
+        self.told_while_busy()
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 1)
+        asked = self.rt.session_status
+
+        def acking(sid):   # the listing takes seconds; the session acks meanwhile
+            self.ack("m1", "S1")
+            return asked(sid)
+        self.rt.session_status = acking
+        self.dispatch()
+        self.assertEqual((self.ended_why("m1"), self.woken(), self.handled), ([], [], []))
+        self.rt.session_status = asked
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), ["taken"])
+        self.assertEqual((self.woken(), self.handled), ([], []))
+
     def test_busy_then_idle_inside_the_bound_is_woken_and_has_its_window(self):
         self.open("S1")
         self.rt.statuses["S1"] = "busy"

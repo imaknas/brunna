@@ -857,6 +857,13 @@ helped this letter.
   among them, the model's pick among them (the model is asked about those only), the most recent of them. Busy ones only
   when all are busy. A `to_session` still comes first, busy or not: it names the session the letter is addressed to, while
   the thread rule is a guess. If that session stays busy, the bound moves the letter on.
+- **From the cold review.** A session whose route ended `busy` doesn't hold the letter again when its own hook tells it later
+  (`ended_busy`, in `tell`): routed while busy and not yet told, its post-tool hook comes soon after the end, and would take
+  the letter back from the next session, or from a triage already started. It is told and can still ack. And `end_route`
+  writes no end for a letter someone took after it was judged: asking what sessions are doing can take seconds, an ack writes
+  no route row, and the tick would otherwise start triage on a letter just acked.
+  Left as it is: from minute 10 to 60 of a held letter not woken for, each tick asks the runtime about the holder, within the
+  tick's `STATUS_TICK_S`.
 - **The text.** The footer of every listing says a request goes to someone else after 60 minutes, and after 10 while this
   session is busy with other work, so a session that is taking one knows to ack.
 
@@ -874,7 +881,8 @@ told by its hook while busy, then the next candidate after the bound in the same
 triage after the bound; busy then idle inside the bound, woken, then busy on the letter and not ended; the bound counted from
 a later telling; an ack; only `busy` ends it; the off switch; idle before a more recent busy one; the usual rules within the
 idle ones; the thread rule looking at idle ones first; a `to_session` busy or not; the model asked about idle ones only; a
-model's pick that got busy since.
+model's pick that got busy since; a busy-ended session's own hook telling it without holding it; an ack during the status
+look not overruled.
 
 **Live check after merge:** two armed sessions of one project, one busy with a long turn; a request with no thread goes
 `by: idle` to the other and wakes it. And a session told mid-turn that doesn't ack is ended `busy` after 10 minutes in
