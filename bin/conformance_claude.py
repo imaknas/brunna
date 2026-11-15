@@ -922,6 +922,11 @@ CHECKS = [
     # a session of this version forked by the platform's current copy (a mailbox fork); on a candidate, by itself
     Check("sessions-fork", "sessions", "function", sessions_fork, side="session"),
     Check("stream-exchange", "stream", "function", stream_exchange),
+    # a lease's --settings ask for every session command the folder's local settings allow (runtime_claude.lease_settings;
+    # docs/design/platform-push.md, "After the code review"): ask must win over that allow
+    Check("lease-ask", "stream", "safety", None,
+          "a lease started in a folder whose local settings allow `brunna send *`, with --settings asking for it, sends "
+          "the command to the permission prompt tool instead of running it: needs a lease session with a stand-in relay"),
     Check("tool-servers-listed", "tool_servers", "function", tool_servers_listed),
     Check("auth-login-error", "auth", "function", auth_login_error),
     Check("auth-keychain", "auth", "safety", auth_keychain),

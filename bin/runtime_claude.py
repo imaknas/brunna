@@ -362,13 +362,14 @@ def lease_settings(pol: dict) -> dict:
     deny += [f"Read({_rule_path(p)})" for p in pol["credential_files"]] + [f"Read({_rule_path(p)}/**)" for p in pol["credentials"]]
     deny += SECURITY_DENY
     # a lease runs in the workspace and loads its local settings (their sandbox and hooks it needs), which also carry
-    # the session rendering's allow rules for every session command and its push folder (review S2 and its re-review's
-    # 4): none of those may run unasked in a lease. An allow can't be taken out of a file the lease loads, so its own
-    # --settings deny them (deny wins), and the Edit denies reach its Bash through the sandbox
+    # the session rendering's allow rules for every session command and its push folder (review S2 and its re-reviews):
+    # none of those may run unasked in a lease. An allow can't be taken out of a file the lease loads, so its own
+    # --settings ask for each (Claude Code's order is deny, then ask, then allow: the owner is asked through the
+    # permission relay, as lease-work asks for every command), and the push folder is denied outright (the Edit denies
+    # reach its Bash through the sandbox)
     deny += [r for p in pol.get("session_write") or [] for r in _edit(p, True)]
-    deny += [f"Bash({_tilde(c)} *)" for c in pol.get("platform_commands") or []]
-    deny += _cli_rules(pol.get("platform_cli") or [])
-    return {"permissions": {"deny": list(dict.fromkeys(deny))}}
+    ask = [f"Bash({_tilde(c)} *)" for c in pol.get("platform_commands") or []] + _cli_rules(pol.get("platform_cli") or [])
+    return {"permissions": {"deny": list(dict.fromkeys(deny)), "ask": list(dict.fromkeys(ask))}}
 
 
 def platform_settings(project: str, spec: dict, run_dir, keep: pathlib.Path | None = None, cwd=None,
