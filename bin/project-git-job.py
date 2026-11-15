@@ -63,6 +63,8 @@ readable. Nothing here decides anything for the platform; the caller treats the 
                                           lacks is left out of that. Exit 3: nothing the given commits don't reach
                                           (stdout: the branch's commit id instead), 4: no such branch
   set-origin <ws> <url> <branch>          origin = url, the branch tracking it
+  set-identity <ws> <name> <email>        user.name and user.email in the repo's own config: the address the
+                                          platform's push allows (brunna push setup, bin/git_push_grant.py)
   tracked <repo> <name>…                  JSON [the tracked paths at or under one of the names, at any depth] (at
                                           most 200): what a sandboxed project tracks among the control names
   test-runs <repo> <since>                JSON [run log lines at or after <since> (ISO time)]: the test runner's
@@ -628,6 +630,17 @@ def op_set_origin(ws: str, url: str, branch: str) -> int:
     return 0
 
 
+def op_set_identity(ws: str, name: str, email: str) -> int:
+    """The repo's commits carry this name and email (its own config; worktrees share it)."""
+    if any(c in name + email for c in "\n\r\0") or "@" not in email:
+        sys.stderr.write("set-identity: a name and an email address, one line each\n")
+        return 2
+    for key, value in (("user.name", name), ("user.email", email)):
+        if git(ws, "config", "--local", key, value).returncode != 0:
+            return 1
+    return 0
+
+
 MAX_RUNS = 5000
 
 
@@ -661,7 +674,8 @@ OPS = {"test-runs": op_test_runs, "worktrees": op_worktrees, "ignored": op_ignor
        "checkout-sigs": op_checkout_sigs, "changed": op_changed, "copy-back": op_copy_back, "hooks": op_hooks,
        "hook-write": op_hook_write, "hook-remove": op_hook_remove, "bundle-unpushed": op_bundle_unpushed, "diff-head": op_diff_head,
        "memory-sync": op_memory_sync, "exclude": op_exclude, "save": op_save, "head": op_head, "first-look": op_first_look,
-       "bundle-head": op_bundle_head, "bundle-branch": op_bundle_branch, "set-origin": op_set_origin, "tracked": op_tracked}
+       "bundle-head": op_bundle_head, "bundle-branch": op_bundle_branch, "set-origin": op_set_origin, "tracked": op_tracked,
+       "set-identity": op_set_identity}
 
 
 if __name__ == "__main__":

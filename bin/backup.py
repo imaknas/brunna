@@ -21,7 +21,8 @@ What is backed up (what only the hub machine has, and cannot be recovered once l
     Claude Code transcripts)
 Not backed up: transcripts of the work profile (company content), GitHub mirrors, whole workspaces, generated videos,
 venv/cache, and live sessions' wake addresses (hubconf.session_addresses_dir: one only works while its session runs), and the
-store of the coding agents' checked copies (hubconf.runtimes_dir: rebuilt from the vendor, ~300 MB a copy).
+store of the coding agents' checked copies (hubconf.runtimes_dir: rebuilt from the vendor, ~300 MB a copy), and the
+platform's push grants (<secrets>/git-push: a deploy key per repo, made again with brunna push setup after a restore).
 On failure: job.failed on the bus and exit 1 (the scheduler records the failure → the status page goes red). The result
 is written to .state/backup/last.json.
 """
@@ -143,9 +144,11 @@ def covers(path: pathlib.Path) -> bool:
     import fnmatch
     path = path.expanduser().resolve()
     if {hubconf.session_addresses_dir().resolve(), (hubconf.secrets_dir() / "tmp").resolve(),
-            hubconf.runtimes_dir().resolve(), (hubconf.secrets_dir() / "credentials").resolve()} & {path, *path.parents}:
+            hubconf.runtimes_dir().resolve(), (hubconf.secrets_dir() / "credentials").resolve(),
+            (hubconf.secrets_dir() / "git-push").resolve()} & {path, *path.parents}:
         # never backed up (module header); credentials/: the platform's grants with backup: false, re-granted after a
-        # restore (docs/design/platform-credentials.md C3; credentials-kept/ holds those with backup: true)
+        # restore (docs/design/platform-credentials.md C3; credentials-kept/ holds those with backup: true); git-push/:
+        # the push grants' deploy keys, made again with brunna push setup (docs/design/platform-push.md)
         return False
     dbs = [hubconf.bus_db(), *(hubconf.path(d["path"]) for d in CFG.get("sqlite") or [])]
     if any(db and path == db.resolve() for db in dbs):  # SQLite is copied separately with the backup API
@@ -248,7 +251,8 @@ def cmd_run() -> int:
             paths.insert(0, str(STAGE))
         args = ["backup", "--tag", "nightly", "--json", "--exclude", str(hubconf.session_addresses_dir()),
                 "--exclude", str(hubconf.secrets_dir() / "tmp"), "--exclude", str(hubconf.runtimes_dir()),
-                "--exclude", str(hubconf.secrets_dir() / "credentials")]
+                "--exclude", str(hubconf.secrets_dir() / "credentials"),
+                "--exclude", str(hubconf.secrets_dir() / "git-push")]
         for x in CFG.get("exclude") or []:
             args += ["--exclude", str(hubconf.path(x)) if x.startswith("~") else x]
         r = restic(*args, *paths, capture=True)

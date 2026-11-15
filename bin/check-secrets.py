@@ -16,6 +16,9 @@ The registry holds only names, locations and expiry, **never values**; this scri
   - undeclared: files in each project's runtime / workspace (and the platform's .secrets/) whose names look like
     credentials but are not declared are only listed as a reminder (not a problem, content not read) -- either
     declare them or confirm they are not credentials
+  - push grants (git-push, derived for a project whose enforce.git_push lets the platform push; bin/git_push_grant.py):
+    the deploy key and its record are there, private, still match paths.origin, and an ls-remote through them works;
+    not backed up on purpose. A broken one raises the owner's `brunna push setup` to-do
   - platform credentials (an entry with kind; docs/design/platform-credentials.md C8): from their status files only
     (bin/credentials.py rows): one a job lists that isn't granted, or that needs the owner again, is a problem, with
     the command that grants it; its file's mode is checked, never its content
@@ -124,6 +127,26 @@ def check(project: str, doc: dict, sec: dict, today: datetime.date) -> tuple[lis
     return probs, notes
 
 
+def check_push_grant(project: str) -> tuple[list[str], list[str]]:
+    """The derived grant `git-push` (docs/design/platform-push.md, "If the grant"): a project whose enforce.git_push lets
+    the platform push has a deploy key in <secrets>/git-push/<project>/. Not a registry secrets: entry, and not backed up
+    on purpose (re-granting is cheap): after a restore it is missing here and the owner runs setup again. Checked from
+    its files and once through it (ls-remote); a broken one raises the owner's setup to-do, one per episode."""
+    import git_push_grant
+    name = f"{project}:git-push"
+    st = git_push_grant.status(project)
+    if st["state"] != "ok":
+        git_push_grant.raise_todo(project, st["detail"])
+        return [_("{name}: {why}", name=name, why=st["detail"])], []
+    ok, why = git_push_grant.probe(project)
+    if not ok:
+        git_push_grant.raise_todo(project, why)
+        return [_("{name}: {why}; the owner runs {command}", name=name, why=why,
+                  command=git_push_grant.setup_command(project))], []
+    return [], [_("{name}: {detail}; works; not backed up on purpose (made again with {command})", name=name,
+                  detail=st["detail"], command=git_push_grant.setup_command(project))]
+
+
 def undeclared(project: str, doc: dict, declared: set[pathlib.Path]) -> list[pathlib.Path]:
     """Files under runtime / workspace (within three levels) whose names look like credentials and are not declared. For
     the platform itself only .secrets/ is looked at, without its sessions' wake addresses (hubconf.session_addresses_dir:
@@ -133,7 +156,8 @@ def undeclared(project: str, doc: dict, declared: set[pathlib.Path]) -> list[pat
         [r for r in (d["runtime"], d["workspace"]) if r]
     found, skip, skip_tmp = [], hubconf.session_addresses_dir(), hubconf.secrets_dir() / "tmp"
     # the platform's grants (bin/credentials.py): declared by their registry entries, or listed as orphaned below
-    skips = {skip, skip_tmp, hubconf.secrets_dir() / "credentials", hubconf.secrets_dir() / "credentials-kept"}
+    skips = {skip, skip_tmp, hubconf.secrets_dir() / "credentials", hubconf.secrets_dir() / "credentials-kept",
+             hubconf.secrets_dir() / "git-push"}   # the push grants: derived below, never declared
     for root in roots:
         if not root.is_dir():
             continue
@@ -203,6 +227,13 @@ def main(argv: list[str]) -> int:
                 print(n)
             if (path := locate(project, doc, sec["path"])):
                 declared.add(path.resolve())
+        import git_push_grant
+        if doc.get("type") != "module" and git_push_grant.needed(doc):
+            count += 1
+            probs, notes = check_push_grant(project)
+            problems += probs
+            for n in notes:
+                print(n)
         for path in ([] if doc.get("type") == "module" else undeclared(project, doc, declared)):
             print(_("{project}: not declared, file name looks like a credential: {path} (declare it under secrets: in "
                     "the registry, or confirm it is not one)", project=project, path=path))

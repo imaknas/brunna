@@ -2399,6 +2399,11 @@ def passthrough(script: str):
     return lambda argv: subprocess.run([*hubconf.launch(BIN / script), *argv]).returncode
 
 
+def cmd_push_setup(argv: list[str]) -> int:
+    """`brunna push setup <project> …`: the platform's push grant and policy (bin/git_push_grant.py; owner-run)."""
+    return subprocess.run([*hubconf.launch(BIN / "git_push_grant.py"), "setup", *argv]).returncode
+
+
 # subcommands for project sessions (any coding agent): the same list as policy.platform_cli() (the permission rules
 # allow only these)
 SESSION_COMMANDS = {**{c: ("hubbus", c) for c in ("send", "inbox", "show", "ack", "pass", "done", "thread", "open-questions")},
@@ -2468,7 +2473,8 @@ COMMANDS = {
     "skills": passthrough("skills_sync.py"),
     "credentials": passthrough("credentials.py"),
     # the owner pushes a sandboxed project's branch (docs/design/git-broker.md, "Owner-run push"); never a session command
-    "push": lambda argv: subprocess.run([*hubconf.launch(BIN / "git_remote.py"), "push", *argv]).returncode,
+    "push": lambda argv: cmd_push_setup(argv[1:]) if argv[:1] == ["setup"] else subprocess.run(
+        [*hubconf.launch(BIN / "git_remote.py"), "push", *argv]).returncode,
     # after a merge of agent-hub, run by merge-branch from the merged tree (docs/design/test-waiting.md step 2.2;
     # step 2.3 adds the hook install): the registry index rebuilt by the code that just landed
     "land": cmd_land,
