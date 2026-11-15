@@ -49,7 +49,7 @@ $ agenthub doctor    # launchd, problems
     → brunna init
 ✗ watchdog (local.brunna-scheduler-watchdog): the loaded one belongs to a different hub, not <HUB>/bin
     → brunna init (replaces it with this one)
-✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only)
+✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
 ! the scheduler has not ticked yet, and no service manager runs it here (see the scheduler line above)
 ! no alerts set up: a stopped scheduler or a dead service only shows on the status page and in the logs
     → to be notified, add an alerts section as in hub.example.json
@@ -97,7 +97,7 @@ $ agenthub doctor    # launchd, all fine
 ✓ judgment points go to the runtime claude (no llm.providers; schedulectl models shows each point's model)
 ✓ scheduler (local.brunna-scheduler): loaded
 ✓ watchdog (local.brunna-scheduler-watchdog): loaded
-✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only)
+✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
 ✓ the scheduler just ticked
 ✓ background services, project settings: match the config
 
@@ -159,7 +159,7 @@ $ agenthub doctor    # no service manager, unnamed assistant
     → brunna llm setup (pick one: an API key or a local Ollama)
 ✗ scheduler, watchdog: HOME (<TMP>/home) is not this account's home directory: the platform leaves the account's background services alone (installing one from here would replace the account's real one)
     → schedule `<TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py` yourself every 15 minutes (for example the crontab line `*/15 * * * * <TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py`)
-✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only)
+✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
 ! the scheduler has not ticked yet, and no service manager runs it here (see the scheduler line above)
 ✓ background services, project settings: match the config
 
@@ -217,7 +217,7 @@ $ agenthub doctor    # two coding agents
 ✓ judgment points go to the runtime claude (no llm.providers; schedulectl models shows each point's model)
 ✗ scheduler, watchdog: HOME (<TMP>/home) is not this account's home directory: the platform leaves the account's background services alone (installing one from here would replace the account's real one)
     → schedule `<TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py` yourself every 15 minutes (for example the crontab line `*/15 * * * * <TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py`)
-✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only)
+✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
 ! the scheduler has not ticked yet, and no service manager runs it here (see the scheduler line above)
 ✓ background services, project settings: match the config
 

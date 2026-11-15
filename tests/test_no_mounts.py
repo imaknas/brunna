@@ -63,7 +63,7 @@ class Routes(unittest.TestCase):
         cls.img = cls.ws / "x.dmg"   # bytes the sandboxed process could have written itself
         subprocess.run(["hdiutil", "create", "-quiet", "-srcfolder", str(src), "-fs", "HFS+", "-volname", cls.vol,
                         str(cls.img)], check=True, capture_output=True)
-        cls.disks0 = cls.disks()
+        cls.ram0 = None   # ram disks counted as this test's: only those new across one of its own ram routes
         cls.profiles = {"service": seatbelt.service_profile(pol_for(cls.ws), [cls.ws]),
                         "gpu": seatbelt.profile(pol_for(cls.ws), "gpu")}
 
@@ -73,23 +73,26 @@ class Routes(unittest.TestCase):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
     @staticmethod
-    def disks() -> set[str]:
-        out = subprocess.run(["diskutil", "list"], capture_output=True, text=True).stdout
-        return set(re.findall(r"^(/dev/disk\d+)", out, re.M))
-
-    @classmethod
-    def seen(cls) -> tuple[set[str], list[str]]:
-        """From outside: the devices of this image (or any ram disk) and every disk new since the start, and the
-        mounts of this volume or anywhere under this test's folder."""
+    def attached(match) -> set[str]:
+        """The devices of the attached images whose image-path line matches."""
         info = subprocess.run(["hdiutil", "info"], capture_output=True, text=True).stdout
         devs, ours = set(), False
         for line in info.splitlines():
             if "image-path" in line:
-                ours = str(cls.img) in line or "ram://" in line
+                ours = match(line)
             elif ours and re.match(r"^/dev/disk\d+\s", line):
                 devs.add(line.split()[0])
                 ours = False
-        devs |= cls.disks() - cls.disks0
+        return devs
+
+    @classmethod
+    def seen(cls) -> tuple[set[str], list[str]]:
+        """From outside, only what is this test's (other tests and the owner may attach at the same time, and nothing
+        of theirs is counted or detached): the devices of this image, ram disks new across this test's own ram
+        route, and the mounts of this volume or under this test's folder."""
+        devs = cls.attached(lambda line: str(cls.img) in line)
+        if cls.ram0 is not None:
+            devs |= cls.attached(lambda line: "ram://" in line) - cls.ram0
         table = subprocess.run(["mount"], capture_output=True, text=True).stdout
         return devs, [x for x in table.splitlines() if str(cls.tmp) in x or cls.vol in x]
 
@@ -147,7 +150,12 @@ class Routes(unittest.TestCase):
         for kind in self.profiles:
             for name, cmd in routes.items():
                 with self.subTest(kind=kind, route=name):
-                    self.assertNothing(kind, name, self.sandboxed(kind, cmd))
+                    # a ram disk has no image of ours to name it: those present before this route are not ours
+                    type(self).ram0 = self.attached(lambda line: "ram://" in line) if "ram://" in cmd else None
+                    try:
+                        self.assertNothing(kind, name, self.sandboxed(kind, cmd))
+                    finally:
+                        type(self).ram0 = None
 
     def test_an_existing_device_is_not_mounted(self):
         """A device attached from outside (the owner's, or a stick): not mounted at a folder, nor at /Volumes."""
