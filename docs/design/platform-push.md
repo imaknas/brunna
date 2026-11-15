@@ -121,8 +121,9 @@ A second blind review of r1 found one blocking point and thirteen should-fix; al
 The core is in `bin/git_remote.py` (forms, pipeline, worker, doctor rows), `bin/push_checks.py`,
 `bin/push_queue.py` and `take_push_requests` in `bin/hubbus`; the tests are `tests/test_platform_push.py`. With the
 grant (`bin/git_push_grant.py`, below):
-- **the credential step** overlays `git_push_grant.ssh_env(project)` last on an environment built from scratch, and
-  pushes to `git_push_grant.push_url(project)`; no module, or `NotSetUp`, refuses with an owner to-do, never a fallback
+- **the credential step** overlays `git_push_grant.ssh_env(project, run_dir)` last on an environment built from
+  scratch (the key's copy in the run's own private folder, removed with it), and pushes to
+  `git_push_grant.push_url(project)`; no module, or `NotSetUp`, refuses with an owner to-do, never a fallback
   to the owner's credential. A local-path origin needs no key;
 - **check 8's and S-l's visibility** is the grant's anonymous probe (`git_push_grant.visibility`), a local path
   private;

@@ -547,7 +547,8 @@ def visibility(origin: str) -> str:
 
 # ---------- the credential (one function; the owner's decision 1, 11-15) ----------
 
-def push_credential_env(project: str, origin: str, owner_form: bool) -> dict[str, str]:
+def push_credential_env(project: str, origin: str, owner_form: bool,
+                        run_dir: pathlib.Path | None = None) -> dict[str, str]:
     """The environment every network step of this push runs with. The owner form: the owner's git environment, as
     before. The worker: a local origin needs no credential (an environment from scratch); any other gets the platform's
     per-repo push key (git_push_grant.ssh_env), never the owner's own credential; no key → refused for the owner."""
@@ -562,7 +563,8 @@ def push_credential_env(project: str, origin: str, owner_form: bool) -> dict[str
     except ImportError:
         raise Refused(setup, check="credential", fix="owner", cause="credential") from None
     try:
-        return {**env, **git_push_grant.ssh_env(project)}
+        # the grant's overlay last; its copy of the key goes into this run's private folder, removed with it
+        return {**env, **git_push_grant.ssh_env(project, run_dir)}
     except getattr(git_push_grant, "NotSetUp", ()) as e:
         raise Refused(setup, check="credential", fix="owner", cause="credential", raw=str(e)[:300]) from None
 
@@ -576,7 +578,12 @@ def push_url(project: str, origin: str, owner_form: bool) -> str:
     except ImportError:
         return origin
     fn = getattr(git_push_grant, "push_url", None)
-    return fn(project) if callable(fn) else origin
+    try:
+        return fn(project) if callable(fn) else origin
+    except getattr(git_push_grant, "NotSetUp", ()) as e:
+        raise Refused(_("the platform's push key isn't set up: {command}",
+                        command=f"{names.current('cli')} push setup {project}"), check="credential", fix="owner",
+                      cause="credential", raw=str(e)[:300]) from None
 
 
 # ---------- the pipeline ----------
@@ -614,7 +621,9 @@ def prepare(project: str, doc: dict, branch: str | None, tmp: pathlib.Path, *, o
     if not ws or not ws.is_dir():
         raise Refused(_("{project}: its workspace {path} is not there", project=project, path=ws), fix="owner",
                       cause="workspace", public=_("the project's workspace is not where the registry says"))
-    env = push_credential_env(project, origin, owner_form)   # before the first network step
+    key_dir = tmp / "key"
+    key_dir.mkdir(mode=0o700)
+    env = push_credential_env(project, origin, owner_form, key_dir)   # before the first network step
     if branch is None:
         try:
             head = project_git.data(project, ws, "head", ws)
@@ -1090,17 +1099,21 @@ def doctor_lines() -> list[tuple[str, str, str]]:
 def credential_probe(project: str, origin: str, setup_cmd: str) -> tuple[str, str, str]:
     """ls-remote exactly as the worker would reach the remote (its environment from push_credential_env, from this
     process's environment: doctor's, which the dispatch service's may not match). → a doctor row."""
+    key_dir = pathlib.Path(tempfile.mkdtemp(prefix="hub-probe-", dir=hubconf.private_tmp()))
     try:
-        env = push_credential_env(project, origin, owner_form=False)
-        url = push_url(project, origin, owner_form=False)
-    except Refused as e:
-        return "bad", f"{project}: {e}", setup_cmd
-    try:
+        try:
+            env = push_credential_env(project, origin, owner_form=False, run_dir=key_dir)
+            url = push_url(project, origin, owner_form=False)
+        except Refused as e:
+            return "bad", f"{project}: {e}", setup_cmd
+        broker_dir(project).mkdir(mode=0o700, parents=True, exist_ok=True)
         r = subprocess.run(["git", *SAFE, "ls-remote", "--heads", "--", url], cwd=broker_dir(project), env=env,
                            capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
     except (OSError, subprocess.TimeoutExpired):
         return "bad", _("{project}: the platform's push credential: {why}", project=project,
                         why=class_reason("unreachable")), ""
+    finally:
+        shutil.rmtree(key_dir, ignore_errors=True)
     if r.returncode == 0:
         return "ok", _("{project}: the platform's push credential reaches its remote", project=project), ""
     _check, kind, fix, _cause = classify(r.stderr)

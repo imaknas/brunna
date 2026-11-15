@@ -384,7 +384,7 @@ class Worker(Push):
         class NotSetUp(Exception):
             pass
         fake.NotSetUp = NotSetUp
-        fake.ssh_env = lambda project: {"GIT_SSH_COMMAND": "ssh -F /dev/null -o IdentitiesOnly=yes", "GRANT_MARK": project}
+        fake.ssh_env = lambda project, run_dir=None: {"GIT_SSH_COMMAND": "ssh -F /dev/null -o IdentitiesOnly=yes", "GRANT_MARK": project}
         self.docs["proj"]["paths"]["origin"] = "https://127.0.0.1:9/x.git"
         self.commit(self.ws, "a.txt", "a\n", "add a")
         with mock.patch.dict(sys.modules, {"git_push_grant": fake}), \
@@ -401,7 +401,7 @@ class Worker(Push):
             self.assertNotEqual(e.get("GIT_CONFIG_GLOBAL"), str(self.gitconfig), "the owner's global config")
         self.assertEqual(res["state"], "failed")
         self.assertNotIn("127.0.0.1", res["reason"], "git's own words reached the project (r1 S8)")
-        fake.ssh_env = lambda project: (_ for _ in ()).throw(NotSetUp("no key"))
+        fake.ssh_env = lambda project, run_dir=None: (_ for _ in ()).throw(NotSetUp("no key"))
         with mock.patch.dict(sys.modules, {"git_push_grant": fake}):
             res = self.ask()
         self.assertEqual((res["state"], res["check"]), ("refused", "credential"))
@@ -415,7 +415,7 @@ class Worker(Push):
         self.assertIn("bad", [lvl for lvl, what, _f in rows if "proj" in what])
         fake = types.ModuleType("git_push_grant")
         fake.NotSetUp = type("NotSetUp", (Exception,), {})
-        fake.ssh_env = lambda project: {}
+        fake.ssh_env = lambda project, run_dir=None: {}
         self.docs["proj"]["paths"]["origin"] = f"file://{self.remote}"
         with mock.patch.dict(sys.modules, {"git_push_grant": fake}):
             rows = git_remote.doctor_lines()
