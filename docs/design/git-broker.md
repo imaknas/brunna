@@ -2636,6 +2636,62 @@ All were byte-identical. The policy dict gained only the `git_broker` key, `None
 - **The nonce folder** `.hub-run/git/` stays in the workspace, empty, after a call. Git doesn't show an empty folder,
   and cap-runner's exclude covers `.hub-run/` for the projects it serves.
 
+**After the slice's blind code review (11-15).** Nothing blocking. Its should-fix items and nits, each fixed and tested
+with a control:
+- **S1, a timeout left `index.lock`.** `sleep 1e9 | git commit -a -F -`: git takes `index.lock`, then waits for its
+  message. The timeout's SIGKILL left the lock, which blocked the owner's git and the project's; the project can't
+  remove it under the fence.
+  - Now the broker reads a message given on stdin (`-F -`, capped at 1 MiB) whole before git starts, within the call's
+    timeout.
+  - Every stop is SIGTERM to the group first (git removes its lock files), then SIGKILL after 2 s.
+  - Tested: the review's case exits 124 and leaves no lock, and the project's next call works. `_stop` on a git holding
+    `index.lock` leaves no lock; the control, SIGKILL alone, leaves it.
+- **S2, exhaustion by any sandboxed project.** The socket rule is rendered only for a switched-on project, so any other
+  sandboxed project's process can connect to every broker socket. Before, each connection got a thread with nothing
+  bounding it.
+  - The handshake has one deadline (`handshake_s`, 10 s) for the whole of it, not a timeout per read, so dripping
+    bytes gains no time.
+  - Connections not yet proved are capped per socket (`unproved_per_socket`, 16) and in all (`unproved_total`, 64).
+    Beyond that, a connection is turned away at once with the reason.
+  - A project's waiting calls are capped (`queue`, 16); the next is refused with the reason.
+  - When the service is out of descriptors, accept backs off. The service raises its open-file limit toward 8192.
+  - `log.jsonl` moves to `log.jsonl.1` past 4 MiB.
+  - Tested, each with its control: a dripping caller is dropped within the deadline while one in time is served; the
+    per-socket cap (another socket of the same project still serves) and the total cap, each served again once the
+    idle connections close; the queue bound, free again afterwards; three `EMFILE` accepts backed off and the call
+    still served; the open-file limit raised from 256; the log rotated under a small bound and not under the real one.
+  - The bounds are its own settings, in `contracts/hub.v1.schema.json`.
+- **N1:** a gitlink (mode 160000) is refused in the same index scan as B2's check, for `commit` and for
+  `apply --cached`. Plain git takes both (control).
+- **N2:** P1 also may not write `rebase-merge/`, `rebase-apply/`, `sequencer/` or `info/sparse-checkout`, in the git
+  dir or in a worktree's admin dir. This is defence in depth: no slice-a operation writes them, and slice b's broker
+  writes the sequencer state itself. Each is refused under P1 and lands with no profile.
+- **N3:** `overlap()` also refuses a project:
+  - whose recorded repo lies in another sandboxed project's folders (switched on or not), even when its nonce folder
+    doesn't;
+  - whose workspace is in the shared temp area.
+
+  Controls: the same project without the overlap, or outside the temp area, is served.
+- **N4:** the config op takes `config.lock` before it reads the config. Tested: with the owner's lock present and the
+  config replaced by a FIFO, it exits 255 on the lock. Without the lock, the FIFO stops it another way, and it leaves
+  no lock.
+- **N5:** a remote's name may hold a dot (`remote.a.b.url`): keys are split at their last dot (`remote_of`). `remote add
+  a.b`, `set-url a.b` and `remove a.b` work, and a second `add a.b` is "already exists".
+
+**The live check, again (11-15).** A project was registered in between, so the first baseline no longer matched the
+live registry. The renderings were compared back to back instead, under the same registry and from the same checkout:
+`seatbelt.py` and `policy.py` from before slice a against the branch's own.
+- All 30 projects' service and cap-run profiles, Claude settings and env, and policy env were byte-identical.
+- The policy gained only `git_broker`, `None` for every project.
+- `sandboxed-run`'s environment was identical to the first baseline.
+- `render-project-settings --report` still exits 1. Its counts moved only with the new project.
+
+**Step 6, before the service is declared (from the review's S2):** render the broker folder's socket deny
+(`(deny network-outbound (remote unix-socket (subpath <state>/git-broker)))`) into every sandboxed project's profiles,
+switched on or not, not only switched-on ones. It isn't rendered now because it would change every sandboxed project's
+renderings, which slice a keeps byte-identical. Until it lands, the bounds above are what stops a project that isn't
+switched on from exhausting the broker.
+
 **Open for the owner (not blocking):** the broker's global config lives in the shared platform state (above). It holds
 the owner's name and email, which the projects already see, and nothing private. Say if it should hold the identity
 elsewhere: for example, the identity passed with `-c` per call. That changes git's precedence, since the project's own
