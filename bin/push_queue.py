@@ -475,17 +475,18 @@ def close_todos(project: str, landed=None, log=None) -> list[str]:
 
 
 def finish(project: str, req: dict, res: dict, letter=None, log=None) -> None:
-    """A request's end: the result file, the letter, the request and worker records gone, served now."""
+    """A request's end: the letter, then the result file (a waiting client that sees the result finds the letter
+    sent), the request and worker records gone, served now."""
     log = log or (lambda m: None)
     res = {**res, "branch": res.get("branch") or req.get("branch")}
-    try:
-        write_result(project, res, log)
-    except OSError as e:
-        log(_("{project}: the result of {id} could not be written: {e}", project=project, id=res["id"], e=e))
     try:
         (letter or project_letter)(project, letter_text(res), f"push-{res['id']}")
     except Exception as e:   # noqa: BLE001 (a letter that can't go out changes nothing else)
         log(_("{project}: the letter about {id} could not be sent: {e!r}", project=project, id=res["id"], e=e))
+    try:
+        write_result(project, res, log)
+    except OSError as e:
+        log(_("{project}: the result of {id} could not be written: {e}", project=project, id=res["id"], e=e))
     with queue_locked(project):
         (broker(project) / "requests" / f"{req['id']}.json").unlink(missing_ok=True)
         w = worker(project)

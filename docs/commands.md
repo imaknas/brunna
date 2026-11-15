@@ -13,7 +13,8 @@ brunna credentials status     # unattended jobs' sign-ins; a to-do gives the `br
 brunna credentials check-published   # does brunna's published shared sign-in app match this install's
 brunna --version              # the release this checkout is at
 brunna upgrade --check        # is there a newer release, and what changes; `brunna upgrade` installs it
-brunna push <project> [branch]   # push a sandboxed project's branch (it shows the commits and asks first)
+brunna push --owner <project> [branch]   # push a sandboxed project's branch yourself (it shows the commits and checks, and asks)
+brunna push setup <project>   # what the platform may push for that project's sessions, and its push key
 ```
 
 Inside a project session, agents use `brunna send / inbox / done …` for the mailbox, `brunna test` to run the

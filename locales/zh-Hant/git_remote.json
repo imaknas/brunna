@@ -99,5 +99,6 @@
  "{runtime}'s sessions can't ask the platform to push (brunna push): it has no {why}": "{runtime} 的 session 不能請平台推送(brunna push):它沒有{why}",
  "{project}: the platform's push credential: {why}": "{project}:平台的推送憑證:{why}",
  "{project}: the platform's push credential reaches its remote": "{project}:平台的推送憑證連得到它的遠端",
- "{project}: the platform's push key: {why}": "{project}:平台的推送金鑰:{why}"
+ "{project}: the platform's push key: {why}": "{project}:平台的推送金鑰:{why}",
+ "the push request could not be written into {path} ({why}): this session's sandbox may not have the folder yet; start a new session, or ask again later": "推送請求寫不進 {path}({why}):這個 session 的沙盒可能還沒有這個資料夾;請開新的 session,或晚點再請求"
 }

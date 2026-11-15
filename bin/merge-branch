@@ -296,11 +296,11 @@ def main() -> int:
         # platform to push the default branch (docs/design/platform-push.md, section 5); whether that lands is the owner's
         # enforce.git_push, and a request still pending ("one in flight") is no failure of the merge
         if info.get("push_on_merge") and (info.get("enforce") or {}).get("sandbox") is True:
-            import git_remote
-            try:
+            try:   # main moved already: whatever happens here, the merge is recorded below
+                import git_remote
                 report["push_requested"] = git_remote.submit(proj, base, head)
-            except git_remote.Refused as e:
-                report["push_error"] = str(e)[-500:]
+            except Exception as e:   # noqa: BLE001
+                report["push_error"] = str(e)[-500:] or type(e).__name__
         elif info.get("push_on_merge"):
             # a commit_gate repo's main moves only through this gate: a diverged origin is reported, never pulled in
             push = ["git", "push", "-q"] if info.get("commit_gate") else [str(hubconf.ROOT / "bin" / "git-safe-push.sh")]

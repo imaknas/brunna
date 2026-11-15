@@ -413,11 +413,13 @@ def bundle_in(owned: Owned, project: str, ws: pathlib.Path, branch: str, have: l
 
 
 def take_in(owned: Owned, checked: Owned | None, sha: str) -> None:
-    """The checked objects into the owned repo, only once every check passed."""
+    """The checked objects into the owned repo, only once every check passed: up to sha (the checks ran on sha, not on
+    commits the branch gained after it)."""
     if checked is None:
         return
+    checked.git("update-ref", "refs/heads/checked", sha, check=True)
     r = owned.git(*SAFE, "-c", "protocol.file.allow=always", "fetch", "-q", "--no-tags", "--no-write-fetch-head", "--",
-                  f"file://{checked.repo.resolve()}", f"+refs/heads/incoming:{INCOMING}")
+                  f"file://{checked.repo.resolve()}", f"+refs/heads/checked:{INCOMING}")
     if r.returncode != 0 or owned.git("cat-file", "-e", f"{sha}^{{commit}}").returncode != 0:
         raw = r.stderr.decode(errors="replace").strip()[-400:]
         raise Failed(_("the checked commits could not be taken into the platform's repo: {why}",
@@ -686,7 +688,9 @@ def send(p: Prepared) -> str:
                     "--", p.url, f"{p.new}:refs/heads/{p.branch}")
     said = visible((r.stderr + r.stdout).decode(errors="replace").strip()[-600:], lines=True)
     if r.returncode != 0:
-        raise network_failure(_("git push failed: {why}", why=said), said)
+        e = network_failure(_("git push failed: {why}", why=said), said)
+        e.sent = True   # the push itself ran and failed: recorded whatever the language
+        raise e
     return said
 
 
@@ -767,7 +771,7 @@ def owner_push(project: str, args: list[str]) -> int:
                     range=f"{p.old[:12]}..{p.new[:12]}" if p.old else p.new[:12]))
             return OK
         except Failed as e:
-            if "git push failed" in str(e):
+            if getattr(e, "sent", False):
                 log(project, branch=branch, ok=False, by="owner", error=e.raw[-300:])
             raise
         finally:
@@ -857,10 +861,15 @@ def serve_request(project: str, req: dict) -> dict:
             else:
                 todo = push_queue.raise_todo(project, cause, owner_text(project, branch, sha, cause, e), sha=sha,
                                              log=say)
-        res = push_queue.result(project, rid, state, reason, e.fix, e.check, **({"todo": todo} if todo else {}))
+        # "only the owner can fix this; they have a to-do" is said only when one was sent
+        fix = "wait" if e.fix == "owner" and not todo else e.fix
+        res = push_queue.result(project, rid, state, reason, fix, e.check, **({"todo": todo} if todo else {}))
     except push_checks.Failure as e:
         rec.update(ok=False, check=e.check, error=e.reason)
-        res = push_queue.result(project, rid, "refused", e.reason, e.fix, e.check)
+        todo = push_queue.raise_todo(project, e.cause, owner_text(project, branch, sha, e.cause, e), sha=sha, log=say) \
+            if e.fix == "owner" else None
+        res = push_queue.result(project, rid, "refused", e.reason, "wait" if e.fix == "owner" and not todo else e.fix,
+                                e.check, **({"todo": todo} if todo else {}))
     except Exception as e:   # noqa: BLE001 (every exception is a classified answer, never a traceback to the project)
         say(f"serve {rid}: {e!r}")
         rec.update(ok=False, check="platform", error=repr(e)[-600:])
@@ -985,8 +994,15 @@ def submit(project: str, branch: str, sha: str, session: str | None = None) -> s
     if sid:
         req["session"] = sid
     tmp = d / f".{rid}.tmp"
-    tmp.write_text(json.dumps(req))
-    tmp.rename(d / f"{rid}.request.json")
+    try:
+        tmp.write_text(json.dumps(req))
+        tmp.rename(d / f"{rid}.request.json")
+    except OSError as e:   # e.g. a session whose sandbox settings predate the folder: said, never a traceback
+        with contextlib.suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise Failed(_("the push request could not be written into {path} ({why}): this session's sandbox may not "
+                       "have the folder yet; start a new session, or ask again later", path=d, why=e.strerror or e),
+                     fix="wait") from None
     return rid
 
 

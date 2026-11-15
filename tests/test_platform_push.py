@@ -204,6 +204,21 @@ class TakingIn(Push):
         (self.push_root / "proj").symlink_to(outside)
         self.assertIsNotNone(nofollow.read(self.push_root / "proj", planted.name))
 
+    def test_a_link_at_the_result_files_name_is_replaced(self):
+        push_queue.ensure_folder("proj")
+        rid = git_remote.request_id()
+        target = self.tmp / "elsewhere.txt"
+        target.write_text("mine\n")
+        (self.push_root / "proj" / f"{rid}.result.json").symlink_to(target)
+        push_queue.write_result("proj", push_queue.result("proj", rid, "refused", "x"))
+        self.assertEqual(target.read_text(), "mine\n", "written through the link")
+        self.assertFalse((self.push_root / "proj" / f"{rid}.result.json").is_symlink())
+        self.assertEqual(self.result(rid)["state"], "refused")
+        # control: a plain write follows a link
+        (self.tmp / "l").symlink_to(target)
+        (self.tmp / "l").write_text("through\n")
+        self.assertEqual(target.read_text(), "through\n")
+
     def test_only_request_files_are_touched(self):
         push_queue.ensure_folder("proj")
         other = self.push_root / "proj" / "notes.txt"
@@ -301,11 +316,12 @@ class Worker(Push):
         a = self.commit(self.ws, "a.txt", "a\n", "add a")
         rid = self.request("main", sha=a)
         self.take()
-        self.commit(self.ws, "b.txt", "b\n", "add b, after the request")
+        b = self.commit(self.ws, "b.txt", "b\n", "add b, after the request")
         self.serve()
         res = self.result(rid)
         self.assertEqual(res["state"], "pushed", res)
         self.assertEqual(self.tip(), a, "the requested sha is pushed, not the branch's tip (r2 S-g)")
+        self.assertEqual(self.bare(self.owned(), "cat-file", "-t", b), "", "an unchecked commit reached the owned repo")
         self.assertEqual(push_queue.queued("proj"), [])
         self.assertFalse((push_queue.broker("proj") / "worker.json").exists())
         [(proj, text, _key)] = self.letters
@@ -472,6 +488,27 @@ class Worker(Push):
         push_queue.tick(spawn=spawn)
         self.assertEqual(len(spawned), 2)
 
+    def test_the_worker_is_detached(self):
+        """start_worker: the worker runs in a session of its own, not a child of the caller, and outlives it; its pid
+        and start time are what tick records. Control: a plain child is in the caller's session."""
+        marker = self.tmp / "started"
+        with mock.patch.object(hubconf, "launch",
+                               lambda script: ["/bin/sh", "-c", f'echo $$ > "{marker}"; exec sleep 30', "worker"]):
+            pid, start = push_queue.start_worker("proj")
+        self.addCleanup(lambda: subprocess.run(["kill", str(pid)], capture_output=True))
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        self.assertEqual(int(marker.read_text()), pid)
+        self.assertNotEqual(os.getsid(pid), os.getsid(0), "in the caller's session")
+        ppid = int(subprocess.run(["ps", "-o", "ppid=", "-p", str(pid)], capture_output=True, text=True).stdout)
+        self.assertNotEqual(ppid, os.getpid(), "still the caller's child")
+        self.assertTrue(push_queue.alive({"pid": pid, "start": start}))
+        child = subprocess.Popen(["sleep", "5"])
+        self.addCleanup(child.wait)
+        self.addCleanup(child.kill)
+        self.assertEqual(os.getsid(child.pid), os.getsid(0), "the control")
+
     def test_concurrency(self):
         self.limits["concurrency"] = 1
         self.docs["two"] = {**self.docs["proj"], "name": "two"}
@@ -493,13 +530,32 @@ class Checks(Push):
         d = self.tmp / "gl"
         d.mkdir(exist_ok=True)
         g = d / "gitleaks"
+        self.gl_log = d / "calls.log"
         g.write_text(f'#!/bin/sh\ncase "$1" in version) echo {version}; exit 0;; esac\n'
+                     f'{{ echo "cwd=$PWD"; echo "args=$*"; env | sed "s/^/env:/"; ls -A; }} >> "{self.gl_log}"\n'
                      f'cat > /dev/null\nwhile [ $# -gt 0 ]; do [ "$1" = --report-path ] && echo \'{report}\' > "$2"; '
                      f'shift; done\nexit {stdin_exit}\n')
         g.chmod(0o755)
-        p = mock.patch.dict(os.environ, {"PATH": f"{d}:{os.environ['PATH']}"})
+        p = mock.patch.dict(os.environ, {"PATH": f"{d}:{os.environ['PATH']}", "GITLEAKS_CONFIG": "/owner/leaks.toml"})
         p.start()
         self.addCleanup(p.stop)
+
+    def test_gitleaks_runs_hardened(self):
+        """B2: a fresh empty folder as its cwd (nothing of the project's to read), an empty ignore file named, no baseline
+        or config from the environment. Control: the caller's environment has GITLEAKS_CONFIG."""
+        self.fake_gitleaks()
+        self.commit(self.ws, ".gitleaksignore", "*\n", "ignore all")
+        self.assertEqual(self.ask()["state"], "pushed")
+        log = self.gl_log.read_text()
+        cwd = next(x for x in log.splitlines() if x.startswith("cwd=")).removeprefix("cwd=")
+        self.assertFalse(pathlib.Path(cwd).resolve().is_relative_to(self.ws.resolve()))
+        self.assertIn("--gitleaks-ignore-path", log)
+        self.assertIn("--redact", log)
+        self.assertNotIn("--baseline-path", log)
+        self.assertNotIn("env:GITLEAKS_CONFIG", log)
+        self.assertEqual(os.environ["GITLEAKS_CONFIG"], "/owner/leaks.toml", "the control: the caller has it")
+        listed = log.split("env:")[-1].splitlines()[1:]
+        self.assertNotIn(".gitleaksignore", listed, "the scanner's folder held the project's files")
 
     def log_p(self) -> str:
         return self.git(self.ws, "log", "-p", "main", "--not", "origin/main")
@@ -714,6 +770,16 @@ class OwnerForm(Push):
         self.assertNotEqual(self.tip(), self.base)
         self.assertTrue(self.pushes()[-1]["overridden"])
 
+    def test_a_failed_push_is_recorded_in_any_language(self):
+        hook = self.remote / "hooks" / "pre-receive"
+        hook.write_text("#!/bin/sh\nexit 1\n")
+        hook.chmod(0o755)
+        self.commit(self.ws, "a.txt", "a\n", "add a")
+        with mock.patch.dict(os.environ, {"AGENT_HUB_LANG_UI": "zh-Hant"}):
+            code, _out, err = self.push("main", "--yes")
+        self.assertEqual(code, git_remote.FAILED, err)
+        self.assertEqual(self.pushes()[-1]["ok"], False)
+
     def test_setup_is_never_a_project(self):
         self.docs["setup"] = dict(self.docs["proj"])
         ran = []
@@ -815,6 +881,45 @@ class Field(unittest.TestCase):
         self.assertTrue(any("enforce" in s for s in said), said)
 
 
+# ---------- merge-branch's push_on_merge in a sandboxed project (section 5) ----------
+
+from test_merge_memory import Project  # noqa: E402
+
+
+class MergeRequests(Project):
+    """A sandboxed project's merge-branch, run for real, files a push request for the default branch instead of running
+    git push; with no request folder the merge still lands and is recorded."""
+
+    def setUp(self):
+        super().setUp()
+        self.index({"demo": {"v": 2, "name": "demo", "paths": {"workspace": str(self.ws)}, "push_on_merge": True,
+                             "enforce": {"sandbox": True}}})
+        self.folder = self.tmp / "state" / "push-requests" / "demo"
+
+    def test_a_request_for_the_default_branch(self):
+        self.folder.mkdir(parents=True)
+        wt = self.worktree("feat")
+        self.commit(wt, "b", "feat: b")
+        r = self.merge(wt, "--note", "n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        [req] = [json.loads(f.read_text()) for f in self.folder.glob("*.request.json")]
+        self.assertEqual((req["branch"], req["sha"]), ("main", self.git(self.ws, "rev-parse", "main")))
+        self.assertTrue(self.events("merge.done"))
+        [report] = self.events("session.report")
+        self.assertTrue(report["push_requested"])
+
+    def test_no_folder_is_no_failure_of_the_merge(self):
+        wt = self.worktree("feat")
+        self.commit(wt, "b", "feat: b")
+        r = self.merge(wt, "--note", "n")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.git(self.ws, "log", "-1", "--format=%s", "main"), "feat: b")
+        self.assertTrue(self.events("merge.done"))
+        [report] = self.events("session.report")
+        self.assertTrue(report["merged"])
+        self.assertIn("push_error", report)
+
+
 # ---------- end to end: the session's command, the real dispatch, a detached worker ----------
 
 class EndToEnd(unittest.TestCase):
@@ -823,8 +928,17 @@ class EndToEnd(unittest.TestCase):
     bin/sandboxed-run (skipped where this machine can't sandbox it)."""
 
     def test_the_whole_way(self):
+        import isolation
+        if (why := isolation.can_sandbox()):
+            self.skipTest(f"this machine can't sandbox the project's job: {why}")
         tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+
+        def workers_done():   # runs before the removal: no worker of this instance outlives the test
+            deadline = time.monotonic() + 120
+            while (tmp / "state" / "git-broker" / "proj" / "worker.json").exists() and time.monotonic() < deadline:
+                time.sleep(0.5)
+        self.addCleanup(workers_done)
         for d in ("home", "config/projects", "data", "secrets", "bus", "state", "ws", "t"):
             (tmp / d).mkdir(parents=True)
         (tmp / "gitconfig").write_text("[safe]\n\tbareRepository = explicit\n")
@@ -872,20 +986,34 @@ class EndToEnd(unittest.TestCase):
                            capture_output=True, text=True, timeout=60)
         self.assertEqual(c.returncode, git_remote.PENDING, c.stdout + c.stderr)
         rid = next(n for n in os.listdir(tmp / "push" / "proj")).split(".")[0]
-        t0 = time.monotonic()
         d = dispatch()
         self.assertEqual(d.returncode, 0, d.stdout + d.stderr)
         res_f = tmp / "push" / "proj" / f"{rid}.result.json"
-        self.assertFalse(res_f.exists() and time.monotonic() - t0 < 0.5, "the push ran inside the dispatch tick")
         deadline = time.monotonic() + 180
         while not res_f.exists() and time.monotonic() < deadline:
             time.sleep(0.5)
         log = tmp / "state" / "git-broker" / "proj" / "worker.log"
         res = json.loads(res_f.read_text()) if res_f.exists() else {}
         rec = tmp / "state" / "git-broker" / "proj" / "pushes.jsonl"
-        if "the sandbox refused" in (rec.read_text() if rec.exists() else ""):
-            self.skipTest("this machine can't sandbox the project's job")
-        self.assertEqual(res.get("state"), "pushed", (res, log.read_text() if log.exists() else ""))
+        self.assertEqual(res.get("state"), "pushed", (res, log.read_text() if log.exists() else "",
+                                                      rec.read_text() if rec.exists() else ""))
+        self.assertNotIn("could not be sent", log.read_text() if log.exists() else "")
+        letters = self.bus(tmp, "SELECT payload FROM events WHERE type='message' AND to_project='proj'")
+        self.assertTrue(any(p.get("type") == "info" and rid in p.get("text", "") for p in letters), letters)
+        # the owner's to-do and its close through the real hubbus of this instance
+        todo = subprocess.run([sys.executable, "-c", (
+            "import sys; sys.path.insert(0, sys.argv[1]); import push_queue; "
+            "k = push_queue.raise_todo('proj', 'emails', 'list the emails'); "
+            "assert k and push_queue.raise_todo('proj', 'emails', 'again') == k; "
+            "print(k, push_queue.close_todos('proj'))"), str(BIN)], env=env, capture_output=True, text=True,
+            timeout=60, cwd=tmp)
+        self.assertEqual(todo.returncode, 0, todo.stdout + todo.stderr)
+        key = todo.stdout.split()[0]
+        self.assertIn(key, todo.stdout.split(" ", 1)[1], "not closed")
+        sent = [p for p in self.bus(tmp, "SELECT payload FROM events WHERE type='message'") if p.get("type") in
+                ("task", "done")]
+        self.assertTrue([p for p in sent if p.get("type") == "task" and "list the emails" in p.get("text", "")], sent)
+        self.assertTrue([p for p in sent if p.get("type") == "done" and key in json.dumps(p)], sent)
         tip = subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"], env=env, capture_output=True,
                              text=True).stdout.strip()
         self.assertEqual(tip, head)
@@ -897,6 +1025,12 @@ class EndToEnd(unittest.TestCase):
         deadline = time.monotonic() + 60
         while (tmp / "state" / "git-broker" / "proj" / "worker.json").exists() and time.monotonic() < deadline:
             time.sleep(0.5)
+
+    def bus(self, tmp, sql) -> list[dict]:
+        import contextlib
+        import sqlite3
+        with contextlib.closing(sqlite3.connect(tmp / "bus" / "bus.db")) as c:
+            return [json.loads(p) for (p,) in c.execute(sql)]
 
 
 if __name__ == "__main__":
