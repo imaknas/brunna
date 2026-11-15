@@ -16,6 +16,7 @@ from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
+import gitdirs  # noqa: E402
 import project_git  # noqa: E402
 
 # the files whose git runs in bare repos the platform owns (memory bare repos, ~/git-origin, upgrade-idea's own.git)
@@ -65,9 +66,14 @@ class ExplicitBare(unittest.TestCase):
     def test_bundle(self):
         """What backup.py runs for each bare repo."""
         out = self.tmp / "x.bundle"
-        r = subprocess.run(["git", "--git-dir", str(self.bare), "bundle", "create", str(out), "--all"],
+        r = subprocess.run(["git", *gitdirs.at(self.bare), "bundle", "create", str(out), "--all"],
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_at_tells_bare_from_a_checkout(self):
+        self.assertEqual(gitdirs.at(self.bare), ["--git-dir", str(self.bare)])
+        self.assertEqual(gitdirs.at(self.tmp / "work"), ["-C", str(self.tmp / "work")])
+        self.assertEqual(gitdirs.at(self.tmp / "missing"), ["-C", str(self.tmp / "missing")])
 
     def test_memory_gaps(self):
         import datetime

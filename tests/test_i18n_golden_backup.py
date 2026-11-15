@@ -120,7 +120,8 @@ class Golden(unittest.TestCase):
             if str(cmd[1]).endswith("hubbus"):
                 bus.append(json.loads(cmd[cmd.index("--payload") + 1]))
                 return subprocess.CompletedProcess(cmd, 0, "", "")
-            if cmd[:2] == ["git", "-C"] and cmd[3] == "bundle" and bundle_fail[0] and cmd[2].endswith(".git"):
+            if cmd[:2] in (["git", "-C"], ["git", "--git-dir"]) and cmd[3] == "bundle" and bundle_fail[0] \
+                    and cmd[2].endswith(".git"):
                 return subprocess.CompletedProcess(cmd, 128, "", "fatal: canned bundle error\n")
             if cmd[:3] == ["git", "bundle", "verify"] and verify_fail[0]:
                 return subprocess.CompletedProcess(cmd, 1, "", "error: canned verify error\n")

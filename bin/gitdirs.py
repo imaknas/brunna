@@ -42,6 +42,18 @@ from typing import NamedTuple
 MAX_POINTER = 4096
 
 
+def at(repo) -> list[str]:
+    """git's arguments for running in `repo`: --git-dir for a bare repo (a regular HEAD at its top and no .git), -C for any
+    other. The owner's safe.bareRepository=explicit (the git broker's precondition) refuses a bare repo git finds on its
+    own, so the platform names its bare repos instead of entering them."""
+    p = pathlib.Path(repo)
+    try:
+        bare = stat.S_ISREG(os.lstat(p / "HEAD").st_mode) and not os.path.lexists(p / ".git")
+    except OSError:
+        bare = False
+    return ["--git-dir", str(p)] if bare else ["-C", str(p)]
+
+
 class Dirs(NamedTuple):
     top: pathlib.Path
     git_dir: pathlib.Path

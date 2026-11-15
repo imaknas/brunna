@@ -37,6 +37,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gitdirs  # noqa: E402
 import hubconf  # noqa: E402
 import hublib  # noqa: E402
 import i18n  # noqa: E402
@@ -68,7 +69,7 @@ def note_commits_since(repo, since: datetime.datetime, branch: str = "agent-memo
     if not repo or not pathlib.Path(repo).is_dir():
         return -1
     r = subprocess.run(
-        ["git", "--git-dir", str(repo), "log", branch, f"--since={since.isoformat()}", "--format=%h", "--no-merges",
+        ["git", *gitdirs.at(repo), "log", branch, f"--since={since.isoformat()}", "--format=%h", "--no-merges",
          "--invert-grep", *(f"--grep={g}" for g in PLATFORM_SUBJECTS), "--", "memory/"],
         capture_output=True, text=True,
     )
