@@ -42,6 +42,10 @@ ready, ask {{owner}} to run `brunna push <project> <branch>`. On a conflict or a
 again. Worktrees that no session has open are cleaned up by the platform every night (their dependencies; after
 a while the whole worktree, the branch is kept), so you don't need to delete them yourself.
 
+In a sandboxed project, commit with the name and email the repo's own git config has (`brunna push setup` sets them to
+the address the platform's pushes allow): don't set another `user.email` or pass `--author`, since a commit carrying
+another email is refused when the platform pushes it.
+
 **Rewriting git history** (amend, rebase, squash, filter-repo, force push): **a repo that is already public is not
 rewritten** (others may have cloned it; a rewrite can't be taken back); one that is not public yet (private, or only on
 this machine) may be rewritten. Before a force push, make sure no other session is using that branch, and afterwards

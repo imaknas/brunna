@@ -1,6 +1,6 @@
 ---
 name: new-or-onboard-project
-description: Create a brand-new project or bring an existing folder into the agent-hub pipeline, end to end. Use whenever the user asks to "start/create a new project" or "onboard/connect this folder/project" — handles location, scaffolding, and visibility decisions, then delegates everything mechanical to one command.
+description: Create a brand-new project or bring an existing folder into the agent-hub pipeline, end to end. Use whenever the user asks to "start/create a new project" or "onboard/connect this folder/project" — handles location, scaffolding, visibility, sandbox and push decisions, then delegates everything mechanical to one command.
 ---
 
 # New or Onboard Project
@@ -16,9 +16,9 @@ what they already do (no `git init` first, no `gh repo create`):
 ## Decision 1: a brand-new project, or existing folders?
 
 - **Brand-new project** (the user says "create a new project for me"): the directory usually doesn't exist yet or is
-  empty. Go to decisions 2, 3 and 4, then run `agenthub onboard`; it creates the directory itself.
+  empty. Go to decisions 2, 3, 4 and 5, then run `agenthub onboard`; it creates the directory itself.
 - **Existing folders** (the user says "connect this" or points at a path that already has things in it): skip decision 3,
-  look at decision 4, then run `agenthub connect <folder>`. A repo with unsaved changes is skipped and the reason
+  look at decisions 4 and 5, then run `agenthub connect <folder>`. A repo with unsaved changes is skipped and the reason
   printed: **don't clean it up for the user and re-run**. Pass the message on unchanged and let them decide whether to
   commit or discard those changes. This protects their work that isn't ready yet.
 
@@ -50,11 +50,36 @@ unsure, ask; don't guess.
 `github.owner`. Tell them the trade-off: without a remote there is no copy beyond this machine (the platform's
 encrypted backup, if on, still covers it). `agenthub connect` uses `--no-remote` unless given `--remote`.
 
+## Decision 5: sandbox it, and which branches may the platform push?
+
+Ask the user both, in the conversation, with these words (docs/design/platform-push.md sections 1 and 2); never decide
+for them:
+
+1. **Sandbox it?** "Will its agent touch other people's data (colleagues' records, other people's documents or
+   profiles, recordings of others), or run or read untrusted code or content (downloaded models, others' benchmarks,
+   unattended processing of outside papers, pages or mail)?" Yes: `--sandbox`. A sandbox keeps a mistake, or an
+   instruction planted in that data, inside the project. Maturity is no reason either way: a new project isn't
+   sandboxed for being new. No, or the user doesn't say: no flag (not sandboxed, as before).
+2. **Only for a sandboxed project with a remote: which branches may the platform push for its sessions?**
+   - `none`: the user pushes themselves;
+   - `others`: every branch but the default;
+   - `all`: the default branch too.
+
+   On a public remote, also say: "every branch you allow is published as soon as it is pushed, and a site or deploy
+   that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. `others` keeps the
+   default branch's CI and deploys yours, not the content private."
+
+   Pass the answer as `--push none|others|all`. If the user leaves it open, pass nothing: the remote's visibility
+   decides (private: `all`; public or can't tell: `none`, and they get a to-do to decide later with
+   `brunna push setup <name>`). Anything but `none` adds a write deploy key to the GitHub repo, held by the platform
+   (other forges get no platform push). `--push-email <address>` (repeatable) names the commit emails those pushes may
+   carry; without it the platform proposes them (on a public remote GitHub's noreply address only).
+
 ## Run
 
 ```bash
-agenthub connect <folder> [--remote]                 # existing folders
-agenthub onboard [--public] [--no-remote] <path>     # one project
+agenthub connect <folder> [--remote] [--sandbox] [--push none|others|all]                 # existing folders
+agenthub onboard [--public] [--no-remote] [--sandbox] [--push none|others|all] <path>     # one project
 ```
 
 Both leave nothing half-done when something fails, and carry on when run again after an interruption. When it

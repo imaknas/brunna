@@ -128,8 +128,13 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      default branch's CI and deploys, not publication. Onboarding asks whether to sandbox and what may be pushed; with
      nobody answering, a public remote gets `none` and a setup to-do. It supersedes slice d's session push mechanism
      and goes before slices b–d. The owner decided (11-15) that the five existing sandboxed projects with a remote get
-     `all`. Open for the owner: the credential (the owner's or a per-repo grant), the default for public remotes, who
-     may request.
+     `all`. The owner chose (11-15) a per-repo write deploy key held by the platform (no fallback to the owner's
+     credential), `none` plus a setup to-do for public remotes with nobody answering, and sessions only. **Built
+     (11-16): the grant and onboarding's questions.** `bin/git_push_grant.py` (`brunna push setup <project>`: the key in
+     `<secrets>/git-push/<project>/`, added with the owner's `gh`, GitHub's host keys pinned, never backed up;
+     `ssh_env`/`push_url` for the push, the derived `git-push` row and daily probe in `brunna/secrets`); `connect`,
+     `onboard`, `upgrade-idea` and `connect_project` ask or pass `--sandbox` and `--push`. The push pipeline, its checks
+     and `enforce.git_push` itself are the next step.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
@@ -292,11 +297,6 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   lists zero as an open-source prerequisite.
 - llm-providers: the switch recommendations from shadow mode, and decision 3 (where memory notes come from for other
   agents).
-- Platform push (`platform-push.md`, "Open questions for the owner"):
-  - which credential the platform pushes with (recommended: a per-repo grant held by the platform);
-  - the non-interactive default for a public remote (recommended: `none` plus a one-time `brunna push setup` to-do);
-  - who may request (recommended: only the project's sessions, enforced by a request folder only their sandboxes can
-    write).
 
 ### 7. Not verified on a real run
 

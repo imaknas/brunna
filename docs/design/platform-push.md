@@ -792,3 +792,33 @@ The owner took all three recommendations:
    own credential.
 2. **Onboarding with nobody answering, public or unknown remote:** `none` plus a one-time `brunna push setup` to-do.
 3. **Who may request:** only the project's sessions, through the session request folder.
+
+### Built: the grant and onboarding's questions (11-16)
+
+- **`bin/git_push_grant.py`**, `brunna push setup <project> [--branches …] [--email …] [--yes] [--grant-only]` and
+  `--revoke`. The key and `grant.json` are in `<secrets>/git-push/<project>/` (700/600). The deploy key's title is
+  `brunna push: <project>`; a rerun with a working grant keeps it, and one that stopped halfway replaces its own titled
+  key at GitHub. The grant is checked with `ls-remote` through the key alone; a key that doesn't work is deleted again.
+  `grant.json` is written last.
+- **Where the build differs from "If the grant":** GitHub's host keys are checked in (`bin/known_hosts/github.com`,
+  matched against `api.github.com/meta` and its published fingerprints, a test pins them), not read from `gh api meta`
+  at setup. Any forge other than GitHub, an ssh alias and a local path are refused with the reason; setup doesn't print
+  a key for another forge to add by hand. `gh` warns that deploy keys it added go when its token is de-authorised:
+  the daily probe in `brunna/secrets` catches that and raises the setup to-do.
+- **The push core's interface:** `ssh_env(project)` is an overlay that must win over `owner_env()`
+  (`GIT_SSH_COMMAND` with `-F /dev/null -i <key> -o IdentitiesOnly=yes -o IdentityAgent=none`, the pinned known_hosts,
+  `StrictHostKeyChecking=yes`, `BatchMode=yes`; an empty platform `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`).
+  `push_url(project)` is `git@github.com:<owner>/<repo>.git`, also for an https origin. Both raise `NotSetUp(reason)`.
+  `status(project)` gives the doctor row, and `probe(project)` the daily check.
+- **The policy** goes into `enforce.git_push` only after the grant works, and only when the registry knows the field
+  (checked at run time); until then setup says what to set. The project repo's `user.name`/`user.email` are then set,
+  as the project (`project-git-job.py set-identity`), to the allowed address (the noreply one when it is allowed), so a
+  public remote's sessions don't commit with the global email and get every push refused. The rules text says so.
+- **Onboarding:** `onboard-project.sh` and `connect.py` take `--sandbox`/`--no-sandbox`, `--push`, `--push-email`, and
+  connect asks both questions. `connect_project` may ask for `sandbox` and always passes `--push none`.
+  `upgrade-idea.py --push`; the lease-runner passes `none`. With nobody answering, the anonymous probe decides
+  (private: `all`; public or unknown: `none` plus the one-time to-do). The to-do is also raised when `none` came from
+  an agent (connect_project, the lease). A grant that fails at onboarding leaves `none`, and the to-do says why.
+- **Not built here:** the design's sshd end-to-end test; the anonymous probe also sits in `git_push_grant.visibility`,
+  so check 8 should share it rather than make a second one. `rename-project.sh` doesn't move a grant's folder: after a
+  rename, the next probe raises the setup to-do.
