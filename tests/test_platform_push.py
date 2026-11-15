@@ -390,6 +390,23 @@ class Worker(Push):
             res = self.ask()
         self.assertEqual((res["state"], res["check"]), ("refused", "credential"))
 
+    def test_doctors_credential_probe(self):
+        """doctor runs ls-remote as the worker would: no key → its row says so; with the grant's environment it reaches
+        the remote. Control: a local origin needs no key."""
+        self.docs["proj"]["paths"]["origin"] = "https://127.0.0.1:9/x.git"
+        with mock.patch.dict(sys.modules, {"git_push_grant": None}):
+            rows = git_remote.doctor_lines()
+        self.assertIn("bad", [lvl for lvl, what, _f in rows if "proj" in what])
+        fake = types.ModuleType("git_push_grant")
+        fake.NotSetUp = type("NotSetUp", (Exception,), {})
+        fake.ssh_env = lambda project: {}
+        self.docs["proj"]["paths"]["origin"] = f"file://{self.remote}"
+        with mock.patch.dict(sys.modules, {"git_push_grant": fake}):
+            rows = git_remote.doctor_lines()
+        self.assertEqual([lvl for lvl, what, _f in rows if "proj" in what], ["ok"])
+        self.assertEqual(git_remote.credential_probe("proj", f"file://{self.remote}", "x")[0], "ok")
+        self.assertEqual(git_remote.credential_probe("proj", str(self.tmp / "missing.git"), "x")[0], "bad")
+
     def test_the_remotes_own_words_reach_only_the_owner(self):
         """S8: a canary in the remote's refusal never reaches the result or the letter; pushes.jsonl and the to-do have
         it. Control: plain git shows it."""
@@ -905,7 +922,8 @@ class EndToEnd(unittest.TestCase):
             time.sleep(0.5)
         log = tmp / "state" / "git-broker" / "proj" / "worker.log"
         res = json.loads(res_f.read_text()) if res_f.exists() else {}
-        if "sandbox refused" in json.dumps(res) or "sandbox" in (log.read_text() if log.exists() else ""):
+        rec = tmp / "state" / "git-broker" / "proj" / "pushes.jsonl"
+        if "the sandbox refused" in (rec.read_text() if rec.exists() else ""):
             self.skipTest("this machine can't sandbox the project's job")
         self.assertEqual(res.get("state"), "pushed", (res, log.read_text() if log.exists() else ""))
         tip = subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"], env=env, capture_output=True,

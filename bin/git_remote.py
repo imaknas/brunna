@@ -1194,13 +1194,37 @@ def doctor_lines() -> list[tuple[str, str, str]]:
                                 branches=gp["branches"]), ""))
             continue
         status = getattr(git_push_grant, "status", None) if git_push_grant else None
+        setup_cmd = f"{names.current('cli')} push setup {name}"
         if git_push_grant is None:
             out.append(("bad", _("{project}: enforce.git_push is {branches}, but the platform's push key isn't built on "
                                  "this install: its pushes are refused", project=name, branches=gp["branches"]), ""))
-        elif callable(status):
+            continue
+        if callable(status):
             ok, what = status(name)
-            out.append(("ok" if ok else "bad", f"{name}: {what}", "" if ok else f"{names.current('cli')} push setup {name}"))
+            out.append(("ok" if ok else "bad", f"{name}: {what}", "" if ok else setup_cmd))
+        out.append(credential_probe(name, origin, setup_cmd))
     return out
+
+
+def credential_probe(project: str, origin: str, setup_cmd: str) -> tuple[str, str, str]:
+    """ls-remote exactly as the worker would reach the remote (its environment from push_credential_env, from this
+    process's environment: doctor's, which the dispatch service's may not match). → a doctor row."""
+    try:
+        env = push_credential_env(project, origin, owner_form=False)
+        url = push_url(project, origin, owner_form=False)
+    except Refused as e:
+        return "bad", f"{project}: {e}", setup_cmd
+    try:
+        r = subprocess.run(["git", *SAFE, "ls-remote", "--heads", "--", url], cwd=broker_dir(project), env=env,
+                           capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return "bad", _("{project}: the platform's push credential: {why}", project=project,
+                        why=class_reason("unreachable")), ""
+    if r.returncode == 0:
+        return "ok", _("{project}: the platform's push credential reaches its remote", project=project), ""
+    _check, kind, fix, _cause = classify(r.stderr)
+    return "bad", _("{project}: the platform's push credential: {why}", project=project, why=class_reason(kind)), \
+        setup_cmd if fix == "owner" else ""
 
 
 # ---------- the forms ----------

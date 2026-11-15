@@ -106,5 +106,7 @@
  "{project}: the platform pushes {branches} branches to a local remote": "{project}:平台把 {branches} 分支推到本機的遠端",
  "{sha} doesn't contain the commits of the request it replaced ({id}): the branch was rewritten": "{sha} 不包含它取代的請求({id})的 commit:分支被改寫過",
  "{sha} is not on {branch} any more (the branch was rewritten since the request): ask again": "{sha} 已經不在 {branch} 上(請求之後分支被改寫了):請再請求一次",
- "{runtime}'s sessions can't ask the platform to push (brunna push): it has no {why}": "{runtime} 的 session 不能請平台推送(brunna push):它沒有{why}"
+ "{runtime}'s sessions can't ask the platform to push (brunna push): it has no {why}": "{runtime} 的 session 不能請平台推送(brunna push):它沒有{why}",
+ "{project}: the platform's push credential: {why}": "{project}:平台的推送憑證:{why}",
+ "{project}: the platform's push credential reaches its remote": "{project}:平台的推送憑證連得到它的遠端"
 }
