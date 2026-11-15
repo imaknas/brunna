@@ -887,3 +887,53 @@ look not overruled.
 **Live check after merge:** two armed sessions of one project, one busy with a long turn; a request with no thread goes
 `by: idle` to the other and wakes it. And a session told mid-turn that doesn't ack is ended `busy` after 10 minutes in
 `hubbus.log`.
+
+## 11-16: should a busy holder let go at once? A replay of the bus
+
+**The question.** A study of pooled claiming suggested letting go of a letter the moment its holder is busy (claimed atomically
+by an idle session of the project, one wake at a time, a heartbeat to keep it). The 11-15 change covers most of that: idle
+sessions are picked first, and a busy holder with no ack lets go after 10 minutes. What's left is "let go at once". The owner
+asked for a zero-cost, read-only replay of the bus to decide it.
+
+**How.** Every request or question to a project (184 letters, 10-22 to 11-16), split into holds: from a route naming a
+session (or, before routes existed on 11-07, from the first telling, capped at that era's 60 minutes) to an ack, done or reply
+by anyone, a platform run, or the route's end. 134 holds. Busy is rebuilt from Claude Code's transcripts, since it isn't on the
+bus: a session is busy from a prompt to its Stop hook, and while any of its background subagents runs. The second part matters:
+the live check of 11-15 saw Claude's status say `busy` for a session between turns with subagents running. Checked against what
+the bus knows for sure: all 86 post-tool tellings and all 279 prompt tellings fall inside a rebuilt busy span (one prompt
+telling had no transcript). Counterfactuals step in one-minute ticks, as dispatch does. "Let go at once" = at the first tick
+where the holder is busy and another session of the project is alive and idle; "10 minutes" = the rule as built.
+
+**Not measurable, so the numbers are upper bounds on what an idle session could have done:**
+- whether that idle session had a fresh waiter (`can_wake`), which isn't recorded;
+- whether it was open: alive means between its first and last transcript entry, so a session closed and resumed counts as
+  open in between;
+- whether it would have taken the letter or answered it well.
+
+All 134 holders had Claude transcripts; no other runtime held a letter. Project membership comes from the presence table and
+the bus's tellings.
+
+**What it shows.**
+- **Busy at the telling is the rule, not a signal.** 132 of 134 holds started with the holder busy. Hooks tell a session
+  during a turn (at its prompt, after a tool), so a hook's route almost always starts busy. "Let go when busy" means "let go of
+  nearly everything a hook told, a minute later".
+- **Since routes (11-07 to 11-15 21:18, 55 holds):** the 10-minute rule fires on 9 of them. 6 ran the whole 60-minute window.
+  One was 11-15's onboarding request, held 46 minutes until the owner stepped in. In the other 2 the holder acked itself at 17
+  and 45 minutes, so a second session would have been asked too. An idle session of the project was there at minute 10 for 8
+  of the 9. On the 7 nobody acked, the rule moves the letter 36 to 51 minutes sooner.
+- **What "at once" adds:** 9 more releases. In 6 of them the holder acked or replied itself within 2 to 10 minutes, so a
+  second session would have been woken for a letter already being handled. Each of the other 3 was taken by another session
+  within 5 to 8 minutes anyway, so letting go at once saves 4 to 7 minutes there.
+- **After the fix (11-15 21:18 to 11-16 00:55, 11 holds):** every holder acked within 2 minutes, and the rule never fired.
+  Too short a span to say more.
+- **Before routes (68 holds):** sessions replied without acking then, so "the holder acted" is spread over the whole hour.
+  Kept for reference, not for the decision.
+- Nearly every long hold was one long-lived brunna session that is busy almost all the time with background subagents.
+
+**Decision proposed:** keep it as it is. Letting go at once would roughly double the wakes for the letters it touches,
+mostly for letters the holder was already taking, to gain a few minutes on a handful. The 10-minute bound already removes the
+waits of 40 minutes and more. The study's heartbeat is what an ack already is: an ack holds while its session lives. Watch the
+log line for a busy end ("busy with other work for 10 minutes with no ack") over the next weeks. If holders often ack just
+after 10 minutes, raise `busy_hold_min`; if letters still wait the full 10 minutes with an idle session beside them and
+nobody acks, try 5. The replay script isn't in the repo: it reads one tool's transcripts directly, which only an adapter may
+do. To repeat it, it belongs in `sessions_claude.py` as turn spans.
