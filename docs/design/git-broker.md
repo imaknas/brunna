@@ -6,7 +6,8 @@ where the text above disagrees: chiefly, no process writes both the worktree and
 over both: an unsandboxed checkout can be raced into writing anywhere the owner can write, and how far to go against
 that is the owner's choice; B-1's mitigation 3 built 11-14, mitigation 2 built and removed 11-15, the last sections);
 approved by the owner 11-15; step 1 (the fence, behind the per-project switch) built 11-15, "Step 1 as built"; step
-2's build list after it (four slices, open points; not built). It takes over the prevention half of
+2's build list after it (four slices, open points; not built), and slice d's push half as an owner-run command,
+built 11-15 ("Owner-run push, built first", at the end). It takes over the prevention half of
 `git-config-fence.md` (the per-name fence, the narrow `brunna git` runner and the one-time install). That doc's scan stays
 as a second layer, and so do its config allowlist and its presets. Measured in scratch repos (git 2.50.1, macOS on a
 case-insensitive APFS volume). A sandboxed writer was stood in for by the platform's real Seatbelt profile
@@ -2696,3 +2697,79 @@ switched on from exhausting the broker.
 the owner's name and email, which the projects already see, and nothing private. Say if it should hold the identity
 elsewhere: for example, the identity passed with `-c` per call. That changes git's precedence, since the project's own
 config could no longer set it.
+
+### Owner-run push, built first (11-15)
+
+**What.** `brunna push <project> [<branch>] [--yes]` (`bin/git_remote.py`), run by the owner in a terminal. It pushes
+one branch of a sandboxed project to the registry's `paths.origin` with the owner's git and credentials, and never runs
+git in the project's repo. It works today for every sandboxed project, switched on (`enforce.git: platform`) or not.
+
+**Why first (the owner, 11-15).** A sandboxed project can't reach the owner's credentials, so its pushes are already
+the owner's, by hand, in the project's repo. That runs the owner's git over a `.git` the project can write: its hooks,
+`core.fsmonitor`, `core.sshCommand`, `credential.helper`, filters. That is project-planted code run as the owner
+outside every sandbox, today, on every push. The push half of slice d fixes that without slices a and b. A session's
+push over the broker socket still needs them and is not part of this.
+
+**How** (each step is the slice d mechanism, run by the owner instead of the broker service):
+1. The project must be sandboxed (`isolation.sandboxed`; a project in `service_sandbox_exempt` is refused, since its
+   jobs run unsandboxed). The remote is `paths.origin`, an owner-only field, and it is the only URL contacted. Refused:
+   none, `(native)`, `ext::` / `fd::`, and a local path in a folder a sandboxed project writes.
+2. The branch is bundled as the project: `project-git-job.py bundle-branch` through `project_git.job`, sandboxed. It
+   leaves out what the remote's tips reach, the ones the project has (a bundle's prerequisites must exist on both sides).
+   Its stdout lands in a file under `hubconf.private_tmp()`.
+3. The owner's git runs only in `<state>/git-broker/<project>/remote.git`. That repo is made with
+   `init --bare --template=`, its config is written by the platform, and it is named with `--git-dir` every time
+   (`safe.bareRepository=explicit` holds). Its cwd is that folder. Its environment is built from scratch: the owner's
+   HOME, PATH, global config, ssh agent and proxies, and nothing else. In order:
+   - `ls-remote --symref` gives the default branch;
+   - a fetch of the default branch and the pushed branch runs with hooks off, no submodules, no tags and fsck on;
+   - the bundle goes into a staging bare repo that borrows the owned repo's objects, and from there into the owned
+     repo over `file://`, with `transfer.fsckObjects`. A fetch of a bundle checks objects only on newer git; a fetch
+     over a transport does on every git. A `.git` tree entry is refused there (`hasDotgit`).
+4. **The policy:**
+   - fast-forward only, with no force of any kind;
+   - no tags, no deletes, no refspecs, one branch per call;
+   - **the default branch is allowed here** (slice d refuses it for sessions). The owner runs this and sees every
+     commit first;
+   - the default branch is the remote's `HEAD` (`ls-remote --symref`). When that can't be told, as with an empty
+     remote, the push is refused, so a repo's first push is not this command's;
+   - `.github/**`: the pushed commit's `.github` entry (mode and object) is compared with the remote default branch
+     tip's. If it differs, the push is refused unless the registry has `enforce.git_ci: true` (owner-only, needs
+     `enforce.sandbox`). With the allowance it is still listed first. The base differs from slice d's (the
+     destination's current commit, or the merge base for a new branch) because GitHub runs the workflows of the pushed
+     commit's own tree, and the default branch's are the ones the owner has already accepted.
+5. **What the owner sees:**
+   - the range;
+   - each commit's short sha, author name and email, and subject;
+   - the changed paths;
+   - `.github/` flagged;
+   - author emails absent from the remote default branch's last 500 commits, flagged (the registry has no field for a
+     project's usual or anonymous email).
+
+   Control characters in anything the project wrote are shown as escapes. The command then asks y/N. `--yes` skips
+   that; with no terminal and no `--yes` it refuses.
+6. `push --no-verify --no-follow-tags --recurse-submodules=no -- <origin> <sha>:refs/heads/<branch>` runs from the
+   owned repo, pushing the exact sha shown. The project's repo is never written, and its `origin/<branch>` moves on its
+   own next fetch. Slice d's step 4 (P1 updates the remote-tracking ref) waits for the broker.
+7. No bus event type fits a push, and `merge.done` would trigger event jobs. Each push is a line in
+   `<state>/git-broker/<project>/pushes.jsonl`.
+
+**What differs from slice d's session push:**
+- the owner starts it, so there is no socket, no nonce, no P1, and no service;
+- the default branch is allowed;
+- there is no `--force-with-lease`;
+- the remote-tracking ref isn't updated;
+- the first push of an empty remote isn't covered.
+
+When slice d lands, sessions push their own non-default branches through the broker, and this command stays the
+owner's way to push the default branch.
+
+**Tests** (`tests/test_git_remote.py`):
+- the remote is a bare repo in the test's temp folder, plus a `git http-backend` behind basic auth on 127.0.0.1 with a
+  recording credential helper in the owner's temp global config. Plain http: TLS is git's own, checked by hand
+  against a real remote;
+- every refusal is tested against a plain-git control that pushes the same thing;
+- every owner-side git call is recorded at its one start point, and each one names an owned repo with `--git-dir`,
+  from outside the workspace;
+- a canary planted in the project's `.git` never runs, with the control that the owner's git in the workspace runs it;
+- on macOS, the project's job runs under the real Seatbelt profile.

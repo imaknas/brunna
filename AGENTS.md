@@ -434,7 +434,9 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   project's repo every git command (status page facts, worktree cleanup, backup, propose, memory sync, gate hooks) goes
   through `bin/project_git.py` → `bin/project-git-job.py` as the project (`isolation.run_as`, sandboxed when it is), and
   only its JSON or bundle comes back (docs/design/projects-and-repos.md section 4). New code that needs git facts from a
-  project's repo adds an op there; it never runs `git -C <workspace>` itself.
+  project's repo adds an op there; it never runs `git -C <workspace>` itself. A sandboxed project's push is the
+  owner's `brunna push <project> [<branch>]` (`bin/git_remote.py`): bundled as the project, pushed by the owner's git
+  from a platform-owned bare repo, fast-forward only (git-broker.md, "Owner-run push, built first").
   Such a project's own services and command jobs run sandboxed as well (`bin/sandboxed-run` → `bin/isolation.py`, one
   adapter per OS: `seatbelt.service_profile` on macOS, `bin/landlock.py` (Landlock + seccomp) on Linux; never
   unsandboxed: no working adapter means not run; each adapter declares its guarantees, `isolation.REQUIRED` must be

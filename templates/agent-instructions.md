@@ -37,8 +37,9 @@ directly to main:
     brunna merge-branch --note "what you did" [--question "what {{owner}} needs to decide"]
 
 It rebases onto main, runs this project's tests, fast-forwards main and records a completion report; **it does not
-push** (pushing waits until {{owner}} says so). On a conflict or a test failure it stops and tells you where; fix it and
-run it again. Worktrees that no session has open are cleaned up by the platform every night (their dependencies; after
+push** (pushing waits until {{owner}} says so). In a sandboxed project pushing is {{owner}}'s alone: when a branch is
+ready, ask {{owner}} to run `brunna push <project> <branch>`. On a conflict or a test failure it stops and tells you where; fix it and run it
+again. Worktrees that no session has open are cleaned up by the platform every night (their dependencies; after
 a while the whole worktree, the branch is kept), so you don't need to delete them yourself.
 
 **Rewriting git history** (amend, rebase, squash, filter-repo, force push): **a repo that is already public is not

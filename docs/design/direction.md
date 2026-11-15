@@ -111,7 +111,11 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      Slice a built 11-15 ("Slice a as built"): the sockets and nonce, P1, the init profile and P2's profile, the
      allowlists, the config op, B2's check for commit and apply --cached, the wrapper and `brunna git`; the broker is
      started only by tests, no service is declared, no project is switched on, and every live rendering is unchanged.
-     Left: slices b, c, d, then steps 3–6. Still open: B-1's option 4.
+     Left: slices b, c, d, then steps 3–6. Still open: B-1's option 4. **Built ahead of the slices (11-15, the
+     owner's decision): `brunna push`**, slice d's push half run by the owner (`git_remote.py`): a sandboxed project's branch is bundled as the project and
+     pushed from a platform-owned bare repo, fast-forward only, `.github/` changes only with `enforce.git_ci`, for
+     every sandboxed project whether switched on or not ("Owner-run push, built first"). Sessions' own pushes
+     wait for slices b and d.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
