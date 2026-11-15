@@ -7,9 +7,11 @@ owner's git reads that repo's `.git` (hooks, core.fsmonitor, core.sshCommand, cr
 project can write: project-planted code run as the owner, outside every sandbox. Here instead:
 
   1. the project must be sandboxed (isolation.sandboxed), and its remote is the registry's paths.origin (owner-only):
-     the only URL contacted. None, `(native)`, ext::/fd:: or a local path a sandbox can write is refused;
-  2. the branch's commits are bundled AS THE PROJECT (project-git-job.py bundle-branch, through project_git.job): the
-     only git that runs in the project's repo, sandboxed, its stdout a bundle in hubconf.private_tmp();
+     the only URL contacted. None, `(native)`, ext::/fd::, a local spelling that isn't absolute, and a local path a
+     sandbox can write (a project's folders, the temp areas) are refused;
+  2. the branch's commits are bundled AS THE PROJECT (project-git-job.py bundle-branch, through project_git.job, whose
+     environment is built, never the owner's terminal's): the only git that runs in the project's repo, sandboxed, its
+     stdout a bundle in hubconf.private_tmp();
   3. the owner's git runs only in a bare repo the platform owns, `<state>/git-broker/<project>/remote.git` (init
      --bare --template=, config written here), always named with --git-dir, from that folder, with an environment
      built from scratch (KEEP_ENV: the owner's HOME, PATH, global config and agent, nothing else): ls-remote --symref
@@ -24,8 +26,9 @@ project can write: project-planted code run as the owner, outside every sandbox.
      flagged and author emails the remote's recent history doesn't have flagged (the registry has no field for a
      project's email), all with control characters made visible, and confirms (y/N) unless --yes; with no terminal
      and no --yes it refuses;
-  6. `push --no-verify <paths.origin> <sha>:refs/heads/<branch>` from the owned repo. The project's repo is never
-     written: its remote-tracking ref stays where it was until its own next fetch;
+  6. `push --no-verify --force-with-lease=refs/heads/<branch>:<old> <paths.origin> <sha>:refs/heads/<branch>` from the
+     owned repo: the lease pins the push to the remote's ref as shown (it forces nothing: old..sha is a fast-forward).
+     The project's repo is never written: its remote-tracking ref stays where it was until its own next fetch;
   7. each push is a line in `<state>/git-broker/<project>/pushes.jsonl` (no bus event type fits one).
 
 Exit: 0 pushed or nothing to push, 1 failed (git, network, the project's job), 2 refused (policy or usage).
@@ -53,7 +56,9 @@ import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import isolation  # noqa: E402
 import names  # noqa: E402
+import policy  # noqa: E402
 import project_git  # noqa: E402
+import seatbelt  # noqa: E402
 
 _ = i18n.domain(__file__)
 
@@ -133,19 +138,43 @@ class Owned:
 
 def broker_dir(project: str) -> pathlib.Path:
     """<state>/git-broker/<project>: the platform's, which no sandbox writes (taken at call time, so a test's state)."""
-    return pathlib.Path(hubconf.STATE) / "git-broker" / project
+    return policy.git_broker_dir(project)
+
+
+def temp_roots() -> list[pathlib.Path]:
+    """Folders every sandboxed project's processes can write, whatever this platform's own sandbox says: the system's
+    temp areas (the same uid)."""
+    roots = [*seatbelt.TMP, tempfile.gettempdir(), "/tmp", "/var/tmp", "/private/tmp", "/private/var/folders"]
+    if sys.platform.startswith("linux"):
+        roots.append("/dev/shm")
+    return [pathlib.Path(r) for r in roots if r]
 
 
 def check_origin(origin: str | None) -> str:
+    """The URL git is given. A local origin must be an absolute path (file:///… or /…; ~ expanded) outside every folder
+    a sandboxed project can write: the owner's git would read that repo's config, as it would the project's own."""
     if not origin or origin == "(native)":
         raise Refused(_("the registry has no paths.origin for it: brunna push sends only to the remote the registry "
                         "names"))
     if origin.startswith("-") or re.match(r"^(ext|fd)::", origin):
         raise Refused(_("paths.origin {url} is not a remote brunna push contacts", url=origin))
-    local = origin.removeprefix("file://") if origin.startswith(("/", "~", "file://")) else None
-    if local is not None and gitdirs.holder(pathlib.Path(os.path.expanduser(local)), project_git.sandbox_writes()):
+    if "://" in origin:
+        if not origin.lower().startswith("file://"):
+            return origin   # https://, ssh://, git://
+        local = origin[len("file://"):]
+    elif re.match(r"^[^/]+:", origin):
+        return origin       # host:path, ssh's short form
+    else:
+        local = os.path.expanduser(origin)
+    if not local.startswith("/"):
+        raise Refused(_("paths.origin {url}: a local remote has to be an absolute path", url=origin))
+    named = pathlib.Path(local)
+    if gitdirs.holder(named, project_git.sandbox_writes()):
         raise Refused(_("paths.origin {url} is in a folder a sandboxed project writes", url=origin))
-    return origin
+    roots = {f"{i}": r for i, r in enumerate(temp_roots())}
+    if gitdirs.holder(named, roots) or any(named.resolve().is_relative_to(r.resolve()) for r in roots.values()):
+        raise Refused(_("paths.origin {url} is in a temp folder, which every sandboxed project can write", url=origin))
+    return origin if "://" in origin else str(named)
 
 
 def branch_arg(args: list[str]) -> tuple[str | None, bool]:
@@ -229,7 +258,8 @@ def bundle_in(owned: Owned, project: str, ws: pathlib.Path, branch: str, have: l
     if r.returncode == NOTHING:
         tip = bundle.read_bytes()[:100].decode(errors="replace").strip()
         if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", tip) or owned.sha(tip) != tip:
-            raise Refused(_("the project's job named a commit the remote doesn't have: {sha}", sha=visible(tip[:64])))
+            raise Refused(_("the project's job said the remote has every commit of {branch}, then named one the "
+                            "remote's tips don't reach: {sha}", branch=visible(branch), sha=visible(tip[:64])))
         return tip
     if r.returncode == NO_BRANCH:
         raise Refused(_("{project} has no branch {branch}", project=project, branch=visible(branch)))
@@ -272,9 +302,10 @@ class Plan:
         out = []
         if self.github:
             out.append(_("!! .github/ differs from {default} on the remote: CI runs what it says, with the repo's secrets "
-                         "(allowed by enforce.git_ci)", default=self.default))
+                         "(allowed by enforce.git_ci)", default=visible(self.default)))
         rng = f"{self.old[:12]}..{self.new[:12]}" if self.old else _("{sha} (a new branch on the remote)", sha=self.new[:12])
-        out.append(_("push {project} {branch} → {url}", project=self.project, branch=self.branch, url=self.origin))
+        out.append(_("push {project} {branch} → {url}", project=self.project, branch=visible(self.branch),
+                     url=visible(self.origin)))
         out.append(_("  range: {range}, {n} {n:commit|commits}", range=rng, n=self.n))
         for short, name, email, subject in self.commits:
             mark = "  !!" if email in self.new_emails else "    "
@@ -294,10 +325,13 @@ class Plan:
 
 def plan(owned: Owned, project: str, origin: str, branch: str, default: str, old: str | None, new: str) -> Plan:
     tips = [t for t in (owned.sha(f"{REMOTE}/{default}"), old) if t]
-    log = owned.out("log", "--no-show-signature", "-z", f"--max-count={MAX_COMMITS}", "--format=%h%x1f%an%x1f%ae%x1f%s",
+    # one field per line: a name, an email or a subject never holds a newline (git ends each header line there), so
+    # none can shift the fields after it
+    log = owned.out("log", "--no-show-signature", "-z", f"--max-count={MAX_COMMITS}", "--format=%h%n%an%n%ae%n%s",
                     new, "--not", *tips)
-    commits = [tuple(rec.split("\x1f", 3)) for rec in log.split("\0") if rec.strip()]
-    commits = [c + ("",) * (4 - len(c)) for c in commits]
+    commits = [tuple(rec.split("\n")) for rec in log.split("\0") if rec.strip()]
+    if any(len(c) != 4 for c in commits):
+        raise Refused(_("a commit's author or subject can't be shown as one line each; not pushed"))
     n = int(owned.out("rev-list", "--count", new, "--not", *tips).strip() or 0)
     base = old or owned.out("merge-base", new, tips[0]).strip() or owned.out("hash-object", "-t", "tree", "/dev/null").strip()
     raw = owned.out("diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-status", "-z", base, new).split("\0")
@@ -378,21 +412,25 @@ def push(project: str, args: list[str]) -> int:
         try:
             new = bundle_in(owned, project, ws, branch, have, tmp)
             if new == old:
-                print(_("nothing to push: the remote's {branch} is already at {sha}", branch=branch, sha=new[:12]))
+                print(_("nothing to push: the remote's {branch} is already at {sha}", branch=visible(branch),
+                        sha=new[:12]))
                 return OK
             if old and owned.git("merge-base", "--is-ancestor", old, new).returncode != 0:
                 raise Refused(_("{branch} is not a fast-forward of the remote's {old}: merge or rebase onto it in the "
-                                "project first (brunna push never forces)", branch=branch, old=old[:12]))
+                                "project first (brunna push never forces)", branch=visible(branch), old=old[:12]))
             p = plan(owned, project, origin, branch, default, old, new)
             ci = (doc.get("enforce") or {}).get("git_ci") is True
             if p.github and not ci:
                 raise Refused(_("{sha} changes .github/ against the remote's {default}: CI would run it with the repo's "
                                 "secrets; the owner allows that with enforce.git_ci: true in the registry",
-                                sha=new[:12], default=default))
+                                sha=new[:12], default=visible(default)))
             print("\n".join(p.lines()))
             confirm(yes)
+            # pinned to what was shown: the lease refuses the push when the remote's ref moved while the owner read
+            # (old..new is a fast-forward, checked above, so the lease forces nothing)
             r = owned.git("-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false", "push", "--no-verify",
-                          "--no-follow-tags", "--recurse-submodules=no", "--", origin, f"{new}:refs/heads/{branch}")
+                          "--no-follow-tags", "--recurse-submodules=no", f"--force-with-lease=refs/heads/{branch}:{old or ''}",
+                          "--", origin, f"{new}:refs/heads/{branch}")
             said = visible((r.stderr + r.stdout).decode(errors="replace").strip()[-600:], lines=True)
             log(project, branch=branch, old=old, new=new, commits=p.n, github=p.github, ok=r.returncode == 0)
             if r.returncode != 0:
@@ -400,7 +438,7 @@ def push(project: str, args: list[str]) -> int:
             if said:
                 print(said)
             print(_("pushed {branch}: {range}. The project's own repo is untouched: its origin/{branch} moves with its "
-                    "next fetch", branch=branch, range=f"{(old or '')[:12]}..{new[:12]}" if old else new[:12]))
+                    "next fetch", branch=visible(branch), range=f"{old[:12]}..{new[:12]}" if old else new[:12]))
             return OK
         finally:
             owned.git("update-ref", "-d", INCOMING)

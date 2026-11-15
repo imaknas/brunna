@@ -850,7 +850,10 @@ class SystemTempIsNoPlaceForIt(unittest.TestCase):
             "bin/runtime_codex.py", "bin/conformance_codex.py",
             # it only reads the temp area, to report folders shaped like a git dir there (git-config-fence.md r2 S1);
             # its own copies go in private_tmp
-            "bin/git_fence.py"}
+            "bin/git_fence.py",
+            # brunna push names the temp areas only to refuse a local origin there (git-broker.md, "Owner-run push");
+            # its own bundle goes in private_tmp
+            "bin/git_remote.py"}
     USE = __import__("re").compile(r"tempfile[.](?:mkdtemp|TemporaryDirectory|NamedTemporaryFile|mkstemp|gettempdir|TemporaryFile)[(]"
                                    r"|[$][(]mktemp|[\"' ]/tmp[/\"' ]|/private/tmp|/var/folders|TMPDIR")
     MOVED = __import__("re").compile(r"dir=(?:hubconf[.])?(?:private_tmp[(][)]|STATE\b)")   # both denied to every sandbox

@@ -284,6 +284,12 @@ def git_fence(doc: dict, roots) -> dict | None:
             "markers": markers}
 
 
+def git_broker_dir(name: str, state: pathlib.Path | None = None) -> pathlib.Path:
+    """<state>/git-broker/<project>: the broker's folder for a project (its sockets, its records, brunna push's owned
+    bare repo); hubconf.STATE by default, taken at call time."""
+    return pathlib.Path(state or hubconf.STATE) / "git-broker" / name
+
+
 def git_broker(doc: dict | None, name: str, state: pathlib.Path | None = None) -> dict | None:
     """Where a project whose git goes through the platform reaches the git broker (docs/design/git-broker.md, "Step 2
     build list", slice a); None when it doesn't (git_platform). state: the platform state the broker runs in
@@ -298,10 +304,10 @@ def git_broker(doc: dict | None, name: str, state: pathlib.Path | None = None) -
     if not git_platform(doc):
         return None
     import registry
-    root = pathlib.Path(state or hubconf.STATE) / "git-broker"
+    d = git_broker_dir(name, state)
     ws = registry.dirs({**(doc or {}), "name": name})["workspace"]
-    return {"root": str(root), "dir": str(root / name), "session": str(root / name / "session"),
-            "service": str(root / name / "service"), "nonce_dir": str(pathlib.Path(ws) / ".hub-run" / "git") if ws else None,
+    return {"root": str(d.parent), "dir": str(d), "session": str(d / "session"),
+            "service": str(d / "service"), "nonce_dir": str(pathlib.Path(ws) / ".hub-run" / "git") if ws else None,
             "wrapper_dir": str(hubconf.ROOT / "bin" / "git-wrapper")}
 
 

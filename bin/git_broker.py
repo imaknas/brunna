@@ -316,7 +316,8 @@ def default_policy(name: str, doc: dict, projects: dict) -> dict:
 
 
 def repos_file(state: pathlib.Path, project: str) -> pathlib.Path:
-    return pathlib.Path(state) / "git-broker" / project / "repos.json"
+    import policy
+    return policy.git_broker_dir(project, pathlib.Path(state)) / "repos.json"
 
 
 def rebuilt(project: str, state: pathlib.Path | None = None) -> str | None:

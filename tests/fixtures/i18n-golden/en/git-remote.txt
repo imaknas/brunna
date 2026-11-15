@@ -153,6 +153,18 @@ refused: paths.origin ext::sh is not a remote brunna push contacts
 --- stderr
 refused: paths.origin <TMP>/ws/proj/.git is in a folder a sandboxed project writes
 
+=== origin ../remote.git: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: paths.origin ../remote.git: a local remote has to be an absolute path
+
+=== origin /var/tmp/x.git: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: paths.origin /var/tmp/x.git is in a temp folder, which every sandboxed project can write
+
 === empty remote: brunna push proj main --yes
 [exit 2]
 --- stdout

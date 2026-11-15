@@ -29,6 +29,8 @@ import hubconf  # noqa: E402
 import isolation  # noqa: E402
 import seatbelt  # noqa: E402
 
+REAL_TEMP_ROOTS = git_remote.temp_roots
+
 IDENT = {"GIT_AUTHOR_NAME": "Dev", "GIT_AUTHOR_EMAIL": "dev@example.org", "GIT_COMMITTER_NAME": "Dev",
          "GIT_COMMITTER_EMAIL": "dev@example.org"}
 
@@ -50,6 +52,10 @@ class Base(unittest.TestCase):
                   mock.patch.object(hubconf, "STATE", self.tmp / "state"),
                   mock.patch.object(hubconf, "projects", lambda: self.docs),
                   mock.patch.object(isolation, "wrap", self.as_project),
+                  # the harness's remote sits in this run's temp folder (on Linux the whole tree is under /tmp): every
+                  # temp root but the ones holding it still counts; OriginSpellings checks the real list
+                  mock.patch.object(git_remote, "temp_roots", lambda: [
+                      r for r in REAL_TEMP_ROOTS() if not self.tmp.is_relative_to(r.resolve())]),
                   mock.patch.object(git_remote, "run_git", lambda argv, cwd, env, **kw: (
                       self.calls.append((list(argv), str(cwd))), run_git(argv, cwd, env, **kw))[1])):
             p.start()
@@ -184,7 +190,7 @@ class Pushes(Base):
         with mock.patch.object(isolation, "wrap", lie):
             code, _out, err = self.push("main", "--yes")
         self.assertEqual(code, git_remote.REFUSED, err)
-        self.assertIn("doesn't have", err)
+        self.assertIn("tips don't reach", err)
         self.assert_untouched(before)
 
     def test_safe_bare_repository_explicit_holds_for_the_owned_repo(self):
@@ -213,6 +219,16 @@ class Pushes(Base):
         code, out, err = self.push("main", "--yes")
         self.assertEqual(code, 0, err)
         self.assertIn("!! author emails not in the remote's recent history: someone@else.example", out)
+
+    def test_a_separator_in_an_author_name_shifts_no_field(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "Mallory\x1fdev@example.org\x1ffine", "GIT_AUTHOR_EMAIL": "m@evil.example"}
+        (self.ws / "b.txt").write_text("b\n")
+        self.git(self.ws, "add", "b.txt")
+        self.git(self.ws, "commit", "-q", "-m", "looks routine", env=env)
+        code, out, err = self.push("main", "--yes")
+        self.assertEqual(code, 0, err)
+        self.assertIn("Mallory\\x1fdev@example.org\\x1ffine <m@evil.example>  looks routine", out)
+        self.assertIn("!! author emails not in the remote's recent history: m@evil.example", out)
 
     def test_control_characters_from_the_project_are_shown_escaped(self):
         self.commit(self.ws, "a.txt", "a\n", "innocent\x1b[2K\rrepainted")
@@ -319,18 +335,63 @@ class Refusals(Base):
 
     def test_missing_origin(self):
         self.commit(self.ws, "a.txt", "a\n", "add a")
-        for origin in (None, "(native)", "ext::sh -c touch% /tmp/x"):
+        marker = self.tmp / "ext-ran"
+        ext = f"ext::sh -c touch% {marker}"
+        for origin in (None, "(native)", ext):
             with self.subTest(origin=origin):
                 self.calls.clear()
                 self.docs["proj"]["paths"]["origin"] = origin
                 self.refused("main", "--yes")
                 self.assertEqual(self.calls, [])
-        self.plain_push("main")
+        self.assertFalse(marker.exists())
+        self.plain_push("main")   # control for none: plain git pushes the branch to the remote it has
+        # control for ext::: plain git, with the transport allowed, runs the command the URL names
+        subprocess.run(["git", "-C", str(self.ws), "-c", "protocol.ext.allow=always", "push", ext, "main"],
+                       capture_output=True)
+        self.assertTrue(marker.exists())
 
     def test_an_origin_inside_a_sandboxed_projects_folder(self):
-        self.docs["proj"]["paths"]["origin"] = str(self.ws / ".git")
         self.commit(self.ws, "a.txt", "a\n", "add a")
-        self.refused("main", "--yes", says="a sandboxed project writes")
+        link = self.tmp / "looks-elsewhere.git"
+        link.symlink_to(self.ws / ".git")
+        for origin in (str(self.ws / ".git"), f"file://{self.ws}/.git", str(link), f"file://{link}"):
+            with self.subTest(origin=origin):
+                self.calls.clear()
+                self.docs["proj"]["paths"]["origin"] = origin
+                self.refused("main", "--yes", says="a sandboxed project writes")
+                self.assertEqual(self.calls, [])
+        # control: plain git pushes into it (and so reads that repo's config, as the owner)
+        other = self.tmp / "other"
+        self.git(self.tmp, "clone", "-q", str(self.remote), str(other))
+        r = subprocess.run(["git", "-C", str(other), "push", "-q", str(link), "main:from-outside"], capture_output=True,
+                           text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertTrue(self.git(self.ws, "rev-parse", "from-outside").strip())
+
+    def test_the_push_is_pinned_to_what_was_shown(self):
+        """S1: the remote's ref moving while the owner reads (here: rewound) refuses the push; the old..new check was
+        made against what was shown. Control: the same push without the lease lands, carrying a commit never shown."""
+        c1 = self.tip()
+        self.commit(self.ws, "a.txt", "a\n", "shown as already there")
+        self.assertEqual(self.push("main", "--yes")[0], 0)
+        c3 = self.commit(self.ws, "b.txt", "b\n", "the one shown")
+        rewound = []
+
+        def answer(prompt=""):
+            subprocess.run(["git", "--git-dir", str(self.remote), "update-ref", "refs/heads/main", c1], check=True)
+            rewound.append(True)
+            return "y"
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
+                mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)), mock.patch("builtins.input", answer):
+            code = git_remote.main(["push", "proj", "main"])
+        self.assertTrue(rewound)
+        self.assertEqual(code, git_remote.FAILED, err.getvalue())
+        self.assertEqual(self.tip(), c1, "the push went through on a remote that moved")
+        r = subprocess.run(["git", "--git-dir", str(self.owned()), "push", "-q", str(self.remote),
+                            f"{c3}:refs/heads/main"], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.tip(), c3)
 
     def test_non_interactive_without_yes(self):
         self.commit(self.ws, "a.txt", "a\n", "add a")
@@ -344,6 +405,42 @@ class Refusals(Base):
         self.refused("main", "--yes", says="not sandboxed")
         self.assertEqual(self.calls, [])
         self.assertEqual(self.wrapped, [])
+
+
+class OriginSpellings(unittest.TestCase):
+    """S3: a local origin is an absolute path outside every temp area (each one is writable by every sandboxed project's
+    processes) and outside the sandboxed projects' folders."""
+
+    def test_refused_spellings(self):
+        with mock.patch.object(hubconf, "projects", lambda: {}):
+            for origin in ["../remote.git", "remote.git", "./remote.git", "file://host/srv/x.git", "file://srv/x.git",
+                           f"{tempfile.gettempdir()}/x.git", f"file://{tempfile.gettempdir()}/x.git", "/tmp/x.git",
+                           "/var/tmp/x.git", "/private/tmp/x.git", "/private/var/folders/x/x.git",
+                           *(["/dev/shm/x.git"] if sys.platform.startswith("linux") else [])]:
+                with self.subTest(origin=origin):
+                    with self.assertRaises(git_remote.Refused):
+                        git_remote.check_origin(origin)
+
+    def test_accepted_spellings(self):
+        with mock.patch.object(hubconf, "projects", lambda: {}):
+            for origin in ("https://example.org/a/b.git", "ssh://git@example.org/a/b.git", "git@example.org:a/b.git"):
+                self.assertEqual(git_remote.check_origin(origin), origin)
+
+    def test_control_plain_git_pushes_to_a_temp_remote(self):
+        d = pathlib.Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        env = {**{k: v for k, v in os.environ.items() if not k.startswith("GIT_")}, "GIT_CONFIG_GLOBAL": "/dev/null",
+               **IDENT}
+        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(d / "remote.git")], env=env, check=True)
+        subprocess.run(["git", "init", "-q", "-b", "main", str(d / "w")], env=env, check=True)
+        (d / "w" / "f").write_text("f\n")
+        subprocess.run(["git", "-C", str(d / "w"), "add", "f"], env=env, check=True)
+        subprocess.run(["git", "-C", str(d / "w"), "commit", "-q", "-m", "f"], env=env, check=True)
+        r = subprocess.run(["git", "-C", str(d / "w"), "push", "-q", str(d / "remote.git"), "main"], env=env,
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        with mock.patch.object(hubconf, "projects", lambda: {}), self.assertRaises(git_remote.Refused):
+            git_remote.check_origin(str(d / "remote.git"))
 
 
 class Canary(Base):
@@ -500,53 +597,114 @@ class EndToEnd(unittest.TestCase):
     """`brunna push` as the owner types it, in a throwaway instance: the registry entry read through its index (paths.origin,
     enforce), the project's job through the real bin/sandboxed-run. Skipped where this machine can't sandbox."""
 
-    def test_the_cli(self):
+    def instance(self, enforce: str = "", **extra_env):
         tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        for d in ("home", "config/projects", "data", "secrets", "bus", "state", "ws"):
+        for d in ("home", "config/projects", "data", "secrets", "bus", "state", "ws", "t"):
             (tmp / d).mkdir(parents=True)
         (tmp / "gitconfig").write_text("[safe]\n\tbareRepository = explicit\n")
         (tmp / "config" / "hub.json").write_text(json.dumps({
             "owner": {"name": "alex", "tag": "Alex"}, "bus_dir": str(tmp / "bus"), "registry_dir": "projects",
             "workspace_root": str(tmp / "ws"), "memory_copies": str(tmp / "copies"), "services_root": str(tmp / "svc"),
             "language": {"ui": "en", "content": "en"}}))
-        env = {**{k: v for k, v in os.environ.items() if not k.startswith(("BRUNNA_", "AGENT_HUB_", "GIT_"))
-                  or k in ("AGENT_HUB_PYTHON", "BRUNNA_PYTHON")},
-               "AGENT_HUB_ROOT": str(ROOT), "HOME": str(tmp / "home"), "AGENT_HUB_CONFIG": str(tmp / "config"),
-               "AGENT_HUB_DATA": str(tmp / "data"), "AGENT_HUB_SECRETS": str(tmp / "secrets"),
-               "AGENT_HUB_STATE": str(tmp / "state"), "GIT_CONFIG_GLOBAL": str(tmp / "gitconfig"),
-               "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C", **IDENT}
-
-        def git(cwd, *args):
-            subprocess.run(["git", "-C", str(cwd), *args], env=env, capture_output=True, text=True, check=True)
+        # the child's own temp folder (tmp/t), so the remote beside it is in no temp root of the child's
+        self.env = env = {
+            **{k: v for k, v in os.environ.items() if not k.startswith(("BRUNNA_", "AGENT_HUB_", "GIT_"))
+               or k in ("AGENT_HUB_PYTHON", "BRUNNA_PYTHON")},
+            "AGENT_HUB_ROOT": str(ROOT), "HOME": str(tmp / "home"), "AGENT_HUB_CONFIG": str(tmp / "config"),
+            "AGENT_HUB_DATA": str(tmp / "data"), "AGENT_HUB_SECRETS": str(tmp / "secrets"), "TMPDIR": str(tmp / "t"),
+            "AGENT_HUB_STATE": str(tmp / "state"), "GIT_CONFIG_GLOBAL": str(tmp / "gitconfig"),
+            "GIT_CONFIG_NOSYSTEM": "1", "LC_ALL": "C", **IDENT, **extra_env}
         remote, ws, seed = tmp / "remote.git", tmp / "ws" / "proj", tmp / "seed"
-        git(tmp, "init", "-q", "--bare", "-b", "main", str(remote))
-        git(tmp, "init", "-q", "-b", "main", str(seed))
+        real = [r for r in git_remote.temp_roots() if r != pathlib.Path(tempfile.gettempdir())]
+        if any(remote.is_relative_to(r.resolve()) or remote.is_relative_to(r) for r in real):
+            self.skipTest(f"this run's temp folder is in a system temp area ({tmp}): no remote outside one to push to")
+        self.run_git(tmp, "init", "-q", "--bare", "-b", "main", str(remote))
+        self.run_git(tmp, "init", "-q", "-b", "main", str(seed))
         (seed / "README").write_text("r\n")
-        git(seed, "add", "README")
-        git(seed, "commit", "-q", "-m", "init")
-        git(seed, "push", "-q", str(remote), "main")
-        git(tmp, "clone", "-q", str(remote), str(ws))
-        (ws / ".github" / "workflows").mkdir(parents=True)
-        (ws / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
-        git(ws, "add", ".github")
-        git(ws, "commit", "-q", "-m", "a workflow")
+        self.run_git(seed, "add", "README")
+        self.run_git(seed, "commit", "-q", "-m", "init")
+        self.run_git(seed, "push", "-q", str(remote), "main")
+        self.run_git(tmp, "clone", "-q", str(remote), str(ws))
         (tmp / "config" / "projects" / "proj.yaml").write_text(
             f"v: 1\nname: proj\npaths:\n  workspace: {ws}\n  origin: {remote}\n"
-            "enforce:\n  sandbox: true\n  git_ci: true\n")
+            f"enforce:\n  sandbox: true\n  git_ci: true\n{enforce}")
         r = subprocess.run([sys.executable, str(BIN / "registry.py"), "check"], env=env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        r = subprocess.run([sys.executable, str(BIN / "agenthub"), "push", "proj", "main", "--yes"], env=env,
+        return tmp, ws, remote
+
+    def run_git(self, cwd, *args):
+        return subprocess.run(["git", "-C", str(cwd), *args], env=self.env, capture_output=True, text=True,
+                              check=True).stdout
+
+    def brunna_push(self, *args):
+        r = subprocess.run([sys.executable, str(BIN / "agenthub"), "push", "proj", *args, "--yes"], env=self.env,
                            capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
         if "the sandbox refused" in r.stderr:
             self.skipTest(f"this machine can't sandbox the project's job: {r.stderr.strip()[-200:]}")
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        head = subprocess.run(["git", "-C", str(ws), "rev-parse", "HEAD"], env=env, capture_output=True, text=True).stdout
-        tip = subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"], env=env, capture_output=True,
+        return r
+
+    def landed(self, ws, remote):
+        head = self.run_git(ws, "rev-parse", "HEAD")
+        tip = subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"], env=self.env, capture_output=True,
                              text=True).stdout
         self.assertEqual(tip, head)
+
+    def test_the_cli(self):
+        tmp, ws, remote = self.instance()
+        (ws / ".github" / "workflows").mkdir(parents=True)
+        (ws / ".github" / "workflows" / "ci.yml").write_text("on: push\n")
+        self.run_git(ws, "add", ".github")
+        self.run_git(ws, "commit", "-q", "-m", "a workflow")
+        r = self.brunna_push("main")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.landed(ws, remote)
         self.assertIn("allowed by enforce.git_ci", r.stdout)
         self.assertTrue((tmp / "state" / "git-broker" / "proj" / "remote.git" / "HEAD").is_file())
+
+    def test_the_owners_environment_never_reaches_the_projects_code(self):
+        """B1: `git status` in the job (the head op) runs the repo's fsmonitor, as the project. What the owner's
+        terminal holds (a token) is not in its environment. Control: the same job given the caller's environment, as
+        project_git did before, hands the token over."""
+        tmp, ws, remote = self.instance(SECRET_TOKEN="canary-7f3a")
+        out = ws / "fsmonitor.env"
+        hook = ws / "fsmonitor.sh"
+        hook.write_text(f'#!/bin/sh\nenv >> "{out}"\nexit 0\n')
+        hook.chmod(0o755)
+        self.run_git(ws, "config", "core.fsmonitor", str(hook))
+        (ws / "a.txt").write_text("a\n")
+        self.run_git(ws, "add", "a.txt")
+        self.run_git(ws, "commit", "-q", "-m", "add a")
+        out.unlink(missing_ok=True)
+        r = self.brunna_push()   # no branch: the head op asks the project which one is checked out
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.landed(ws, remote)
+        self.assertTrue(out.exists(), "the fsmonitor never ran: the test shows nothing")
+        self.assertNotIn("canary-7f3a", out.read_text())
+        out.unlink()
+        c = subprocess.run([sys.executable, str(BIN / "sandboxed-run"), "--project", "proj", "--cwd", str(ws), "--",
+                            sys.executable, str(BIN / "project-git-job.py"), "head", str(ws)],
+                           env=self.env, capture_output=True, text=True, timeout=120)
+        self.assertEqual(c.returncode, 0, c.stderr)
+        self.assertIn("SECRET_TOKEN=canary-7f3a", out.read_text())
+
+    @unittest.skipUnless(sys.platform == "darwin", "enforce.git: platform renders only where the sandbox fences git dirs")
+    def test_a_project_switched_on_to_git_through_the_platform(self):
+        """S2: sandboxed-run puts the platform's git wrapper first on PATH, and the wrapper refuses `bundle`: the job runs
+        the real git by the path project_git resolved."""
+        tmp, ws, remote = self.instance("  git: platform\n")
+        (ws / "a.txt").write_text("a\n")
+        self.run_git(ws, "add", "a.txt")
+        self.run_git(ws, "commit", "-q", "-m", "add a")
+        r = self.brunna_push("main")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.landed(ws, remote)
+        # control: the job as sandboxed-run starts it, with no real git named, gets the wrapper, which refuses bundle
+        env = {k: v for k, v in self.env.items() if not k.endswith("GIT_BIN")}
+        c = subprocess.run([sys.executable, str(BIN / "sandboxed-run"), "--project", "proj", "--cwd", str(ws), "--",
+                            sys.executable, str(BIN / "project-git-job.py"), "bundle-branch", str(ws), "main"],
+                           env=env, capture_output=True, timeout=120)
+        self.assertNotEqual(c.returncode, 0, "the wrapper let bundle through: the control shows nothing")
 
 
 class Registry(unittest.TestCase):

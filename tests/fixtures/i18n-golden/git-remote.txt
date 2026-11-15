@@ -153,6 +153,18 @@ To <TMP>/remote.git
 --- stderr
 拒絕:paths.origin <TMP>/ws/proj/.git 在沙盒專案寫得到的資料夾裡
 
+=== origin ../remote.git: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:paths.origin ../remote.git:本機的遠端要寫絕對路徑
+
+=== origin /var/tmp/x.git: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:paths.origin /var/tmp/x.git 在暫存資料夾裡,每個沙盒專案都寫得到
+
 === empty remote: brunna push proj main --yes
 [exit 2]
 --- stdout

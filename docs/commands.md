@@ -58,7 +58,10 @@ Before anything leaves, it shows the commits (author, email, subject), the chang
 and any author email the remote hasn't seen before, and asks. `--yes` skips the question (a script, say).
 
 It only fast-forwards: no force, no tags, no deletes, one branch at a time. A branch the remote has moved past is
-refused: merge or rebase in the project first. A commit that changes `.github/` (CI, which runs with the repo's
-secrets) is refused unless the project's registry entry has `enforce: {git_ci: true}`. A remote with no branches yet
-is refused too (it has no default branch to compare with): give it a first commit on the forge, such as a README, then push. The project's own `origin/<branch>` catches up at
-its next fetch.
+refused: merge or rebase in the project first. A commit that changes `.github/` (CI, which runs with the repo's secrets)
+is refused unless the project's registry entry has `enforce: {git_ci: true}`. That gate doesn't stop the workflows
+already there from running the pushed code (its scripts and tests), and it doesn't look at other services' CI files
+(`.gitlab-ci.yml`, `.circleci/`, `Jenkinsfile`…): read the changed paths before you say yes. A remote with no branches
+yet is refused too (it has no default branch to compare with): give it a first commit on the forge, such as a README,
+then push. The project's own `origin/<branch>` catches up at its next fetch. Run it again if the remote moved while you
+read: it pushes only onto what it showed you.

@@ -42,5 +42,8 @@
  "{sha} changes .github/ against the remote's {default}: CI would run it with the repo's secrets; the owner allows that with enforce.git_ci: true in the registry": "{sha} 的 .github/ 跟遠端的 {default} 不一樣:CI 會拿 repo 的 secrets 跑它;{owner} 在登錄寫 enforce.git_ci: true 才允許",
  "git push failed: {why}": "git push 失敗:{why}",
  "unknown option {flag}": "不認得的選項 {flag}",
- "the project's job named a commit the remote doesn't have: {sha}": "專案的 job 給了一個遠端沒有的 commit:{sha}"
+ "the project's job said the remote has every commit of {branch}, then named one the remote's tips don't reach: {sha}": "專案的 job 說遠端已經有 {branch} 的每個 commit,卻給了一個遠端分支頂端到不了的 commit:{sha}",
+ "paths.origin {url}: a local remote has to be an absolute path": "paths.origin {url}:本機的遠端要寫絕對路徑",
+ "paths.origin {url} is in a temp folder, which every sandboxed project can write": "paths.origin {url} 在暫存資料夾裡,每個沙盒專案都寫得到",
+ "a commit's author or subject can't be shown as one line each; not pushed": "有個 commit 的作者或標題沒辦法各用一行顯示;沒有推"
 }

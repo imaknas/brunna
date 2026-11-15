@@ -59,7 +59,7 @@ class Golden(Base):
         self.commit(self.ws, "m.txt", "m\n", "mine")
         self.case("not a fast-forward", "main", "--yes")
         self.case("no such branch", "nope", "--yes")
-        for origin in (None, "(native)", "ext::sh", str(self.ws / ".git")):
+        for origin in (None, "(native)", "ext::sh", str(self.ws / ".git"), "../remote.git", "/var/tmp/x.git"):
             self.docs["proj"]["paths"]["origin"] = origin
             self.case(f"origin {origin and origin.replace(str(self.tmp), '<TMP>')}", "main", "--yes")
         empty = self.tmp / "empty.git"

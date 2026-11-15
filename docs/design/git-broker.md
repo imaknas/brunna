@@ -2713,8 +2713,16 @@ push over the broker socket still needs them and is not part of this.
 **How** (each step is the slice d mechanism, run by the owner instead of the broker service):
 1. The project must be sandboxed (`isolation.sandboxed`; a project in `service_sandbox_exempt` is refused, since its
    jobs run unsandboxed). The remote is `paths.origin`, an owner-only field, and it is the only URL contacted. Refused:
-   none, `(native)`, `ext::` / `fd::`, and a local path in a folder a sandboxed project writes.
-2. The branch is bundled as the project: `project-git-job.py bundle-branch` through `project_git.job`, sandboxed. It
+   none, `(native)`, `ext::` / `fd::`, a local spelling that isn't an absolute path (relative, `file://host/…`), and a
+   local path, as named or resolved, in a folder a sandboxed project writes or in a temp area (every sandboxed
+   project's processes can write those: `/tmp`, `/var/tmp`, `/private/tmp`, `/private/var/folders`, `/dev/shm`, the
+   temp folder of the run).
+2. The branch is bundled as the project: `project-git-job.py bundle-branch` through `project_git.job`, sandboxed. Every
+   job's environment is built (`project_git.job_env`: `isolation.kept_env`, as `run_as_project`), never the caller's:
+   the owner's terminal may hold tokens, and `git status` in the job runs the repo's fsmonitor. The job runs the real
+   git by the absolute path `project_git` resolved, since sandboxed-run puts the platform's wrapper first on PATH for
+   a switched-on project and the wrapper refuses `bundle` (this holds for every op: bundle-head, bundle-unpushed,
+   memory-sync). It
    leaves out what the remote's tips reach, the ones the project has (a bundle's prerequisites must exist on both sides).
    Its stdout lands in a file under `hubconf.private_tmp()`. When the remote already has every commit (a new branch at
    a known commit, say), the job prints only the branch's commit id, and the push goes on only if the owned repo has
@@ -2740,6 +2748,10 @@ push over the broker socket still needs them and is not part of this.
      `enforce.sandbox`). With the allowance it is still listed first. The base differs from slice d's (the
      destination's current commit, or the merge base for a new branch) because GitHub runs the workflows of the pushed
      commit's own tree, and the default branch's are the ones the owner has already accepted.
+     **What the gate doesn't stop:** workflows that already exist run on the pushed code, and the code they run
+     (scripts, test suites, build files) has no gate; nor do other forges' CI files (`.gitlab-ci.yml`,
+     `.circleci/`, `Jenkinsfile` and the like). It keeps a push from changing which workflows run with the repo's
+     secrets, not what those workflows execute.
 5. **What the owner sees:**
    - the range;
    - each commit's short sha, author name and email, and subject;
@@ -2750,8 +2762,10 @@ push over the broker socket still needs them and is not part of this.
 
    Control characters in anything the project wrote are shown as escapes. The command then asks y/N. `--yes` skips
    that; with no terminal and no `--yes` it refuses.
-6. `push --no-verify --no-follow-tags --recurse-submodules=no -- <origin> <sha>:refs/heads/<branch>` runs from the
-   owned repo, pushing the exact sha shown. The project's repo is never written, and its `origin/<branch>` moves on its
+6. `push --no-verify --no-follow-tags --recurse-submodules=no --force-with-lease=refs/heads/<branch>:<old> --
+   <origin> <sha>:refs/heads/<branch>` runs from the owned repo, pushing the exact sha shown. The lease pins the push to
+   the remote's ref as shown (empty for a new branch): if it moved while the owner read, even backwards, the push is
+   refused. It forces nothing, since `<old>..<sha>` was checked as a fast-forward. The project's repo is never written, and its `origin/<branch>` moves on its
    own next fetch. Slice d's step 4 (P1 updates the remote-tracking ref) waits for the broker.
 7. No bus event type fits a push, and `merge.done` would trigger event jobs. Each push is a line in
    `<state>/git-broker/<project>/pushes.jsonl`.
@@ -2759,7 +2773,7 @@ push over the broker socket still needs them and is not part of this.
 **What differs from slice d's session push:**
 - the owner starts it, so there is no socket, no nonce, no P1, and no service;
 - the default branch is allowed;
-- there is no `--force-with-lease`;
+- `--force-with-lease` only pins what was shown; nothing the owner names is forced;
 - the remote-tracking ref isn't updated;
 - the first push of an empty remote isn't covered.
 
@@ -2774,6 +2788,14 @@ owner's way to push the default branch.
 - every owner-side git call is recorded at its one start point, and each one names an owned repo with `--git-dir`,
   from outside the workspace;
 - a canary planted in the project's `.git` never runs, with the control that the owner's git in the workspace runs it;
+- a token in the owner's environment never reaches the job's fsmonitor through the real `sandboxed-run`, with the
+  control that the caller's environment passed through hands it over;
+- a remote rewound while the owner reads refuses the push, with the control that a push without the lease lands the
+  commit never shown;
+- a switched-on project's job bundles through the real `sandboxed-run` (macOS), with the control that the wrapper
+  refuses `bundle`;
+- local origins: relative, `file://host/…`, temp areas, a project's folder through a link or `file://`, each refused,
+  with plain-git controls;
 - on macOS, the project's job runs under the real Seatbelt profile, with and without the git-dir fence;
 - one end-to-end run types `brunna push` in a throwaway instance: the registry entry read through its index and the
   job through the real `sandboxed-run` (Seatbelt on macOS, Landlock in `bin/linux-test`).
