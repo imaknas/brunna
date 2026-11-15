@@ -21,7 +21,7 @@ The base is "allow everything, then block the dangerous parts" (a deny-list; tri
            fails (git 2.56 resolves every component of `git -C <dir>` and dies on the workspace root)
   network  fully off (127.0.0.1 and unix sockets included); Seatbelt can't filter by domain
   other    blocks the Keychain system services (the hole the runtime's sandbox can't close), opening apps, Apple Events,
-           launchctl/crontab/at, inspecting or signalling other processes
+           launchctl/crontab/at, inspecting or signalling other processes, and every mount (mount_denies)
 Capability fragments follow the base (later rules win); the gpu fragment is empty: here a capability's role is
 authorization.
 Both kinds carry the git fence (git_fence_rules) for a project whose git goes through the platform, and nothing of it
@@ -42,6 +42,12 @@ TMP = ["/private/tmp", "/private/var/folders"]
 DEVICES = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/dtracehelper"]
 KEYCHAIN_SERVICES = ["com.apple.SecurityServer", "com.apple.securityd.xpc", "com.apple.security.agent",
                      "com.apple.security.keychain-circle-notification", "com.apple.secd", "com.apple.trustd.agent"]
+# what mounts, attaches a disk image, or changes disks on a caller's behalf (mount_denies; measured 11-15, macOS 27)
+MOUNT_SERVICE_PREFIXES = ["com.apple.DiskArbitration.", "com.apple.diskimage", "com.apple.system.hdiejectd",
+                          "com.apple.storagekitd", "com.apple.filesystems.", "com.apple.fskit.", "com.apple.netauth.",
+                          "com.apple.automountd"]
+MOUNT_IOKIT_SERVICES = ["IOHDIXController", "AppleDiskImagesController"]
+MOUNT_IOKIT_CLIENTS = ["IOHDIXControllerUserClient"]
 NO_EXEC = ["/usr/bin/open", "/usr/bin/osascript", "/bin/launchctl", "/usr/bin/crontab", "/usr/bin/at", "/usr/bin/batch",
            "/usr/bin/security"]
 
@@ -61,7 +67,7 @@ def can_sandbox() -> str | None:
 def guarantees() -> set[str]:
     """isolation.py's backend interface: what service_profile enforces (capabilities.md, "What each OS enforces")."""
     return {"own-writes-only", "isolated-reads", "declared-port-only", "localhost-inbound-only", "keychain-blocked",
-            "signals-blocked", "runtime-files-locked", "git-dirs-fenced"}
+            "signals-blocked", "runtime-files-locked", "git-dirs-fenced", "no-mounts"}
 
 
 def confined_now(marked: bool = False) -> bool:
@@ -246,6 +252,33 @@ def git_fence_rules(pol: dict) -> list[str]:
     return out
 
 
+def mount_denies() -> list[str]:
+    """No mount from inside, anywhere (guarantee no-mounts; docs/design/capabilities.md, "11-15: no mounts"): a disk
+    image the process wrote, attached and mounted over a folder, puts files it never wrote through the file system
+    (a .git with a hostile config) where its write rules don't reach. Three layers, each measured on its own route:
+    - the mount operations themselves: mount(2), a remount and unmount by the process (mount_devfs, mount_hfs,
+      mount_nfs, mount_smbfs, …), and a mount a daemon makes at a mount point the caller names (DiskArbitration
+      checks the caller's sandbox: `hdiutil attach -mountpoint`, `diskutil mount -mountPoint`);
+    - the daemons that attach images, mount at a place they choose (/Volumes), unmount or change disks for a caller:
+      DiskArbitration, diskimagesiod/spawner (diskutil image attach), hdiejectd, storagekitd, FSKit/UserFS, NetAuth,
+      the automounter; by name, as Seatbelt can only deny a mach service it is told about;
+    - the disk-image driver's own door (hdiutil opens IOHDIXController's user client directly to make the device).
+    Not an exec deny: that names one path, and the door is the services (a copied hdiutil, killed at exec on macOS 27
+    by code signing, is not a promise)."""
+    return [
+        "; no mounts: none made, remounted or unmounted by the process, none asked of the daemons that mount, attach "
+        "disk images or change disks, nor of the disk-image driver",
+        "(deny file-mount)",
+        "(deny file-mount-update)",
+        "(deny file-unmount)",
+        "(deny mach-lookup " + " ".join(f"(global-name-prefix {q(s)})" for s in MOUNT_SERVICE_PREFIXES) + ")",
+        "(deny iokit-open-service " + " ".join(f"(iokit-registry-entry-class {q(c)})" for c in MOUNT_IOKIT_SERVICES)
+        + ")",
+        "(deny iokit-open-user-client " + " ".join(f"(iokit-user-client-class {q(c)})" for c in MOUNT_IOKIT_CLIENTS)
+        + ")",
+    ]
+
+
 def ancestors(paths) -> list[str]:
     """The folders above each path, as literals: what a process must be able to stat to resolve the path to a folder
     it may use (realpath, `git -C`), when one of them is in a denied tree (the workspace root, the platform state).
@@ -281,6 +314,7 @@ def _isolation(pol: dict, writable: list[pathlib.Path], writable_extra: list[pat
         "(allow file-read-metadata " + " ".join(ancestors(configured)) + ")",
         "; the Keychain system services",
         "(deny mach-lookup " + " ".join(f"(global-name {q(s)})" for s in KEYCHAIN_SERVICES) + ")",
+        *mount_denies(),
         "; no asking other system services to launch programs outside the sandbox, no touching other processes",
         "(deny lsopen)",
         "(deny appleevent-send)",

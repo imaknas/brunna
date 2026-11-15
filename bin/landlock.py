@@ -27,6 +27,10 @@ What it enforces:
            can create sockets without socket()); no_new_privs (setuid/setgid programs such as crontab gain nothing);
            ptrace and /proc/<pid>/environ of processes outside the sandbox are refused by Landlock itself (measured);
            signals to other processes and abstract unix sockets are scoped only with ABI ≥ 6 (kernel 6.12)
+  mounts   none: a landlocked process can't change the file-system topology at all (mount, umount, pivot_root are
+           refused by Landlock itself, every ABI); a setuid helper (fusermount3, mount's `user` entries) gains nothing
+           under no_new_privs; udisks, gvfs and systemd-mount are reached over D-Bus, a unix socket (refused); a mount
+           in a user namespace of its own is seen only inside it (docs/design/capabilities.md, "11-15: no mounts")
 Can't enforce (the adapter's limits): policy.protect and protect_roots (what the project's sessions load settings and
 hooks from, and the runtime's own folder in the project, inside
 its own writable folder: Landlock can only allow, and a write right on a folder covers everything under it, so it
@@ -131,7 +135,7 @@ def confined_now(marked: bool = False) -> bool:
 def guarantees() -> set[str]:
     """isolation.py's backend interface: what plan + the seccomp filter enforce on this kernel (capabilities.md,
     "What each OS enforces"); not the listening address, so not localhost-inbound-only."""
-    return {"own-writes-only", "isolated-reads", "declared-port-only", "unix-sockets-blocked",
+    return {"own-writes-only", "isolated-reads", "declared-port-only", "unix-sockets-blocked", "no-mounts",
             *(["signals-blocked"] if abi() >= SIGNAL_ABI else [])}
 
 

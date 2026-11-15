@@ -248,6 +248,14 @@ cat "$SECRETS_REAL/key" >/dev/null 2>&1 || echo linked-secrets-target-blocked
 cat /etc/hosts >/dev/null && echo system-read
 kill -0 "$OUTSIDE_PID" 2>/dev/null || echo signal-blocked
 /usr/bin/security list-keychains >/dev/null 2>&1 || echo keychain-blocked
+mkdir -p "$WS/mnt"
+if [ -n "$IMG" ]; then   # macOS: an image it could have written, over its own folder and at /Volumes
+  hdiutil attach -nobrowse -noautoopen -mountpoint "$WS/mnt" "$IMG" >/dev/null 2>&1
+  diskutil image attach --nobrowse "$IMG" >/dev/null 2>&1
+  /sbin/mount_devfs devfs "$WS/mnt" >/dev/null 2>&1
+else
+  mount -t tmpfs none "$WS/mnt" >/dev/null 2>&1
+fi
 "$PY" - <<'PY'
 import socket
 def bind(port):
@@ -278,7 +286,9 @@ PROBES = {"own-writes-only": {"outside-write-blocked", "bus-write-blocked"},
           "declared-port-only": {"bind-other-blocked"}, "unix-sockets-blocked": {"unix-blocked"},
           "keychain-blocked": {"keychain-blocked"}, "signals-blocked": {"signal-blocked"},
           "runtime-files-locked": {"control-blocked"},
-          "git-dirs-fenced": {"git-dir-blocked", "head-file-blocked"}}
+          "git-dirs-fenced": {"git-dir-blocked", "head-file-blocked"},
+          # seen from outside after the run (Conformance.mounted), never from the probe's exit codes
+          "no-mounts": {"mount-blocked"}}
 # guarantees no probe here can show, with why (checked by hand when an adapter declares them)
 UNPROBED = {"localhost-inbound-only": "needs a second address to connect from (macOS checked live 10-31)"}
 
@@ -306,6 +316,31 @@ sys.exit(m.main(["--project", "proj", "--cwd", args["ws"], "--port", str(args["p
 
 
 class Conformance(unittest.TestCase):
+    @staticmethod
+    def mounted(tmp, img) -> list[str]:
+        """Seen from outside: mounts under the probe's folder, and (macOS) any attach of its image."""
+        if sys.platform == "darwin":
+            table = subprocess.run(["mount"], capture_output=True, text=True).stdout.splitlines()
+        else:
+            table = pathlib.Path("/proc/self/mounts").read_text().splitlines()
+        out = [x for x in table if str(tmp) in x]
+        if img is not None:
+            info = subprocess.run(["hdiutil", "info"], capture_output=True, text=True).stdout
+            out += [b for b in info.split("=" * 48) if str(img) in b]
+        return out
+
+    @classmethod
+    def unmount(cls, tmp, img):
+        """Whatever a failing probe left mounted or attached."""
+        import re
+        for x in cls.mounted(tmp, None):
+            subprocess.run(["umount", "-f", x.split(" on ")[1].split(" (")[0] if " on " in x else x.split()[1]],
+                           capture_output=True)
+        if img is not None:
+            for block in cls.mounted(tmp, img):
+                for dev in re.findall(r"^(/dev/disk\d+)\s", block, re.M):
+                    subprocess.run(["hdiutil", "detach", "-quiet", "-force", dev], capture_output=True)
+
     def test_what_counts_as_a_temp_area_sandboxes_write(self):
         for t in [*seatbelt.TMP, *landlock.TMP]:
             self.assertTrue(isolation.in_system_tmp(pathlib.Path(t) / "x"), t)
@@ -361,9 +396,19 @@ class Conformance(unittest.TestCase):
                "SECRETS_LINK": str(secrets_link), "SECRETS_REAL": str(secrets_real),
                "AGENT_HUB_SECRETS": str(secrets_link), "SHARED": str(shared),
                "PY": sys.executable}   # the platform's Python: never rely on a python3 on PATH (AGENTS.md)
+        img = None
+        if sys.platform == "darwin":   # made outside: bytes the service could have written itself
+            (tmp / "img-src" / ".git").mkdir(parents=True)
+            img = ws / "x.dmg"
+            subprocess.run(["hdiutil", "create", "-quiet", "-srcfolder", str(tmp / "img-src"), "-fs", "HFS+",
+                            "-volname", f"brunnaconf{os.getpid()}", str(img)], check=True, capture_output=True)
+            env["IMG"] = str(img)
+        self.addCleanup(self.unmount, tmp, img)
         r = subprocess.run([sys.executable, "-c", RUNNER, __import__("json").dumps(args)], capture_output=True,
                            text=True, env=env)
         got = set(r.stdout.split())
+        if not self.mounted(tmp, img):
+            got.add("mount-blocked")
         name = isolation.adapter()[0]
         self.assertLessEqual(WORKS, got, f"{name}: {r.stdout} {r.stderr}")
         for g in isolation.guarantees():

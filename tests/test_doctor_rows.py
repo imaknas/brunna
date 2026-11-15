@@ -319,7 +319,7 @@ class Doctor(unittest.TestCase):
         level, what, fix = self.isolation_row(self.doctor())
         self.assertEqual((level, fix), ("ok", ""))
         self.assertEqual(what, T("sandboxed projects' own services and jobs: run isolated ({adapter})",
-                                 adapter="seatbelt: own-writes-only, isolated-reads, declared-port-only"))
+                                 adapter="seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts"))
 
     def test_isolation_off_with_nothing_sandboxed_is_a_reminder(self):
         self.projects = {"open": {"name": "open"}}

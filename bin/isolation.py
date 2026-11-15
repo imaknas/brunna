@@ -57,11 +57,14 @@ GUARANTEES = {
     "runtime-files-locked": "what its sessions load settings, hooks and tools from can't be written (policy protect)",
     "git-dirs-fenced": "for a project whose git goes through the platform (policy git_fence), no git dir can be written "
                        "or made anywhere: no .git, no HEAD that isn't a folder (docs/design/git-broker.md)",
+    "no-mounts": "nothing can be mounted, attached as a disk or unmounted: no file system it built or reached appears "
+                 "over a folder, where its write rules don't reach (docs/design/capabilities.md, \"11-15: no mounts\")",
 }
 # what a policy asks for that only some adapters can give: a policy carrying it is refused where the adapter lacks it
 NEEDS = {"git_fence": "git-dirs-fenced"}
 # what a sandboxed service or job must never get past, whatever the backend
-REQUIRED = ("own-writes-only", "isolated-reads", "declared-port-only")
+# (no-mounts: a mount puts files over a folder past own-writes-only, so that guarantee means nothing without it)
+REQUIRED = ("own-writes-only", "isolated-reads", "declared-port-only", "no-mounts")
 
 
 def in_system_tmp(path) -> bool:
