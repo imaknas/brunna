@@ -53,6 +53,7 @@ SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 REQUEST, RESULT = ".request.json", ".result.json"
 CAP = 64 << 10
 RESULT_KEEP_S = 7 * 86400
+CLEAR_RUN = 1000               # entries that aren't requests removed from a folder per tick
 TAKEN_KEEP_S = 7 * 86400       # taken.jsonl: ids seen (a request file older than this is long answered)
 WORKER_MAX_S = 3 * 1800 + 900  # the lock (git_remote.TIMEOUT_S), the bundle, the push, and a margin
 ATTEMPTS = 2                   # workers started for one request before it ends as worker lost
@@ -284,9 +285,16 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
     r = root()
     names = nofollow.entries(r, project) or []
     _old_results(project, names)
-    reqs = []
+    reqs, cleared = [], 0
     for n in names:
         if not n.endswith(REQUEST) or n.startswith("."):
+            # nothing but requests, results and a client's half-written dot-file belongs here: anything else goes (at
+            # most CLEAR_RUN a tick), and a dot-file once it is an hour old
+            st = nofollow.lstat(r, f"{project}/{n}")
+            stale = st is not None and n.startswith(".") and st.st_mtime < time.time() - 3600
+            if cleared < CLEAR_RUN and (stale or (not n.startswith(".") and not n.endswith(RESULT))):
+                _clear(r, f"{project}/{n}")
+                cleared += 1
             continue
         st = nofollow.lstat(r, f"{project}/{n}")
         if st is None:
@@ -300,12 +308,13 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
     if len(reqs) > most:
         for _m, n in reqs[most:]:
             _clear(r, f"{project}/{n}")
-        if letter:
+        if letter:   # at most one a day: its key is the day's
             letter(project, _("{n} push request files in {project}'s folder were over what one day allows and have been "
-                              "deleted unread", n=len(reqs) - most, project=project), f"push-flood-{project}")
+                              "deleted unread", n=len(reqs) - most, project=project),
+                   f"push-flood-{project}-{datetime.date.today():%Y%m%d}")
         reqs = reqs[:most]
     seen = Taken(project)
-    done = []
+    done, misnamed = [], []
     for _m, n in reqs:
         rid = n[:-len(REQUEST)]
         rel = f"{project}/{n}"
@@ -322,9 +331,8 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
                 seen.add({"id": rid, "outcome": "malformed"})
                 write_result(project, result(project, rid, "refused", _("the request was malformed: {why}", why=why),
                                              "project", "request"), log)
-            elif not ID.fullmatch(rid) and letter:
-                letter(project, _("A file in {project}'s push request folder was not a push request and has been deleted "
-                                  "({name}): {why}", project=project, name=n[:80], why=why), f"push-malformed-{project}")
+            elif not ID.fullmatch(rid):
+                misnamed.append(n[:80])
             _clear(r, rel)
             continue
         if rid in seen.ids:
@@ -335,6 +343,10 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
         _queue(project, rid, fields, log, seen)
         nofollow.remove(r, rel)
         done.append(rid)
+    if misnamed and letter:   # one letter a tick, however many
+        letter(project, _("{n} {n:file|files} in {project}'s push request folder {n:was|were} not a push request and "
+                          "{n:has|have} been deleted (e.g. {name})", n=len(misnamed), project=project, name=misnamed[0]),
+               f"push-malformed-{project}-{int(time.time())}")
     return done
 
 
@@ -482,7 +494,7 @@ def letter_text(res: dict) -> str:
 def project_letter(project: str, text: str, key: str) -> None:
     """An info letter from the platform to the project (a notice: no handler, wake or round limit)."""
     r = subprocess.run([*hubconf.launch(BIN / "hubbus"), "send", "--from", hubconf.hub_project(), "--to", project,
-                        "--type", "info", "--text", text], capture_output=True, text=True, cwd=broker(project))
+                        "--type", "info", "--id", key, "--text", text], capture_output=True, text=True, cwd=broker(project))
     if r.returncode != 0:
         raise OSError((r.stderr or r.stdout).strip()[-300:])
 
@@ -518,14 +530,15 @@ def raise_todo(project: str, cause: str, text: str, sha: str | None = None, log=
     return key
 
 
-def close_todos(project: str, landed=None, log=None) -> list[str]:
+def close_todos(project: str, landed=None, log=None, still=()) -> list[str]:
     """After a push of the project landed: every open to-do closes, except a "branch not allowed" one, which closes only
-    when what landed contains its sha (landed(sha) → bool)."""
+    when what landed contains its sha (landed(sha) → bool), and the causes in still, which this push didn't settle (a
+    visibility that still differs from what setup recorded)."""
     f = broker(project) / "todos.json"
     todos = _read_json(f, {})
     closed = []
     for cause, t in todos.items():
-        if not t.get("sent") or t.get("closed"):
+        if not t.get("sent") or t.get("closed") or cause in still:
             continue
         if cause == "branch" and not (t.get("sha") and landed and landed(t["sha"])):
             continue

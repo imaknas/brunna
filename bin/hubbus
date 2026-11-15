@@ -3359,9 +3359,8 @@ def take_push_requests(c) -> None:
     import push_queue
 
     def letter(project: str, text: str, key: str) -> None:
-        text = storable(text)[:1500]
-        publish(c, f"{key}-{hashlib.sha1(text.encode()).hexdigest()[:12]}", "message", hubconf.hub_project(), project,
-                None, {"type": "info", "text": text})
+        # the key is the letter's id: the same key again sends nothing (push_queue picks one per request, tick or day)
+        publish(c, key, "message", hubconf.hub_project(), project, None, {"type": "info", "text": storable(text)[:1500]})
 
     for proj in push_queue.sandboxed_projects():
         try:

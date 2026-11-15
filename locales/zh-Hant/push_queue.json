@@ -1,5 +1,4 @@
 {
- "A file in {project}'s push request folder was not a push request and has been deleted ({name}): {why}": "{project} 的推送請求資料夾裡有個檔案不是推送請求,已刪除({name}):{why}",
  "a newer request for {branch} ({id}) carries these commits": "{branch} 較新的請求({id})帶著這些 commit",
  "branch must be a branch name": "branch 必須是分支名稱",
  "brunna push {id}: nothing to push for {branch}": "brunna push {id}:{branch} 沒有要推的",
@@ -28,5 +27,6 @@
  "{project}: the result of {id} could not be written: {e}": "{project}:{id} 的結果寫不進去:{e}",
  "⚠️ the owner to-do {key} could not be closed ({why})": "⚠️ 擁有者待辦 {key} 關不掉({why})",
  "⚠️ the owner to-do {key} could not be sent ({why})": "⚠️ 擁有者待辦 {key} 送不出去({why})",
- "{n} push request files in {project}'s folder were over what one day allows and have been deleted unread": "{project} 資料夾裡有 {n} 個推送請求檔超過一天允許的數量,沒讀就刪了"
+ "{n} push request files in {project}'s folder were over what one day allows and have been deleted unread": "{project} 資料夾裡有 {n} 個推送請求檔超過一天允許的數量,沒讀就刪了",
+ "{n} {n:file|files} in {project}'s push request folder {n:was|were} not a push request and {n:has|have} been deleted (e.g. {name})": "{project} 的推送請求資料夾裡有 {n} 個檔案不是推送請求,已刪除(例如 {name})"
 }

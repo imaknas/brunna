@@ -696,6 +696,12 @@ def run_checks(p: Prepared, owner_form: bool, deadline: float, logf=None) -> tup
     return found, vis
 
 
+def unsettled(doc: dict, vis: str) -> set[str]:
+    """The to-do causes a push that landed doesn't settle: the visibility while it still differs from setup's record."""
+    recorded = field(doc).get("visibility")
+    return {"visibility"} if recorded and recorded != ("private" if vis == "private" else "public") else set()
+
+
 def send(p: Prepared) -> str:
     """The push, pinned by the lease to the remote's ref as checked. → git's own words (for the owner only)."""
     r = p.owned.git("-c", "core.hooksPath=/dev/null", "-c", "submodule.recurse=false", "push", "--no-verify",
@@ -778,7 +784,8 @@ def owner_push(project: str, args: list[str]) -> int:
             log(project, branch=p.branch, old=p.old, new=p.new, commits=pl.n, github=pl.github, ok=True, by="owner",
                 checks={f.check: f.reason for f in found}, overridden=bool(found))
             import push_queue
-            push_queue.close_todos(project, landed_check(project), log=lambda m: print(m, file=sys.stderr))
+            push_queue.close_todos(project, landed_check(project), log=lambda m: print(m, file=sys.stderr),
+                                   still=unsettled(p.doc, vis))
             if said:
                 print(said)
             print(_("pushed {branch}: {range}. The project's own repo is untouched: its origin/{branch} moves with its "
@@ -869,7 +876,7 @@ def serve_request(project: str, req: dict) -> dict:
             rec["visibility"] = vis
             if found:
                 f = found[0]
-                raise Refused(f.reason, check=f.check, fix=f.fix, cause=f.cause)
+                raise Refused(f.reason, check=f.check, fix=f.fix, cause=f.cause, raw=f.detail)
             take_in(p.owned, p.checked, p.new)
             rec["commits"] = int(p.owned.out("rev-list", "--count", p.new, "--not",
                                              *[t for t in (p.owned.sha(f"{REMOTE}/{p.default}"), p.old) if t]).strip()
@@ -881,7 +888,7 @@ def serve_request(project: str, req: dict) -> dict:
                                                               n=rec["commits"], branch=branch), None, None,
                                     old=p.old, new=p.new, commits=rec["commits"],
                                     range=f"{p.old[:12]}..{p.new[:12]}" if p.old else p.new[:12])
-            push_queue.close_todos(project, landed_check(project), log=say)
+            push_queue.close_todos(project, landed_check(project), log=say, still=unsettled(p.doc, vis))
             _unclassified(project, reset=True)
     except Refused as e:   # Failed too
         state = "failed" if isinstance(e, Failed) else "refused"
