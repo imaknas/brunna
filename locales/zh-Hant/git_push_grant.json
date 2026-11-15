@@ -65,5 +65,10 @@
  "public": "公開的",
  "private": "私有的",
  "no grant, and none needed while the platform pushes nothing for it": "沒有授權,平台不替它推任何東西時也不需要",
- "The grant here no longer works ({why}): making a new one": "這裡的授權已經不能用了({why}):重做一份"
+ "The grant here no longer works ({why}): making a new one": "這裡的授權已經不能用了({why}):重做一份",
+ "--grant-only makes the grant and leaves the policy as it is: give it without --branches": "--grant-only 只做授權、不動 policy:不要同時給 --branches",
+ "this platform's registry doesn't know enforce.git_push yet, so no grant is made: update brunna, then run {command}": "這個平台的登錄還不認得 enforce.git_push,所以不做授權:更新 brunna 之後再跑 {command}",
+ "The platform pushes nothing for {name} now; its deploy key stays at GitHub until you run {command} --revoke": "平台現在不替 {name} 推任何東西;它的 deploy key 會留在 GitHub,直到你跑 {command} --revoke",
+ "the grant couldn't be checked ({why}); it is kept: run this again once GitHub answers": "沒辦法檢查授權({why});先留著:等 GitHub 有回應再跑一次",
+ "deploy key {id} was already gone from {repo}": "{repo} 上的 deploy key {id} 早就不在了"
 }

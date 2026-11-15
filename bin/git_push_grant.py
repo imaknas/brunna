@@ -47,6 +47,7 @@ Exit: 0 done, 1 failed (gh, ssh, the network), 2 refused.
 """
 from __future__ import annotations
 
+import atexit
 import base64
 import contextlib
 import datetime
@@ -77,6 +78,8 @@ KNOWN_HOSTS = {"github.com": BIN / "known_hosts" / "github.com"}
 REPO = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 TIMEOUT_S = 60
+PRIVATE_SIGNALS = ("could not read username", "terminal prompts disabled", "repository not found",
+                   "authentication failed")
 
 
 class NotSetUp(Exception):
@@ -191,9 +194,10 @@ def visibility(origin: str | None) -> str:
     r = anonymous_ls_remote(url)
     if r.returncode == 0:
         return "public"
-    err = (r.stderr or "").lower()
-    if any(s in err for s in ("could not read username", "authentication failed", "repository not found",
-                              "terminal prompts disabled", "403", "401")):
+    # git's own words for "it wants a credential", read with the quoted URLs taken out (a repo named "x-403" says
+    # nothing); an HTTP status alone (a rate limit's 403) can't tell, so it is unknown, which counts as public
+    err = re.sub(r"'[^'\n]*'", "''", r.stderr or "").lower()
+    if any(s in err for s in PRIVATE_SIGNALS):
         return "private"
     return "unknown"
 
@@ -273,22 +277,62 @@ def empty_config() -> pathlib.Path:
 
 
 def ssh_command(key: pathlib.Path, known_hosts: pathlib.Path) -> str:
-    return shlex.join(["ssh", "-F", "/dev/null", "-i", str(key), "-o", "IdentitiesOnly=yes", "-o", "IdentityAgent=none",
+    """IdentityFile=none first: ssh then adds none of the owner's default keys (~/.ssh/id_*), even if the -i file were
+    gone; IdentitiesOnly alone doesn't stop those."""
+    return shlex.join(["ssh", "-F", "/dev/null", "-o", "IdentityFile=none", "-i", str(key), "-o", "IdentitiesOnly=yes",
+                       "-o", "IdentityAgent=none",
                        "-o", "PasswordAuthentication=no", "-o", "BatchMode=yes",
                        "-o", "StrictHostKeyChecking=yes", "-o", f"UserKnownHostsFile={known_hosts}",
                        "-o", "GlobalKnownHostsFile=/dev/null", "-o", "UpdateHostKeys=no", "-o", "ControlMaster=no",
                        "-o", "ControlPath=none", "-o", "ForwardAgent=no", "-o", "ConnectTimeout=20"])
 
 
-def ssh_env(project: str) -> dict[str, str]:
+def run_copy(project: str, g: dict, run_dir: pathlib.Path) -> pathlib.Path:
+    """The grant's key copied into the run's own private folder (read without following a link, written 600 and new),
+    and checked to be the granted one: what ssh is pointed at can't vanish or change under the run."""
+    if (why := private_file(run_dir, 0o700)):
+        raise NotSetUp(why)
+    fd = os.open(grant_dir(project) / "key", os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    with os.fdopen(fd, "rb") as fh:
+        data = fh.read(64 << 10)
+    copy = run_dir / "push-key"
+    out = os.open(copy, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    with os.fdopen(out, "wb") as fh:
+        fh.write(data)
+    if key_public_half(copy) != " ".join(g["public_key"].split()[:2]):
+        copy.unlink(missing_ok=True)
+        raise NotSetUp(_("its key is not the one granted"))
+    return copy
+
+
+def new_run_dir() -> pathlib.Path:
+    """A private folder for one run's copy of the key, removed when this process ends."""
+    d = pathlib.Path(tempfile.mkdtemp(prefix="push-run-", dir=hubconf.private_tmp()))
+    atexit.register(shutil.rmtree, d, True)
+    return d
+
+
+def ssh_env(project: str, run_dir: pathlib.Path | None = None) -> dict[str, str]:
     """The environment overlay for a push through the grant. It must win over the owner's environment (git_remote's
-    owner_env keeps GIT_SSH* and SSH_AUTH_SOCK): the ssh command names the key, no agent and the pinned host keys; the
-    global config is the platform's empty one and the system's is off, so no credential helper or insteadOf of the
-    owner's applies."""
+    owner_env keeps GIT_SSH* and SSH_AUTH_SOCK): the ssh command names a copy of the key in run_dir (a private folder
+    the caller owns and removes; without one, a new one removed at this process's exit), no default keys, no agent and
+    the pinned host keys; the global config is the platform's empty one and the system's is off, so no credential
+    helper or insteadOf of the owner's applies."""
     g = read_grant(project)
-    return {"GIT_SSH_COMMAND": ssh_command(grant_dir(project) / "key", KNOWN_HOSTS[g["host"]]),
+    key = run_copy(project, g, run_dir or new_run_dir())
+    return {"GIT_SSH_COMMAND": ssh_command(key, KNOWN_HOSTS[g["host"]]),
             "GIT_SSH_VARIANT": "ssh", "GIT_CONFIG_GLOBAL": str(empty_config()), "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": ""}   # empty: no helper asks (git reads empty as unset)
+
+
+@contextlib.contextmanager
+def push_env(project: str):
+    """ssh_env with its run folder removed on leaving: `with push_env(p) as env: …`."""
+    d = pathlib.Path(tempfile.mkdtemp(prefix="push-run-", dir=hubconf.private_tmp()))
+    try:
+        yield ssh_env(project, d)
+    finally:
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def push_url(project: str) -> str:
@@ -335,20 +379,28 @@ def ls_remote(url: str, env: dict[str, str]) -> subprocess.CompletedProcess:
             return subprocess.CompletedProcess([], 124, "", "timed out")
 
 
-def probe(project: str) -> tuple[bool, str]:
+def check(project: str) -> tuple[str, str]:
+    """(ok | refused | not_set_up | failed, why): ls-remote through the grant. refused: GitHub said no to the key (gone
+    there, or gh's sign-in that added it revoked): only that is a reason to make a new one. failed: the network, a
+    changed host key, anything else: the grant is kept."""
     try:
-        env, url = ssh_env(project), push_url(project)
+        with push_env(project) as env:
+            r = ls_remote(push_url(project), env)
     except NotSetUp as e:
-        return False, str(e)
-    r = ls_remote(url, env)
+        return "not_set_up", str(e)
     if r.returncode == 0:
-        return True, ""
+        return "ok", ""
     err = (r.stderr or "").strip()
-    if "permission denied" in err.lower():
-        return False, _("GitHub refused the deploy key (it was removed, or gh's sign-in that added it was revoked)")
+    if "permission denied (publickey)" in err.lower():
+        return "refused", _("GitHub refused the deploy key (it was removed, or gh's sign-in that added it was revoked)")
     if "host key" in err.lower():
-        return False, _("GitHub's host key didn't match the pinned one")
-    return False, _("ls-remote through the grant failed: {why}", why=err[-200:] or r.returncode)
+        return "failed", _("GitHub's host key didn't match the pinned one")
+    return "failed", _("ls-remote through the grant failed: {why}", why=err[-200:] or r.returncode)
+
+
+def probe(project: str) -> tuple[bool, str]:
+    state, why = check(project)
+    return state == "ok", why
 
 
 # ---------- gh (the owner's, only here) ----------
@@ -364,7 +416,7 @@ def gh(*args: str) -> subprocess.CompletedProcess:
 
 
 def deploy_keys(repo: str) -> list[dict]:
-    r = gh("repo", "deploy-key", "list", "--repo", repo, "--json", "id,key,title,readOnly")
+    r = gh("repo", "deploy-key", "list", "--repo", gh_repo(repo), "--json", "id,key,title,readOnly")
     if r.returncode != 0:
         raise Failed(_("gh couldn't list {repo}'s deploy keys: {why}", repo=repo, why=r.stderr.strip()[-300:]))
     try:
@@ -372,6 +424,22 @@ def deploy_keys(repo: str) -> list[dict]:
     except ValueError:
         raise Failed(_("gh's list of deploy keys wasn't JSON")) from None
     return [k for k in keys if isinstance(k, dict)]
+
+
+def gh_repo(repo: str) -> str:
+    """gh's --repo with the host named, so the owner's GH_HOST or default host can't point it elsewhere."""
+    return f"github.com/{repo}"
+
+
+def delete_key(repo: str, key_id) -> bool:
+    """→ True when gh deleted it, False when GitHub had no such key; Failed otherwise."""
+    r = gh("repo", "deploy-key", "delete", str(key_id), "--repo", gh_repo(repo))
+    if r.returncode == 0:
+        return True
+    if "not found" in (r.stderr or "").lower():
+        return False
+    raise Failed(_("gh couldn't delete deploy key {id} from {repo}: {why}; the key here is kept, so run this again",
+                   id=key_id, repo=repo, why=(r.stderr or "").strip()[-300:]))
 
 
 def title(project: str) -> str:
@@ -435,21 +503,29 @@ def grant(project: str, doc: dict) -> dict:
     host, repo = parse_origin(origin_of(doc))
     with contextlib.suppress(NotSetUp):
         g = read_grant(project)
-        ok, why = probe(project)
-        if ok:
+        state, why = check(project)
+        if state == "ok":
             print(_("✓ the grant exists: deploy key {id} on {repo} ({fp})", id=g.get("deploy_key_id"), repo=g["repo"],
                     fp=g.get("fingerprint")))
             return g
+        if state != "refused":   # the network, the host key: no reason to drop a grant that may well work
+            raise Failed(_("the grant couldn't be checked ({why}); it is kept: run this again once GitHub answers",
+                           why=why))
         print(_("The grant here no longer works ({why}): making a new one", why=why))
     d = grant_dir(project)
+    old = record(project)
+    if old and old.get("repo") and old.get("deploy_key_id") is not None and old["repo"].lower() != repo.lower():
+        # the origin changed: the old repo's write key goes before a new one is made
+        if delete_key(old["repo"], old["deploy_key_id"]):
+            print(_("✓ deploy key {id} deleted from {repo}", id=old["deploy_key_id"], repo=old["repo"]))
     new = make_key(project)
     try:
         pub = (new / "key.pub").read_text().strip()
         # a run that stopped after adding its key at GitHub left one with this title: replaced, not piled up
         for k in deploy_keys(repo):
             if k.get("title") == title(project) and not same_key(str(k.get("key", "")), pub):
-                gh("repo", "deploy-key", "delete", str(k.get("id")), "--repo", repo)
-        r = gh("repo", "deploy-key", "add", str(new / "key.pub"), "--repo", repo, "--allow-write", "--title",
+                delete_key(repo, k.get("id"))
+        r = gh("repo", "deploy-key", "add", str(new / "key.pub"), "--repo", gh_repo(repo), "--allow-write", "--title",
                title(project))
         if r.returncode != 0:
             raise Failed(_("gh couldn't add the deploy key to {repo}: {why}. An organisation or forge that turns deploy "
@@ -458,7 +534,7 @@ def grant(project: str, doc: dict) -> dict:
         if not added:
             raise Failed(_("the deploy key added to {repo} isn't in its list", repo=repo))
         if added.get("readOnly") is not False:
-            gh("repo", "deploy-key", "delete", str(added.get("id")), "--repo", repo)
+            delete_key(repo, added.get("id"))
             raise Failed(_("GitHub added the key to {repo} read-only: the platform needs a write deploy key", repo=repo))
         rec = {"v": 1, "project": project, "host": host, "repo": repo, "push_url": ssh_url(host, repo),
                "origin": origin_of(doc), "public_key": pub, "fingerprint": fingerprint(pub),
@@ -470,7 +546,7 @@ def grant(project: str, doc: dict) -> dict:
         shutil.rmtree(new, ignore_errors=True)
     ok, why = probe(project)
     if not ok:
-        gh("repo", "deploy-key", "delete", str(rec["deploy_key_id"]), "--repo", repo)
+        delete_key(repo, rec["deploy_key_id"])   # a new key that doesn't work, whatever the reason
         for f in ("grant.json", "key", "key.pub"):
             (d / f).unlink(missing_ok=True)
         raise Failed(_("the new deploy key didn't work ({why}); it was removed again", why=why))
@@ -590,7 +666,13 @@ def setup(project: str, *, yes: bool = False, branches: str | None = None, email
     bad = [e for e in emails or [] if not EMAIL.fullmatch(e)]
     if bad:
         raise Refused(_("not an email address: {emails}", emails=", ".join(bad)))
+    if grant_only and branches is not None:
+        raise Refused(_("--grant-only makes the grant and leaves the policy as it is: give it without --branches"))
     parse_origin(origin_of(doc))
+    if not field_supported():
+        # a grant whose policy can't be written would push nothing: none is made, and the to-do stays open
+        raise Refused(_("this platform's registry doesn't know enforce.git_push yet, so no grant is made: update "
+                        "brunna, then run {command}", command=setup_command(project)))
     interactive = not yes and sys.stdin.isatty()
     vis = visibility(origin_of(doc))
     print(warning(vis))
@@ -617,28 +699,48 @@ def setup(project: str, *, yes: bool = False, branches: str | None = None, email
             if (bad := [e for e in proposed if not EMAIL.fullmatch(e)]):
                 raise Refused(_("not an email address: {emails}", emails=", ".join(bad)))
         emails = proposed
-    policy = {"branches": branches, "emails": list(emails or [])}
+    # none with no emails given leaves the emails the entry has (setting none again later loses nothing)
+    policy = {"branches": branches, **({"emails": list(emails or [])} if branches != "none" or emails else {})}
     if branches != "none" and not policy["emails"]:
         print(_("⚠️ no email is allowed yet, so every push will be refused until one is: run {command} --email "
                 "<address>", command=setup_command(project)))
     if write_policy(project, policy) and g:   # the identity only matters once the platform pushes
         set_identity(project, doc, policy["emails"])
+    if branches == "none" and grant_dir(project).exists():
+        print(_("The platform pushes nothing for {name} now; its deploy key stays at GitHub until you run {command} "
+                "--revoke", name=project, command=setup_command(project)))
     close_todo(project)
     return OK
 
 
+def record(project: str) -> dict | None:
+    """grant.json as it is, unchecked (None when missing or unreadable)."""
+    with contextlib.suppress(OSError, ValueError):
+        g = json.loads((grant_dir(project) / "grant.json").read_text())
+        return g if isinstance(g, dict) else None
+    return None
+
+
 def revoke(project: str) -> int:
-    d = grant_dir(project)
-    try:
-        g = json.loads((d / "grant.json").read_text())
-    except (OSError, ValueError):
-        g = None
-    if g and g.get("deploy_key_id") is not None:
-        r = gh("repo", "deploy-key", "delete", str(g["deploy_key_id"]), "--repo", g["repo"])
-        if r.returncode != 0 and "not found" not in (r.stderr or "").lower():
-            raise Failed(_("gh couldn't delete deploy key {id} from {repo}: {why}; the key here is kept, so run this "
-                           "again", id=g["deploy_key_id"], repo=g["repo"], why=r.stderr.strip()[-300:]))
-        print(_("✓ deploy key {id} deleted from {repo}", id=g["deploy_key_id"], repo=g["repo"]))
+    """The project's write keys deleted at GitHub (the record's, and every key with its title on the record's repo and
+    on the registry origin's repo, so a lost or broken record leaves none behind), then the key here. A GitHub that
+    can't be reached keeps the key here, to run again."""
+    d, g = grant_dir(project), record(project)
+    repos = [g["repo"]] if g and isinstance(g.get("repo"), str) and REPO.fullmatch(g["repo"]) else []
+    with contextlib.suppress(Refused):
+        repos.append(parse_origin(origin_of(doc_of(project)))[1])
+    gone = set()
+    if g and repos and g.get("repo") == repos[0] and g.get("deploy_key_id") is not None:
+        if delete_key(g["repo"], g["deploy_key_id"]):
+            print(_("✓ deploy key {id} deleted from {repo}", id=g["deploy_key_id"], repo=g["repo"]))
+        else:
+            print(_("deploy key {id} was already gone from {repo}", id=g["deploy_key_id"], repo=g["repo"]))
+        gone.add((g["repo"].lower(), str(g["deploy_key_id"])))
+    for repo in dict.fromkeys(repos):
+        for k in deploy_keys(repo):
+            if k.get("title") == title(project) and (repo.lower(), str(k.get("id"))) not in gone:
+                if delete_key(repo, k.get("id")):
+                    print(_("✓ deploy key {id} deleted from {repo}", id=k.get("id"), repo=repo))
     if d.is_dir() and not d.is_symlink():
         shutil.rmtree(d)
         print(_("✓ the key for {name} is deleted here", name=project))
@@ -722,6 +824,8 @@ def onboard(project: str, push: str | None, emails: list[str] | None, agent: boo
     except Refused as e:
         print(_("No platform push for {name}: {why}", name=project, why=e))
         return OK
+    if agent:   # what an agent passes is never a choice: none, and the owner decides with setup
+        push = "none"
     chosen = push is not None and not agent
     if push is None:
         push = "all" if visibility(origin_of(doc)) == "private" else "none"

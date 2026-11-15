@@ -5,6 +5,7 @@ throwaway secrets, stand-in gh and ssh; temp paths and key fingerprints are norm
     bin/py -m unittest tests.test_i18n_golden_git_push_grant
     I18N_GOLDEN_UPDATE=1 bin/py -m unittest tests.test_i18n_golden_git_push_grant   # rewrite (review it)
 """
+import contextlib
 import io
 import os
 import pathlib
@@ -45,6 +46,8 @@ class Golden(Base):
 
     def test_texts(self):
         with mock.patch.object(gpg, "field_supported", lambda: False):
+            self.case("the registry doesn't know enforce.git_push yet", "setup", "proj", "--yes")
+        with contextlib.nullcontext():
             self.case("usage")
             self.case("usage, two projects", "setup", "a", "b")
             self.case("bad --branches", "setup", "proj", "--branches", "most", "--yes")
@@ -72,6 +75,8 @@ class Golden(Base):
             self.docs["proj"]["paths"]["origin"] = "git@github.com:o/proj.git"
             self.vis = "unknown"
             self.case("unknown visibility: the noreply address only", "setup", "proj", "--yes", "--branches", "all")
+            self.case("grant-only with branches", "setup", "proj", "--grant-only", "--branches", "all")
+            self.case("none with a grant", "setup", "proj", "--yes", "--branches", "none")
             self.case("revoke", "setup", "proj", "--revoke")
             self.case("revoke again", "setup", "proj", "--revoke")
         with mock.patch.object(gpg, "visibility", lambda origin: "public"):

@@ -136,7 +136,8 @@ def check_push_grant(project: str) -> tuple[list[str], list[str]]:
     name = f"{project}:git-push"
     st = git_push_grant.status(project)
     if st["state"] != "ok":
-        git_push_grant.raise_todo(project, st["detail"])
+        if st["state"] != "unsupported":   # another forge: setup can't help there, so no to-do asks for it
+            git_push_grant.raise_todo(project, st["detail"])
         return [_("{name}: {why}", name=name, why=st["detail"])], []
     ok, why = git_push_grant.probe(project)
     if not ok:

@@ -799,14 +799,22 @@ The owner took all three recommendations:
   `--revoke`. The key and `grant.json` are in `<secrets>/git-push/<project>/` (700/600). The deploy key's title is
   `brunna push: <project>`; a rerun with a working grant keeps it, and one that stopped halfway replaces its own titled
   key at GitHub. The grant is checked with `ls-remote` through the key alone; a key that doesn't work is deleted again.
-  `grant.json` is written last.
+  `grant.json` is written last. An existing grant is made again only when GitHub refuses the key ("Permission denied
+  (publickey)"); a timeout or a changed host key fails and keeps it. A grant for an origin that changed has its old
+  repo's key deleted first. `--revoke` deletes every key with the project's title on the record's repo and the
+  registry origin's, so a lost record leaves none behind. While the registry doesn't know `enforce.git_push`, setup
+  makes no grant and the to-do stays open (blind code review, 11-16).
 - **Where the build differs from "If the grant":** GitHub's host keys are checked in (`bin/known_hosts/github.com`,
   matched against `api.github.com/meta` and its published fingerprints, a test pins them), not read from `gh api meta`
   at setup. Any forge other than GitHub, an ssh alias and a local path are refused with the reason; setup doesn't print
   a key for another forge to add by hand. `gh` warns that deploy keys it added go when its token is de-authorised:
   the daily probe in `brunna/secrets` catches that and raises the setup to-do.
-- **The push core's interface:** `ssh_env(project)` is an overlay that must win over `owner_env()`
-  (`GIT_SSH_COMMAND` with `-F /dev/null -i <key> -o IdentitiesOnly=yes -o IdentityAgent=none`, the pinned known_hosts,
+- **The push core's interface:** `ssh_env(project, run_dir=None)` is an overlay that must win over `owner_env()`
+  (`GIT_SSH_COMMAND` with `-F /dev/null -o IdentityFile=none -i <copy> -o IdentitiesOnly=yes -o IdentityAgent=none`;
+  `IdentitiesOnly` alone doesn't stop ssh's default `~/.ssh/id_*` when the `-i` file is gone, `IdentityFile=none`
+  does. `<copy>` is the key copied into the run's private folder (`run_dir`, which the caller removes; without one, a
+  folder removed at process exit; `push_env(project)` is the context-manager form), checked against the grant; the
+  pinned known_hosts,
   `StrictHostKeyChecking=yes`, `BatchMode=yes`; an empty platform `GIT_CONFIG_GLOBAL` and `GIT_CONFIG_NOSYSTEM=1`).
   `push_url(project)` is `git@github.com:<owner>/<repo>.git`, also for an https origin. Both raise `NotSetUp(reason)`.
   `status(project)` gives the doctor row, and `probe(project)` the daily check.

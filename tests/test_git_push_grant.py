@@ -36,6 +36,7 @@ import isolation  # noqa: E402
 import names  # noqa: E402
 
 HAS_KEYGEN = shutil.which("ssh-keygen") is not None
+REAL_FIELD_SUPPORTED = gpg.field_supported
 
 FAKE_GH = r'''
 import json, os, pathlib, sys
@@ -56,7 +57,7 @@ if a[:2] != ["repo", "deploy-key"]:
 if os.environ.get("FAKE_GH_FAIL") == a[2]:
     print("HTTP 422: Deploy keys are disabled for this repository", file=sys.stderr)
     sys.exit(1)
-repo = opt("--repo")
+repo = (opt("--repo") or "").removeprefix("github.com/")   # the grant names the host
 if a[2] == "list":
     print(json.dumps([{k: v for k, v in d.items() if k != "repo"} for d in keys if d["repo"] == repo]))
 elif a[2] == "add":
@@ -143,10 +144,14 @@ class Base(unittest.TestCase):
                   mock.patch.object(gpg, "owner_notify", lambda *a: self.todos.append(a)),
                   mock.patch.object(gpg, "commit_registry", lambda *a: self.commits.append(a)),
                   mock.patch.object(gpg, "visibility", lambda origin: self.vis),
+                  # the registry knows enforce.git_push (the push core adds it): the tests that need it unknown say so
+                  mock.patch.object(gpg, "field_supported", lambda: True),
+                  mock.patch("registry.validate", lambda doc, stem: []),
                   mock.patch.object(isolation, "wrap", lambda project, cwd, argv, port=None: ["env", *argv])):
             p.start()
             self.addCleanup(p.stop)
         self.vis = "private"
+        (self.tmp / "reg" / "proj.yaml").write_text("v: 1\nname: proj\nenforce:\n  sandbox: true\n")
 
     def git(self, cwd, *args) -> str:
         r = subprocess.run(["git", "-C", str(cwd), *args], capture_output=True, text=True)
@@ -189,8 +194,7 @@ class Base(unittest.TestCase):
 @unittest.skipUnless(HAS_KEYGEN, "no ssh-keygen (OpenSSH's client) on this machine")
 class Grant(Base):
     def test_setup_makes_a_private_key_and_a_write_deploy_key(self):
-        with mock.patch.object(gpg, "field_supported", lambda: False):
-            code, out, err = self.setup_grant()
+        code, out, err = self.setup_grant()
         self.assertEqual(code, 0, err)
         top = self.tmp / "secrets" / "git-push"
         for p, mode in ((top, 0o700), (self.gdir(), 0o700), (self.gdir() / "key", 0o600),
@@ -204,20 +208,27 @@ class Grant(Base):
         add = [c for c in self.gh_calls() if c[:3] == ["repo", "deploy-key", "add"]]
         self.assertEqual(len(add), 1)
         self.assertIn("--allow-write", add[0])
-        self.assertEqual(add[0][add[0].index("--repo") + 1], "o/proj")
+        self.assertEqual(add[0][add[0].index("--repo") + 1], "github.com/o/proj")
         self.assertEqual(add[0][add[0].index("--title") + 1], f"{names.current('cli')} push: proj")
         self.assertEqual(g["deploy_key_id"], self.deploy_keys()[0]["id"])
         self.assertFalse(self.deploy_keys()[0]["readOnly"])
         # outside credentials.py's grants, which it walks as <secrets>/credentials/*/*.json
         self.assertFalse((self.tmp / "secrets" / "credentials").exists())
-        # checked through the grant: one ls-remote by the stand-in ssh, with this key
-        self.assertTrue(any(c[c.index("-i") + 1] == str(self.gdir() / "key") for c in self.ssh_calls()))
-        self.assertIn("enforce.git_push", out, "the registry has no field yet: what to set is said")
-        self.assertEqual(self.commits, [])
+        # checked through the grant: one ls-remote by the stand-in ssh, with a run's copy of this key (gone after)
+        used = [pathlib.Path(c[c.index("-i") + 1]) for c in self.ssh_calls()]
+        self.assertTrue(used and all(u.name == "push-key" and u.parent.name.startswith("push-run-") for u in used))
+        self.assertFalse(any(u.exists() for u in used), "each run's copy is removed")
+        self.assertIn("✓ projects/proj.yaml: enforce.git_push", out)
+        self.assertEqual(len(self.commits), 1)
+        # gh is always told the host: the owner's GH_HOST can't send it elsewhere
+        repos = [c[c.index("--repo") + 1] for c in self.gh_calls() if "--repo" in c]
+        self.assertTrue(repos and all(r == "github.com/o/proj" for r in repos), repos)
 
     def test_ssh_env_uses_only_the_key_and_the_pinned_host_keys(self):
         self.setup_grant()
-        env = gpg.ssh_env("proj")
+        run = self.tmp / "secrets" / "tmp" / "run"
+        run.mkdir(mode=0o700, parents=True)
+        env = gpg.ssh_env("proj", run)
         self.assertEqual(env["GIT_CONFIG_NOSYSTEM"], "1")
         self.assertEqual(env["GIT_TERMINAL_PROMPT"], "0")
         self.assertEqual((env["GIT_ASKPASS"], env["SSH_ASKPASS"]), ("", ""), "the owner's askpass helpers are off")
@@ -225,7 +236,12 @@ class Grant(Base):
         cmd = shlex.split(env["GIT_SSH_COMMAND"])
         self.assertEqual(cmd[0], "ssh")
         self.assertEqual(cmd[1:3], ["-F", "/dev/null"])
-        self.assertEqual(cmd[cmd.index("-i") + 1], str(self.gdir() / "key"))
+        # the run's own copy of the granted key, never the grant's file itself
+        copy = pathlib.Path(cmd[cmd.index("-i") + 1])
+        self.assertEqual(copy.parent, run)
+        self.assertEqual(copy.read_bytes(), (self.gdir() / "key").read_bytes())
+        self.assertEqual(stat.S_IMODE(copy.stat().st_mode), 0o600)
+        self.assertLess(cmd.index("IdentityFile=none"), cmd.index("-i"), "no default identities, set before the key")
         opts = {cmd[i + 1].split("=", 1)[0]: cmd[i + 1].split("=", 1)[1] for i, x in enumerate(cmd) if x == "-o"}
         self.assertEqual(opts["IdentitiesOnly"], "yes")
         self.assertEqual(opts["IdentityAgent"], "none")
@@ -241,6 +257,74 @@ class Grant(Base):
         r = gpg.ls_remote(gpg.push_url("proj"), env)
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("refs/heads/main", r.stdout)
+
+    @unittest.skipUnless(shutil.which("ssh"), "no ssh client here")
+    def test_no_fallback_to_the_owners_default_keys(self):
+        """The grant's key removed after ssh_env(), with a default identity (~/.ssh/id_ed25519) that GitHub would take:
+        ssh, as it resolves its options (ssh -G, no network), names only the run's copy and never ~/.ssh/id_*; and with
+        that copy gone too, nothing at all. The control: the same options without IdentityFile=none would add them."""
+        self.setup_grant()
+        home_ssh = self.tmp / "home" / ".ssh"
+        home_ssh.mkdir(mode=0o700)
+        subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-f", str(home_ssh / "id_ed25519")], check=True)
+        with gpg.push_env("proj") as env:
+            shutil.rmtree(self.gdir())   # the grant goes while a push runs
+            cmd = shlex.split(env["GIT_SSH_COMMAND"])
+
+            def identities(argv):
+                r = subprocess.run(["/usr/bin/env", "ssh", "-G", *argv[1:], "github.com"], capture_output=True,
+                                   text=True, env={"HOME": str(self.tmp / "home"), "PATH": os.environ["PATH"]})
+                return [line.split(None, 1)[1] for line in r.stdout.splitlines() if line.startswith("identityfile ")]
+            real_ssh = [p for p in os.environ["PATH"].split(os.pathsep) if p != str(self.tmp / "fakebin")]
+            with mock.patch.dict(os.environ, {"PATH": os.pathsep.join(real_ssh)}):
+                got = identities(cmd)
+                self.assertTrue(got, "ssh -G answered")
+                self.assertFalse([i for i in got if "id_" in i], got)
+                self.assertIn(cmd[cmd.index("-i") + 1], got, "the run's copy still works")
+                pathlib.Path(cmd[cmd.index("-i") + 1]).unlink()
+                self.assertFalse([i for i in identities(cmd) if "id_" in i])
+                control = [a for i, a in enumerate(cmd) if a != "IdentityFile=none" and cmd[i + 1:i + 2] != ["IdentityFile=none"]]
+                self.assertTrue([i for i in identities(control) if "id_" in i], "the control: ssh's defaults are there")
+        self.assertFalse(any((self.tmp / "secrets" / "tmp").glob("push-run-*")), "the run's folder is removed")
+
+    def test_a_check_that_cant_reach_github_keeps_the_grant(self):
+        """Only GitHub refusing the key remakes a grant: a timeout or a changed host key leaves it as it is."""
+        self.setup_grant()
+        before = (json.loads((self.gdir() / "grant.json").read_text()), self.deploy_keys())
+        for err in ("ssh: connect to host github.com port 22: Operation timed out",
+                    "Host key verification failed."):
+            with self.subTest(err=err), mock.patch.object(
+                    gpg, "ls_remote", lambda url, env, err=err: subprocess.CompletedProcess([], 255, "", err)):
+                with self.assertRaises(gpg.Failed) as cm:
+                    self.setup_grant()
+                self.assertIn("it is kept", str(cm.exception))
+                self.assertEqual((json.loads((self.gdir() / "grant.json").read_text()), self.deploy_keys()), before)
+        self.assertEqual(len([c for c in self.gh_calls() if c[2:3] == ["add"]]), 1)
+
+    def test_no_grant_while_the_registry_does_not_know_the_field(self):
+        """A grant whose policy can't be written would push nothing: none is made and the to-do stays open; onboarding
+        leaves none with the to-do saying why."""
+        with mock.patch.object(gpg, "field_supported", lambda: False):
+            with mock.patch("sys.stdout", io.StringIO()), mock.patch("sys.stderr", io.StringIO()):
+                gpg.onboard("proj", "all", None, False)
+            self.assertEqual(self.gh_calls(), [])
+            self.assertEqual(len(self.todos), 1)
+            self.assertIn("enforce.git_push", self.todos[0][5], "the to-do says why")
+            with self.assertRaises(gpg.Refused) as cm:
+                self.setup_grant()
+            self.assertIn("enforce.git_push", str(cm.exception))
+            self.assertEqual(self.gh_calls(), [])
+            self.assertFalse(self.gdir().exists())
+            self.assertEqual([t[1] for t in self.todos], ["task"], "the to-do isn't closed")
+
+    def test_flags_that_contradict_each_other_and_none_with_a_grant(self):
+        with self.assertRaises(gpg.Refused):
+            self.setup_grant(grant_only=True, branches="all")
+        self.setup_grant()
+        code, out, err = self.setup_grant(branches="none")
+        self.assertEqual(code, 0, err)
+        self.assertIn("deploy key stays", out)
+        self.assertTrue((self.gdir() / "key").exists())
 
     def test_the_pinned_host_keys_are_githubs_published_ones(self):
         got = set()
@@ -381,6 +465,38 @@ class Grant(Base):
             self.setup_grant()
         self.assertEqual(self.gh_calls(), [])
 
+    def test_revoke_leaves_no_write_key_behind(self):
+        """No record, a broken record, or an origin that changed: every key with the project's title goes, on the
+        record's repo and on the registry origin's; one GitHub doesn't have isn't reported as deleted."""
+        self.setup_grant()
+        (self.gdir() / "grant.json").unlink()
+        with mock.patch("sys.stdout", io.StringIO()):
+            gpg.revoke("proj")
+        self.assertEqual(self.deploy_keys(), [], "no record")
+        self.setup_grant()
+        (self.gdir() / "grant.json").write_text("{")
+        with mock.patch("sys.stdout", io.StringIO()):
+            gpg.revoke("proj")
+        self.assertEqual(self.deploy_keys(), [], "a broken record")
+        # the origin changed: the new grant's setup deletes the old repo's key first
+        self.setup_grant()
+        self.git(self.tmp, "clone", "-q", "--bare", str(self.remote), str(self.remotes / "o" / "else.git"))
+        self.docs["proj"]["paths"]["origin"] = "git@github.com:o/else.git"
+        self.setup_grant()
+        self.assertEqual([k["repo"] for k in self.deploy_keys()], ["o/else"])
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            gpg.revoke("proj")
+        self.assertEqual(self.deploy_keys(), [])
+        # a key already gone at GitHub: said so, not "deleted"
+        self.setup_grant()
+        (self.fake / "deploy-keys.json").write_text("[]")
+        out = io.StringIO()
+        with mock.patch("sys.stdout", out):
+            gpg.revoke("proj")
+        self.assertIn("already gone", out.getvalue())
+        self.assertNotIn("deleted from", out.getvalue())
+
     def test_revoke_deletes_the_deploy_key_and_the_key(self):
         self.setup_grant()
         out = io.StringIO()
@@ -421,7 +537,7 @@ class Grant(Base):
         self.assertEqual(gpg.default_emails("private"), ["owner@example.org", "42+octo@users.noreply.github.com"])
 
     def test_non_interactive_defaults_follow_the_visibility(self):
-        with mock.patch.object(gpg, "field_supported", lambda: False):
+        with contextlib.nullcontext():
             self.vis = "public"
             code, out, _ = self.setup_grant(branches=None)
             self.assertIn("'branches': 'none'".replace("'", '"'), out)
@@ -435,8 +551,7 @@ class Grant(Base):
     def test_interactive_setup_asks_branches_and_emails(self):
         answers = iter(["others", "a@b.example, 42+octo@users.noreply.github.com"])
         out = io.StringIO()
-        with mock.patch.object(gpg, "field_supported", lambda: False), mock.patch("sys.stdout", out), \
-                mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)), \
+        with mock.patch("sys.stdout", out), mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)), \
                 mock.patch("builtins.input", lambda prompt="": next(answers)):
             self.assertEqual(gpg.setup("proj"), 0)
         self.assertIn('"branches": "others"', out.getvalue())
@@ -473,7 +588,15 @@ class Visibility(unittest.TestCase):
     def test_the_anonymous_probe(self):
         cases = ((0, "", "public"), (128, "fatal: could not read Username for 'https://github.com'", "private"),
                  (128, "remote: Repository not found.", "private"),
-                 (128, "fatal: unable to access: Could not resolve host: github.com", "unknown"))
+                 (128, "fatal: Authentication failed for 'https://github.com/o/r/'", "private"),
+                 (128, "fatal: unable to access: Could not resolve host: github.com", "unknown"),
+                 # an HTTP status alone (a rate limit) can't tell; a 403 or "not found" in the URL says nothing
+                 (128, "fatal: unable to access 'https://github.com/o/r/': The requested URL returned error: 403",
+                  "unknown"),
+                 (128, "fatal: unable to access 'https://github.com/o/x-403/': Could not resolve host: github.com",
+                  "unknown"),
+                 (128, "fatal: unable to access 'https://github.com/o/repository not found/': Could not resolve "
+                  "host: github.com", "unknown"))
         for rc, err, want in cases:
             with self.subTest(want=want, err=err), \
                     mock.patch.object(gpg, "anonymous_ls_remote", lambda url, rc=rc, err=err:
@@ -525,7 +648,9 @@ class Onboard(Base):
                 ("unknown", None, False, None, True),
                 ("public", "others", False, "others", False),
                 ("private", "none", False, None, False),   # a person chose none: no to-do
-                ("private", "none", True, None, True)):    # an agent's none (connect_project, the lease): the to-do
+                ("private", "none", True, None, True),     # an agent's none (connect_project, the lease): the to-do
+                ("private", None, True, None, True),       # an agent's say is never a choice: none and the to-do
+                ("private", "all", True, None, True)):
             with self.subTest(vis=vis, push=push, agent=agent):
                 self.vis, self.todos[:] = vis, []
                 (self.tmp / "state" / "git-push-grant" / "proj.json").unlink(missing_ok=True)
@@ -607,9 +732,9 @@ class Onboard(Base):
     def test_field_supported_asks_the_registry(self):
         import registry
         with mock.patch.object(registry, "validate_enforce", lambda doc: []):
-            self.assertTrue(gpg.field_supported())
+            self.assertTrue(REAL_FIELD_SUPPORTED())
         with mock.patch.object(registry, "validate_enforce", lambda doc: ["enforce can only be …"]):
-            self.assertFalse(gpg.field_supported())
+            self.assertFalse(REAL_FIELD_SUPPORTED())
 
 
 class Identity(Base):
@@ -686,6 +811,14 @@ class Wiring(Base):
         with mock.patch("sys.stdout", io.StringIO()):
             probs, notes = cs.check_push_grant("proj")
         self.assertIn("refused the deploy key", probs[0])
+        # another forge: a problem, but no to-do asking for a setup that can't help there
+        self.todos.clear()
+        self.docs["proj"]["paths"]["origin"] = "git@gitlab.com:o/proj.git"
+        with mock.patch("sys.stdout", io.StringIO()):
+            probs, notes = cs.check_push_grant("proj")
+        self.assertEqual(len(probs), 1)
+        self.assertIn("is not GitHub", probs[0])
+        self.assertEqual(self.todos, [])
 
 
 if __name__ == "__main__":
