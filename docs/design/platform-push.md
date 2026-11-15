@@ -171,6 +171,38 @@ A blind review of the core found two blocking points and three should-fix:
   - S-l refuses one way only: a remote recorded as private that now looks public is refused; one recorded as public
     that now looks private only raises the setup to-do.
 
+The re-review of those fixes found B1 and B2 not fully closed, and four more points:
+- **B1, the store.** The store was read with a cap and treated as empty on any error (fail open), then rewritten from
+  that read (history lost), and the project controls its size. Now:
+  - the store is append-only JSON lines, `<secrets>/push-declared/<project>.jsonl`, never rewritten;
+  - a value up to 512 bytes is kept as itself; a longer one only as its sha256, matched against a whole new file and
+    against any word longer than 512 characters in one;
+  - values are deduplicated, at most 4096 per project; past that the push is refused for the owner, never one dropped;
+  - a store that can't be read whole (over 8 MB, or any error) refuses the push for the owner and is left as it is;
+  - dotenv values are read as dotenv does (an unquoted value ends at whitespace before `#`), and both sides are
+    compared in NFC.
+- **B2, path bytes.** The walk was bounded in entries but not in bytes: deep, long names make every path long.
+  - `rev-list` prints ids only (`--no-object-names`).
+  - A tree object over 16 MB, or new trees over 64 MB together, are refused before any is parsed.
+  - The walk refuses a path over 4096 characters and paths over 32 MB together, counted as it builds them.
+  - The paths are scanned in chunks of about a megabyte, never joined whole.
+  - macOS has no RLIMIT_AS, so these caps are the bound there.
+- **3, a bounded match.** The declared values are one trie-factored regex, matched in 1 MB chunks that check the scan's
+  deadline (4096 values over 10 MB take about 3 s); past the deadline the scanner refuses.
+- **4, leases and every session command.** A lease loads the session rendering's allow rules for every session
+  command (the mail commands, `merge-branch`, `test`, `cap-run`, `complete`, `agent`, `pass`, `push`, and the absolute
+  `hubbus` and `merge-branch` paths), so they ran without the owner's relay. That predates this work. An allow can't be
+  taken out of a file the lease loads (it needs that file's sandbox and hooks), so the lease's own `--settings` deny every
+  one of them: in a lease they are refused, not relayed.
+- **5:** a push that lands closes the owner's to-dos it settled, not the visibility one while the visibility still
+  differs from setup's record.
+- **6:** a private name finding tells the project only that a new commit's message, file or path names a private
+  project; the commit, the place and the name are in the owner's to-do.
+- **Nits:**
+  - a project letter's id is its key: one letter per request, one per tick for misnamed files, one a day for a flood;
+  - anything in the request folder but requests, results and a young dot-file is removed (at most 1000 a tick), never
+    read.
+
 ## 1. Two axes, and when to sandbox
 
 A project has two settings, and neither depends on the other:
