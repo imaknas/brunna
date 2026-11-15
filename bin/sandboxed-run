@@ -58,6 +58,10 @@ def main(argv: list[str]) -> int:
     dirs = [p for p in (d["runtime"], d["workspace"]) if p]
     os.chdir(a.cwd)
     os.environ.update(pol.get("env") or {})   # its own tool caches (the shared ones aren't writable in the sandbox)
+    if (gb := pol.get("git_broker")):   # git through the platform: its `git` first, reaching the service socket
+        import names
+        os.environ["PATH"] = os.pathsep.join([gb["wrapper_dir"], *filter(None, [os.environ.get("PATH")])])
+        names.env_set(os.environ, "GIT_SOCKET", gb["service"])
     try:
         isolation.exec_service(pol, dirs, a.port, cmd)
     except OSError as e:

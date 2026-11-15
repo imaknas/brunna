@@ -26,7 +26,14 @@ The base is "allow everything, then block the dangerous parts" (a deny-list; tri
 Capability fragments follow the base (later rules win); the gpu fragment is empty: here a capability's role is
 authorization.
 Both kinds carry the git fence (git_fence_rules) for a project whose git goes through the platform, and nothing of it
-for any other (docs/design/git-broker.md).
+for any other (docs/design/git-broker.md); for such a project the service profile also reaches, of the git broker's
+sockets, only its own service socket (broker_socket_rules). The git broker's own profiles (its "Step 2 build list",
+slice a), each applied by the broker from outside:
+  git_writer_profile(pol, git_dirs, readable, git_paths)   P1: only the request's git dir written, minus the names git
+                                                           runs or reads elsewhere; _isolation's denies and the
+                                                           project's reads; no temp area, no network, the exec guard
+  git_init_profile(pol, git_dir, readable, git_paths)      the broker's `git init`: only <dir>/.git written
+  materialiser_profile(pol, dirs, git_paths)               P2: the service profile (the fence with it) + the exec guard
 
   profile(pol, cap) → str        paths are written straight into the profile (computed fresh on every run), no -D
                                  parameters
@@ -38,6 +45,7 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
+import names  # noqa: E402
 
 TMP = ["/private/tmp", "/private/var/folders"]
 DEVICES = ["/dev/null", "/dev/zero", "/dev/random", "/dev/urandom", "/dev/stdout", "/dev/stderr", "/dev/tty", "/dev/dtracehelper"]
@@ -303,19 +311,21 @@ def ancestors(paths) -> list[str]:
 
 
 def _isolation(pol: dict, writable: list[pathlib.Path], writable_extra: list[pathlib.Path] = (),
-               readable: list[pathlib.Path] = ()) -> list[str]:
+               readable: list[pathlib.Path] = (), temp: bool = True) -> list[str]:
     """What both kinds share: writes only to `writable` (+ `writable_extra`) and the temp area, reads blocked for other
     projects, platform state and credentials (own folders allowed again, `readable` too, the folders above them stat'ed
     only), Keychain services, other processes, launching outside. The paths come as configured: the allows name what they
     resolve to (Seatbelt matches the real path, so an allow naming a link never matches), the stat-only folders are
-    above both spellings (ancestors)."""
+    above both spellings (ancestors). temp=False: the temp area leaves the write allow (the git broker's writer, P1),
+    the devices stay; the output for temp=True is unchanged."""
     configured = [*writable, *writable_extra, *readable]
     own = [f"(subpath {q(pathlib.Path(w).resolve())})" for w in [*writable, *writable_extra]]
     readable = [pathlib.Path(r).resolve() for r in readable]
     return [
-        "; writes: only its own folders and the temp area (the allow after this wins)",
+        "; writes: only its own folders and the temp area (the allow after this wins)" if temp else
+        "; writes: only its own folders (the allow after this wins)",
         '(deny file-write* (subpath "/"))',
-        "(allow file-write* " + " ".join([*own, *[f"(subpath {q(t)})" for t in TMP],
+        "(allow file-write* " + " ".join([*own, *[f"(subpath {q(t)})" for t in (TMP if temp else [])],
                                           *[f"(literal {q(d)})" for d in DEVICES]]) + ")",
         *protect_denies(pol),
         *root_denies(pol),
@@ -383,11 +393,131 @@ def service_profile(pol: dict, dirs: list[pathlib.Path], port: int | None = None
         # connects through localhost)
         lines += [f'(allow network-bind (local ip "*:{int(port)}"))',
                   '(allow network-inbound (local ip "localhost:*"))']
+    lines += broker_socket_rules(pol)
     # policy.write is written too; the registry index the platform CLI reads (agenthub send / complete inside a
     # service): read-only
     lines += _isolation(pol, [pathlib.Path(d) for d in dirs], [hubconf.path(w) for w in pol["write"]],
                         [pathlib.Path(r) for r in pol.get("read") or []])
     return "\n".join(lines + [""])
+
+
+# ---------- the git broker's profiles (docs/design/git-broker.md, "Step 2 build list", slice a) ----------
+# P1, the git-dir writer: the names in a git dir that git runs or reads as instructions elsewhere, or that change what
+# the owner's git sees, never written (each a regex below the git dir, matched in any letter case: the volume folds);
+# the entries git needs stay pinned (not removed, renamed or made as a link). r2 B1, r3 S-b, open point 22.
+GIT_WRITER_DENIED = ("config", "commondir", "gitdir", "shallow", "hooks(/|$)", "modules(/|$)", "remotes(/|$)",
+                     "branches(/|$)", "info/attributes", "info/grafts", "objects/info/alternates",
+                     "objects/info/http-alternates", "worktrees/[^/]+/(commondir|gitdir|config)")
+GIT_WRITER_PINS = ("objects", "objects/info", "refs", "logs", "worktrees", "info")
+
+
+def _anycase(text: str) -> str:
+    """A regex fragment matching text in any letter case (Seatbelt's regex has no flag for it)."""
+    return "".join(f"[{c.lower()}{c.upper()}]" if c.isalpha() else c for c in text)
+
+
+def broker_socket_rules(pol: dict) -> list[str]:
+    """For a project whose git goes through the platform (policy git_broker): no Unix socket in the broker's folder but
+    its own service socket (r2 S5, measured: an unrelated socket stays reachable; r1 S5: the whole broker folder, so
+    its own session socket too). Nothing at all for any other project."""
+    gb = pol.get("git_broker")
+    if not gb:
+        return []
+    return ["; the platform's git broker: of the sockets in its folder only this project's own service socket",
+            "(deny network-outbound (remote unix-socket " + " ".join(f"(subpath {q(s)})" for s in spellings(gb["root"]))
+            + "))",
+            "(allow network-outbound (remote unix-socket "
+            + " ".join(f"(path-literal {q(s)})" for s in spellings(gb["service"])) + "))"]
+
+
+def exec_guard(git_paths) -> list[str]:
+    """No program runs but git's own (r2 B1, measured in section 4): `git_paths` are its binaries, and its exec-path
+    folder written with a trailing /; resolved by the caller (the broker, when it starts). Last in a profile: its allow
+    names only git, so it reopens nothing else."""
+    allows = []
+    for p in git_paths:
+        s = str(p)
+        allows += [f"(subpath {q(x)})" for x in spellings(s.rstrip("/"))] if s.endswith("/") else \
+                  [f"(literal {q(x)})" for x in spellings(s)]
+    if not allows:
+        raise ValueError("the exec guard needs git's own programs")
+    return ["; the exec guard: no program runs but git's own", "(deny process-exec)",
+            "(allow process-exec " + " ".join(dict.fromkeys(allows)) + ")"]
+
+
+def _no_network() -> list[str]:
+    return ["; network: none at all (including localhost and unix sockets)",
+            "(deny network-outbound (remote ip))",
+            "(deny network-outbound (remote unix-socket))",
+            "(deny network-inbound (local ip))",
+            "(deny network-bind)"]
+
+
+def _read_rules_present(pol: dict) -> None:
+    """A git-dir writer is never built from a policy without the project's read rules (r3 S-b: such a profile put another
+    project's file into the objects)."""
+    missing = [k for k in ("workspace", "other_projects", "deny_read", "credentials", "credential_files") if k not in pol]
+    if missing or not read_denies(pol):
+        raise ValueError(f"no git-dir writer without the project's read rules (missing: {', '.join(missing) or 'all'})")
+
+
+def git_dir_rules(git_dirs) -> list[str]:
+    """P1's denied names and pins below each git dir (as resolved: Seatbelt matches the real path)."""
+    import re
+    out = ["; the git dir: no name git runs or reads as instructions; its own entries pinned"]
+    for g in git_dirs:
+        for d in dict.fromkeys(spellings(g)):
+            base = re.escape(d)
+            out.append("(deny file-write* " + " ".join(f'(regex #"^{base}/{_anycase(n)}")' for n in GIT_WRITER_DENIED)
+                       + ")")
+            pins = "|".join(_anycase(re.escape(n)) for n in GIT_WRITER_PINS)
+            own = "|".join(_anycase(re.escape(n)) for n in names.all("repo_dir"))
+            out += [f'(deny file-write-unlink (regex #"^{base}/({pins}|{own})$"))',
+                    f'(deny file-write-create (require-all (regex #"^{base}/({pins}|{own})$") (vnode-type SYMLINK)))']
+    return out
+
+
+def git_writer_profile(pol: dict, git_dirs, readable, git_paths) -> str:
+    """P1 (r2 B1, r3 S-b): writes only the request's git dir (its common dir; a linked worktree's admin dir is inside
+    it), minus the names above, and nothing else: no worktree, no temp area, only the devices. Every deny of
+    _isolation (mounts, raw disks, lsopen, the Keychain, other processes) and the project's own read rules, with
+    `readable` its own folders (its workspace, runtime folder, policy read, and at most one bundle for one call); no
+    network at all; the exec guard last. Never the fence: it must write a git dir."""
+    _read_rules_present(pol)
+    return "\n".join([
+        "(version 1)",
+        "; brunna: the git broker's git-dir writer (generated by bin/seatbelt.py for each call; don't edit)",
+        "(allow default)",
+        *_no_network(),
+        *_isolation({**pol, "git_fence": None}, [pathlib.Path(g) for g in git_dirs], (),
+                    [pathlib.Path(r) for r in readable], temp=False),
+        *git_dir_rules(git_dirs),
+        *exec_guard(git_paths),
+        "",
+    ])
+
+
+def git_init_profile(pol: dict, git_dir, readable, git_paths) -> str:
+    """The broker's `git init` (r1 S1, r3 S-a): P1's rules with the new repo's <real path>/.git the only writable
+    folder, and without P1's denied names and pins, which init must write (config, objects, refs, info); the config op
+    replaces the config whole afterwards."""
+    _read_rules_present(pol)
+    return "\n".join([
+        "(version 1)",
+        "; brunna: the git broker's init (generated by bin/seatbelt.py for each call; don't edit)",
+        "(allow default)",
+        *_no_network(),
+        *_isolation({**pol, "git_fence": None}, [pathlib.Path(git_dir)], (), [pathlib.Path(r) for r in readable],
+                    temp=False),
+        *exec_guard(git_paths),
+        "",
+    ])
+
+
+def materialiser_profile(pol: dict, dirs, git_paths) -> str:
+    """P2 (r2 B1; open point 3): the project's own service profile unchanged, the fence with it, plus the exec guard, so
+    it runs only git and copies nothing itself."""
+    return service_profile(pol, dirs) + "\n".join(exec_guard(git_paths)) + "\n"
 
 
 if __name__ == "__main__":  # seatbelt.py <project> <capability>: print the profile it would use (for debugging)

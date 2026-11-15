@@ -56,6 +56,8 @@ policy(name, doc, index) → {
   git_fence:          None, or for a project whose git goes through the platform (enforce.git: platform, with
                       enforce.sandbox; docs/design/git-broker.md, "The fence") what every sandbox of it denies, wherever
                       it may write (git_fence below): {names, files, repo_dirs, markers}
+  git_broker:         None, or for the same projects where they reach the platform's git broker (git_broker below):
+                      {root, dir, session, service, nonce_dir, wrapper_dir}
 }
 """
 from __future__ import annotations
@@ -282,6 +284,27 @@ def git_fence(doc: dict, roots) -> dict | None:
             "markers": markers}
 
 
+def git_broker(doc: dict | None, name: str, state: pathlib.Path | None = None) -> dict | None:
+    """Where a project whose git goes through the platform reaches the git broker (docs/design/git-broker.md, "Step 2
+    build list", slice a); None when it doesn't (git_platform). state: the platform state the broker runs in
+    (hubconf.STATE by default):
+    root        the broker's folder, every project's sockets in it (no sandbox of a project reaches any but its own
+                service socket)
+    dir         this project's folder in it
+    session     the socket its sessions use (step 4 renders it into each runtime)
+    service     the socket its services and command jobs use (r3 S-d: the broker refuses pushes there)
+    nonce_dir   <workspace>/.hub-run/git/: where a caller proves the project, one file per connection
+    wrapper_dir the folder holding only the platform's `git`, first on PATH for its services and jobs"""
+    if not git_platform(doc):
+        return None
+    import registry
+    root = pathlib.Path(state or hubconf.STATE) / "git-broker"
+    ws = registry.dirs({**(doc or {}), "name": name})["workspace"]
+    return {"root": str(root), "dir": str(root / name), "session": str(root / name / "session"),
+            "service": str(root / name / "service"), "nonce_dir": str(pathlib.Path(ws) / ".hub-run" / "git") if ws else None,
+            "wrapper_dir": str(hubconf.ROOT / "bin" / "git-wrapper")}
+
+
 def mail_outbox(doc: dict | None) -> bool:
     """Whether a project's letters go through its outbox instead of the bus (docs/design/bus-sender.md): its sessions
     are sandboxed (enforce.sandbox, as render-project-settings decides it; the services-only exemption doesn't change
@@ -480,6 +503,7 @@ def policy(name: str, doc: dict, index: dict) -> dict:
         "platform_cli": platform_cli(),
         "capabilities": list((doc.get("enforce") or {}).get("capabilities") or []),
         "git_fence": git_fence(doc, [d["workspace"], d["runtime"]]),
+        "git_broker": git_broker(doc, name),
     }
 
 
