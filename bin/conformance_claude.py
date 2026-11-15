@@ -879,6 +879,22 @@ def confine_sandbox(world) -> Outcome:
         (hubconf.secrets_dir() / f"canary-{tag}", "file", _("the platform's secrets"))]))
 
 
+def session_write(world) -> Outcome:
+    """A sandboxed project's session writes its own push request folder through the rendered settings (policy
+    session_write; docs/design/platform-push.md, "Who may request"), and not another project's: that canary is refused,
+    and lands with its rules left out."""
+    import policy
+    project, _neighbour, settings = _rendered(world)
+    own, other = policy.push_request_dir(SANDBOXED), policy.push_request_dir(NEIGHBOUR)
+    for d in (own, other):
+        d.mkdir(mode=0o700, parents=True, exist_ok=True)
+    tag = os.urandom(3).hex()
+    if not _attempt(project, settings, own / f"canary-{tag}", "bash")[1]:
+        return Outcome("fail", _("its own push request folder wasn't writable"))
+    return _verdict(*_canaries(project, settings, [(other / f"canary-{tag}", "bash",
+                                                    _("another project's push request folder"))]))
+
+
 V_M6 = "a check through V-M6's pty driver (an interactive throwaway session; measured 11-09, not built as a check yet)"
 CHECKS = [
     Check("distribution-integrity", "distribution", "function", distribution, timeout_s=120),
@@ -892,6 +908,8 @@ CHECKS = [
     # staged and moved in, 1 long-s spelling), x 2, + the residual's 2
     Check("confine-sandbox", "confine", "safety", confine_sandbox, timeout_s=2 * 2 * 2 * RUN_S + 120, side="session"),
     Check("control", "control", "safety", control, timeout_s=(18 * 2 + 2) * 2 * RUN_S + 120, side="session"),
+    # its own request folder written, the neighbour's refused and its positive control
+    Check("session-write", "session_write", "safety", session_write, timeout_s=3 * 2 * RUN_S + 120, side="session"),
     Check("lifecycle-events", "lifecycle", "function", lifecycle_events, side="session"),
     Check("lifecycle-deny", "lifecycle", "safety", None,
           "a PreToolUse deny stops the tool: the one tool the platform denies (opening a session elsewhere) exists "

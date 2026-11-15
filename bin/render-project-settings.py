@@ -9,7 +9,8 @@ Written only for projects registered with `enforce: {sandbox: true}`; for other 
 would write (--report). Not applied to the platform itself (brunna).
 What is written:
   sandbox (the whole key is managed by the platform): enabled, failIfUnavailable, allowUnsandboxedCommands: false,
-    filesystem.allowWrite (its own runtime, the bus directory, the registry's allow_write),
+    filesystem.allowWrite (its own runtime, the bus directory, the registry's allow_write, and its push request
+    folder, made here first: docs/design/platform-push.md),
     filesystem.denyRead (other projects' workspace/runtime, raw memory notes, the platform's secrets, credentials,
     the hub's platform state: what its services are denied, docs/design/capabilities.md 11-08),
     network.allowedDomains (platform defaults + the registry's network)
@@ -53,8 +54,8 @@ RENDERED = hubconf.STATE / "rendered-settings"
 
 def desired(name: str, doc: dict, index: dict) -> tuple[dict, list[str], list[str]]:
     """(sandbox, deny rules, allow rules): the neutral policy (policy.py) translated into Claude Code settings
-    (runtime_claude.py)."""
-    return runtime_claude.settings(policy.policy(name, doc, index))
+    (runtime_claude.py), for its sessions: the only place policy session_write (the push request folder) is rendered."""
+    return runtime_claude.session_settings(policy.policy(name, doc, index))
 
 
 def desired_env(name: str, doc: dict, index: dict) -> dict[str, str]:
@@ -164,6 +165,8 @@ def write_project(name: str, doc: dict, index: dict, report: bool) -> list[str]:
     ws = registry.dirs(doc)["workspace"]
     drift += [_("its own files would make its sessions run something the platform didn't put there: {what}",
                 what=what) for what in foreign_controls(ws, name)]
+    if not report:
+        push_folder(name)
     if report:
         print(_("{project}: would write sandbox (allowWrite {write}, denyRead {read}, {domains} {domains:domain|domains}), "
                 "{deny} deny {deny:rule|rules}, {allow} allow {allow:rule|rules} → {path}", project=name,
@@ -181,6 +184,16 @@ def write_project(name: str, doc: dict, index: dict, report: bool) -> list[str]:
     RENDERED.mkdir(parents=True, exist_ok=True)
     (RENDERED / f"{name}.json").write_text(json.dumps(record, ensure_ascii=False, indent=1))
     return drift
+
+
+def push_folder(name: str) -> None:
+    """Its push request folder, made by the platform before any session settings name it (docs/design/platform-push.md
+    r2 K1): a session can't make it (the root is the platform's), and one it swapped for a link is made again."""
+    import push_queue
+    try:
+        push_queue.ensure_folder(name, log=lambda m: print(m, file=sys.stderr))
+    except OSError as e:
+        print(_("{project}: its push request folder could not be made ({why})", project=name, why=e), file=sys.stderr)
 
 
 def unapply(name: str, doc: dict) -> None:
@@ -474,6 +487,7 @@ def worktree(folder: str) -> int:
         return 0
     try:
         index = registry.refresh()
+        push_folder(found[0])
         c = compose(found[0], index["projects"][found[0]], index)
         ws = registry.dirs(found[1])["workspace"]
         # its own .agent-memory as a working directory, notes and STATE.md only (runtime_claude.worktree_memory): the

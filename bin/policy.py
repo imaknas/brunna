@@ -58,6 +58,11 @@ policy(name, doc, index) → {
                       it may write (git_fence below): {names, files, repo_dirs, markers}
   git_broker:         None, or for the same projects where they reach the platform's git broker (git_broker below):
                       {root, dir, session, service, nonce_dir, wrapper_dir}
+  session_write:      what only its sessions may write (Path; empty for an unsandboxed project): its push request folder
+                      (<push_dir>/<project>, docs/design/platform-push.md). Rendered only into session settings
+                      (render-project-settings through the runtime's session_settings), never by settings(),
+                      platform_settings, leases, seatbelt or landlock; other projects' request folders are in
+                      other_projects
 }
 """
 from __future__ import annotations
@@ -311,6 +316,19 @@ def git_broker(doc: dict | None, name: str, state: pathlib.Path | None = None) -
             "wrapper_dir": str(hubconf.ROOT / "bin" / "git-wrapper")}
 
 
+def push_request_dir(name: str) -> pathlib.Path:
+    """<push_dir>/<project>: the project's session request folder (docs/design/platform-push.md, "Who may request"), made
+    by the platform (render-project-settings, take-in); only its sessions write it (session_write)."""
+    return hubconf.push_dir() / name
+
+
+def session_write(name: str, doc: dict | None) -> list[pathlib.Path]:
+    """What only a sandboxed project's sessions may write beyond write (policy session_write): its push request folder.
+    Never in its services', jobs', cap-run's, leases' or platform runs' sandboxes: a runtime adapter renders it only into
+    the session settings (render-project-settings), and a runtime that can't says so (runtime_ports session_write)."""
+    return [push_request_dir(name)] if mail_outbox(doc) else []
+
+
 def mail_outbox(doc: dict | None) -> bool:
     """Whether a project's letters go through its outbox instead of the bus (docs/design/bus-sender.md): its sessions
     are sandboxed (enforce.sandbox, as render-project-settings decides it; the services-only exemption doesn't change
@@ -478,6 +496,8 @@ def policy(name: str, doc: dict, index: dict) -> dict:
     d = registry.dirs(doc)
     outbox = mail_outbox(doc)
     others = [p for n, ps in project_paths(index).items() if n != name for p in ps]
+    # other projects' push request folders, as their other folders (docs/design/platform-push.md, "Who may request")
+    others += [push_request_dir(n) for n in sorted(index["projects"]) if n != name and n != hubconf.hub_project()]
     copies = hubconf.p("memory_copies", "~/.memory-copies")
     cred_dirs, cred_files = credentials()
     import runtime_ports
@@ -510,6 +530,7 @@ def policy(name: str, doc: dict, index: dict) -> dict:
         "capabilities": list((doc.get("enforce") or {}).get("capabilities") or []),
         "git_fence": git_fence(doc, [d["workspace"], d["runtime"]]),
         "git_broker": git_broker(doc, name),
+        "session_write": session_write(name, doc),
     }
 
 
@@ -518,7 +539,8 @@ def policy(name: str, doc: dict, index: dict) -> dict:
 # onboard…)
 MAIL_SUBCOMMANDS = ("send", "inbox", "show", "ack", "done", "thread", "open-questions")
 # pass: a session's word, never a mailbox agent's (not in MAIL_SUBCOMMANDS; a confined run has no mail command at all)
-SESSION_SUBCOMMANDS = (*MAIL_SUBCOMMANDS, "pass", "merge-branch", "test", "cap-run", "complete", "agent")
+# push: a session asks the platform to push (docs/design/platform-push.md); the command still runs in its sandbox
+SESSION_SUBCOMMANDS = (*MAIL_SUBCOMMANDS, "pass", "merge-branch", "test", "cap-run", "complete", "agent", "push")
 
 
 def platform_cli() -> list[str]:

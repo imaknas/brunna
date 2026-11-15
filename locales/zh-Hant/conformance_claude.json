@@ -56,5 +56,7 @@
  "a sealed run didn't start its stdio server and list its tools ({seen})": "封閉的執行沒有啟動它的 stdio server 並列出工具({seen})",
  "the server's tool isn't named as the rules name it": "server 的工具名稱和規則寫的不一樣",
  "tools_named doesn't read the rule back": "tools_named 讀不回這條規則",
- "the run called `security -i` (a Keychain write) with a stdio server attached": "掛上 stdio server 的執行呼叫了 `security -i`(寫入 Keychain)"
+ "the run called `security -i` (a Keychain write) with a stdio server attached": "掛上 stdio server 的執行呼叫了 `security -i`(寫入 Keychain)",
+ "another project's push request folder": "別的專案的推送請求資料夾",
+ "its own push request folder wasn't writable": "它自己的推送請求資料夾寫不進去"
 }

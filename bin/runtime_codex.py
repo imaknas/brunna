@@ -147,6 +147,8 @@ def unsupported(port: str) -> str | None:
         "tool_servers": _("the platform's Codex runs load no tool server at all"),
         "rule_check": _("the platform's Codex runs hold no project's own rules"),
         "run_server": _("the platform's Codex runs get no mail tools"),
+        "session_write": _("its sessions in sandboxed projects aren't served yet (runtime-codex.md, Step 4), so they "
+                           "can't ask the platform to push: push requests are not supported for Codex sessions"),
     }
     return why.get(port)
 

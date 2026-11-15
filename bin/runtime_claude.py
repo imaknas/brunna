@@ -32,7 +32,9 @@ Settings (neutral policy → Claude Code's settings; the policy's fields are in 
   settings(pol)          → (sandbox, deny, allow): the platform-managed part of the project's
                          .claude/settings.local.json
                          (render-project-settings.py writes the file, records it, detects drift)
-  lease_settings(pol)    → the content of a lease's `--settings`: the same deny + user-level credentials + blocking
+  session_settings(pol)  → the same for its sessions only, plus policy session_write (the push request folder);
+                         runtime_ports' session_write port
+  lease_settings(pol)   → the content of a lease's `--settings`: the same deny + user-level credentials + blocking
                          `security`
   settings_path(ws), sandbox_rendered(ws)   where the settings file is, whether the OS sandbox really has been written
   control_paths(), session_folders(ws), foreign_controls(ws), platform_hooks()
@@ -291,6 +293,15 @@ def settings(pol: dict) -> tuple[dict, list[str], list[str]]:
         "network": {"allowedDomains": list(pol["network"]), "allowLocalBinding": bool(pol.get("local_bind"))},
     }
     return sandbox, deny, allow
+
+
+def session_settings(pol: dict) -> tuple[dict, list[str], list[str]]:
+    """settings() for the project's sessions (render-project-settings, the only caller): plus what only its sessions may
+    write (policy session_write: its push request folder, docs/design/platform-push.md), as an allowWrite and as a place
+    where no control tree may be built (_protect_rules). Never in settings() itself: platform_settings, leases and the
+    services' profiles are made from the same policy and must not carry it (r2 S-h, S-i)."""
+    extra = [_tilde(p) for p in pol.get("session_write") or []]
+    return settings({**pol, "write": [*pol["write"], *[w for w in extra if w not in pol["write"]]]})
 
 
 # Where its sandbox may let a session's Bash write outside the project's folders: the temp area, as given and as it

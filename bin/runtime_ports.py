@@ -348,7 +348,8 @@ def port_labels() -> dict[str, str]:
             "run_server": _("way to give a run the platform's mail tools"),
             "credential_tools": _("way to tell which of a server's tools a credentials job's rules name"),
             "distribution": _("way to install and pin a checked version"),
-            "worktree_maker": _("way to hand its own worktree mode to the platform")}
+            "worktree_maker": _("way to hand its own worktree mode to the platform"),
+            "session_write": _("way to let only a sandboxed project's sessions write a folder (brunna push requests)")}
 
 
 def _feature_settings() -> tuple[bool, bool]:
@@ -465,7 +466,7 @@ def missing_session_ports(name: str | None = None) -> list[str]:
     named = {p for _f, need in features() for p in need}
     have = capabilities(name)
     return [missing_label(name, p) for p in OPTIONAL if p not in have and p not in named
-            and p not in ("distribution", "worktree_maker")]   # each has its own doctor rows
+            and p not in ("distribution", "worktree_maker", "session_write")]   # each has its own doctor rows
 
 
 def unversioned(name: str | None = None) -> bool:
@@ -527,6 +528,10 @@ PORTS = {
     # one; worktree_location(workspace, name) → (path, branch) where the tool expects it; worktree_reply(path) → what the
     # hook prints for the tool to find it; makes_worktrees(workspace) → whether the project's tool settings hand it over
     "worktree_maker": ("worktree_request", "worktree_location", "worktree_reply", "makes_worktrees"),
+    # session_write (docs/design/platform-push.md, "Who may request"): session_settings(pol) renders the session settings
+    # with the policy's session_write (the push request folder) writable for the project's sessions only. Without it a
+    # sandboxed project's sessions of that runtime can't ask the platform to push (doctor says so)
+    "session_write": ("session_settings",),
 }
 # Beside the distribution port, a runtime that runs a store's checked copy (bin/runtime_store.py) has checked_copy() →
 # (the copy, None) or (None, why there is none): load() refuses the ports that start platform runs while it says why
@@ -539,7 +544,7 @@ PORTS = {
 # session's own record named there instead (hub-event passes it when the signature has raw).
 # Ports a runtime may lack without any platform feature switching off (only reinforcement is lost): load() without
 # ports= doesn't ask for them
-OPTIONAL = ("wake", "session_status", "session_summary", "distribution", "worktree_maker")
+OPTIONAL = ("wake", "session_status", "session_summary", "distribution", "worktree_maker", "session_write")
 # ---------- conformance (docs/design/runtime-versions.md section 2) ----------
 # A runtime with the distribution port has a conformance adapter, conformance_<runtime>.py, whose CHECKS ([Check], one
 # or more per port it implements) bin/conformance.py runs against a binary in a throwaway world

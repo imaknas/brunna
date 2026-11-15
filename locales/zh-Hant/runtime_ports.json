@@ -42,5 +42,6 @@
  "it lacks {ports}": "它缺少{ports}",
  "way to hand its own worktree mode to the platform": "把自己的 worktree 模式交給平台的方法",
  "way to tell which of a server's tools a credentials job's rules name": "分辨憑證 job 的規則列出 server 哪些工具的方法",
- "unattended jobs on the platform's own MCP grants (credentials:)": "使用平台自有 MCP 授權的無人值守 job(credentials:)"
+ "unattended jobs on the platform's own MCP grants (credentials:)": "使用平台自有 MCP 授權的無人值守 job(credentials:)",
+ "way to let only a sandboxed project's sessions write a folder (brunna push requests)": "只讓沙盒專案的 session 寫一個資料夾的方法(brunna push 請求)"
 }
