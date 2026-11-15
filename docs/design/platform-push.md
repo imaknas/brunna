@@ -783,3 +783,12 @@ rule).
 
    **Recommended:** only sessions, as r3 decided. The folder makes it a rule on both OSes with no carve-out (S4). The
    sessions that letters drive stay a residual, with the mitigations in section 8.
+
+### The owner's answers (11-15)
+
+The owner took all three recommendations:
+1. **Credential:** a per-repo write deploy key held by the platform ("If the grant"), added by `gh` at onboarding and
+   once for each existing project with a remote, before any project gets `branches: all`. No fallback to the owner's
+   own credential.
+2. **Onboarding with nobody answering, public or unknown remote:** `none` plus a one-time `brunna push setup` to-do.
+3. **Who may request:** only the project's sessions, through the session request folder.
