@@ -2,7 +2,6 @@
  "{cmd} failed: {err}": "{cmd} 失敗:{err}",
  "the rename {old} → {new} stopped halfway (stage {stage}): first retry the rename until it completes": "{old} → {new} 的改名做到一半(stage {stage}),先把改名的重試做完",
  "--rename needs a new name": "--rename 要給新名稱",
- "usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--apply]": "用法:upgrade-idea.py <沙盒名稱> [--rename <新名稱>] [--public] [--apply]",
  "the last upgrade of {name} stopped halfway after renaming to {new}; run it again with the name {new}": "{name} 上次升級做到一半,已經改名成 {new};要用同一個名稱再叫一次",
  "{name} is not in the registry": "登錄裡沒有 {name}",
  "{name} is not an idea sandbox (type: {type})": "{name} 不是想法沙盒(type: {type})",
@@ -28,5 +27,10 @@
  "{path}: its history could not be bundled ({why})": "{path}:它的歷史打不成 bundle({why})",
  "{path}: origin could not be set ({why})": "{path}:設不了 origin({why})",
  "This project is no longer an idea sandbox: it is a project with its GitHub repo {url} (only main was pushed; the memory branch stays on this machine). What stays: its sandbox, network list, capabilities and privacy are as they were, so pushing and gh still go through the platform (write to brunna) or {owner}. What is yours now: README and STATE.md wording that says sandbox or idea, and declaring tests if the project has none (a manifest.update).": "這個專案已經不是想法沙盒，而是有自己 GitHub repo {url} 的正式專案(只推了 main;memory 分支留在這台機器)。不變的：沙盒、網路清單、能力和隱私設定都照舊，所以 push 和 gh 仍然要透過平台(寫信給 brunna)或 {owner}。現在歸你的:README 和 STATE.md 裡寫著沙盒或想法的字樣，還有專案若沒有測試就宣告(manifest.update)。",
- "the letter to {project} was not sent: {why}": "給 {project} 的信沒寄出:{why}"
+ "the letter to {project} was not sent: {why}": "給 {project} 的信沒寄出:{why}",
+ "the platform's push: {push}": "平台推送:{push}",
+ "usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--push none|others|all] [--apply]": "用法:upgrade-idea.py <沙盒名稱> [--rename <新名稱>] [--public] [--push none|others|all] [--apply]",
+ "the platform's push for {project} was not set up ({why}); run brunna push setup {project}": "{project} 的平台推送沒設好({why});請跑 brunna push setup {project}",
+ "by the new repo's visibility (private: all; public: none and a to-do)": "看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)",
+ "--push takes none, others or all": "--push 只能是 none、others 或 all"
 }

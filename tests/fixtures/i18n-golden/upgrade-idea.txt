@@ -2,7 +2,7 @@
 exit 1
 --- stdout
 --- stderr
-upgrade-idea: 用法:upgrade-idea.py <沙盒名稱> [--rename <新名稱>] [--public] [--apply]
+upgrade-idea: 用法:upgrade-idea.py <沙盒名稱> [--rename <新名稱>] [--public] [--push none|others|all] [--apply]
 
 === --rename without a name
 exit 1
@@ -23,6 +23,7 @@ exit 0
   2. gh repo create o/idea-7 --private + push,origin = <TMP>/a/remotes/o/idea-7.git
   3. 登錄 projects/idea-7.yaml:type: project、paths.origin: <TMP>/a/remotes/o/idea-7.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 (dry-run,加 --apply 執行)
 --- stderr
 
@@ -39,6 +40,7 @@ exit 0
   2. gh repo create o/garden --public + push,origin = <TMP>/a/remotes/o/garden.git
   3. 登錄 projects/garden.yaml:type: project、paths.origin: <TMP>/a/remotes/o/garden.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 (dry-run,加 --apply 執行)
 --- stderr
 
@@ -61,6 +63,7 @@ exit 0
   2. GitHub 上的 o/idea-7 是上次建的:只 push,origin = <TMP>/a/remotes/o/idea-7.git
   3. 登錄 projects/idea-7.yaml:type: project、paths.origin: <TMP>/a/remotes/o/idea-7.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 (dry-run,加 --apply 執行)
 --- stderr
 
@@ -83,6 +86,7 @@ exit 1
   2. gh repo create o/idea-7 --private + push,origin = <TMP>/a/remotes/o/idea-7.git
   3. 登錄 projects/idea-7.yaml:type: project、paths.origin: <TMP>/a/remotes/o/idea-7.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 --- stderr
 upgrade-idea: gh repo create 失敗:HTTP 502: bad gateway
 
@@ -93,6 +97,7 @@ exit 1
   2. gh repo create o/garden --private + push,origin = <TMP>/a/remotes/o/garden.git
   3. 登錄 projects/garden.yaml:type: project、paths.origin: <TMP>/a/remotes/o/garden.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 --- stderr
 rename-project: folder is busy
 upgrade-idea: rename-project.sh 失敗,停在這裡(還沒建 GitHub repo)
@@ -104,6 +109,8 @@ exit 0
   2. gh repo create o/idea-7 --private + push,origin = <TMP>/a/remotes/o/idea-7.git
   3. 登錄 projects/idea-7.yaml:type: project、paths.origin: <TMP>/a/remotes/o/idea-7.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
+idea-7 沒有平台推送:paths.origin <TMP>/a/remotes/o/idea-7.git 不是 GitHub 的遠端:平台只透過 deploy key 推到 GitHub(不推別的 forge,也不推本機路徑)
 完成:idea-7 已升級成正式專案 idea-7(<TMP>/a/remotes/o/idea-7.git)
 --- stderr
 
@@ -138,6 +145,7 @@ exit 1
   2. gh repo create o/garden --private + push,origin = <TMP>/b/remotes/o/garden.git
   3. 登錄 projects/garden.yaml:type: project、paths.origin: <TMP>/b/remotes/o/garden.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 --- stderr
 upgrade-idea: gh repo create 失敗:HTTP 502: bad gateway
 
@@ -154,6 +162,7 @@ exit 0
   2. gh repo create o/garden --private + push,origin = <TMP>/b/remotes/o/garden.git
   3. 登錄 projects/garden.yaml:type: project、paths.origin: <TMP>/b/remotes/o/garden.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 (dry-run,加 --apply 執行)
 --- stderr
 
@@ -170,5 +179,6 @@ exit 1
   2. gh repo create o/garden --private + push,origin = <TMP>/d/remotes/o/garden.git
   3. 登錄 projects/garden.yaml:type: project、paths.origin: <TMP>/d/remotes/o/garden.git(purpose/enforce/privacy 留著)
   4. mirror-list.txt 加上 origin、重生 index.md、commit brunna
+  5. 平台推送:看新 repo 公不公開決定(私有:all;公開:none 加一個待辦)
 --- stderr
 upgrade-idea: <TMP>/d/home/workspace/garden:它的歷史打不成 bundle(sandboxed-run: garden is not in the registry; not run (a sandboxed project's service or job never runs unsandboxed))

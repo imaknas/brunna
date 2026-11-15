@@ -1,0 +1,137 @@
+=== usage: 
+[exit 2]
+--- stdout
+--- stderr
+usage: brunna push setup <project> [--branches none|others|all] [--email <address>]… [--yes] [--grant-only] | brunna push setup <project> --revoke
+
+=== usage, two projects: setup a b
+[exit 2]
+--- stdout
+--- stderr
+usage: brunna push setup <project> [--branches none|others|all] [--email <address>]… [--yes] [--grant-only] | brunna push setup <project> --revoke
+
+=== bad --branches: setup proj --branches most --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: --branches takes none, others or all
+
+=== bad --email: setup proj --email nope --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: not an email address: nope
+
+=== not registered: setup nosuch --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: nosuch is not in the registry
+
+=== not sandboxed: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: proj is not sandboxed: its agents push with your own git, and there is no platform push to set up
+
+=== origin git@gitlab.com:o/proj.git: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: paths.origin git@gitlab.com:o/proj.git: gitlab.com is not GitHub. A forge without GitHub's deploy keys gets no platform push (and an ssh alias isn't read: the push reads no ssh config); push it yourself with brunna push --owner
+
+=== origin /srv/git/proj.git: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: paths.origin /srv/git/proj.git is not a GitHub remote: the platform pushes only to GitHub, through a deploy key (no other forge, no local path)
+
+=== origin git@github.com:o/a/b.git: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: paths.origin git@github.com:o/a/b.git doesn't name one repo (<owner>/<repo>)
+
+=== origin (native): setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: it has no remote (paths.origin): there is nothing to push to
+
+=== status before: status proj
+[exit 0]
+--- stdout
+proj: not_needed — no grant, and none needed while the platform pushes nothing for it
+--- stderr
+
+=== public, nobody answering: none: setup proj --yes
+[exit 0]
+--- stdout
+The remote is public. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
+This platform's registry has no enforce.git_push yet: set it in projects/proj.yaml once it does: enforce.git_push: {"branches": "none", "emails": []}
+--- stderr
+
+=== the key doesn't work: setup proj --yes --branches all
+[exit 1]
+--- stdout
+The remote is public. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
+--- stderr
+failed: the new deploy key didn't work (GitHub refused the deploy key (it was removed, or gh's sign-in that added it was revoked)); it was removed again
+
+=== interactive: setup proj
+[exit 0]
+--- stdout
+The remote is private. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
+Which branches may the platform push for proj? none: you push yourself; others: every branch but the default; all: the default branch too.
+none, others or all? [all] all
+✓ deploy key 102 added to o/proj with write access, and checked (<FP>)
+Commit emails the platform's pushes may carry (comma-separated) [owner@example.org, 42+octo@users.noreply.github.com] 
+This platform's registry has no enforce.git_push yet: set it in projects/proj.yaml once it does: enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"]}
+--- stderr
+
+=== again: the grant is kept: setup proj --yes --branches others --email a@b.example
+[exit 0]
+--- stdout
+The remote is private. On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
+✓ the grant exists: deploy key 102 on o/proj (<FP>)
+This platform's registry has no enforce.git_push yet: set it in projects/proj.yaml once it does: enforce.git_push: {"branches": "others", "emails": ["a@b.example"]}
+--- stderr
+
+=== status: status proj
+[exit 0]
+--- stdout
+proj: ok — deploy key 102 on o/proj
+--- stderr
+
+=== origin changed: status proj
+[exit 1]
+--- stdout
+proj: not_set_up — the grant is for o/proj, but paths.origin is now o/other: the origin changed, so the grant no longer applies; the owner runs brunna push setup proj
+--- stderr
+
+=== unknown visibility: the noreply address only: setup proj --yes --branches all
+[exit 0]
+--- stdout
+The remote is of unknown visibility (treated as public). On a public remote every branch you allow is published as soon as it is pushed, and a site or deploy that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. 'others' keeps the default branch's CI and deploys yours, not the content private.
+✓ the grant exists: deploy key 102 on o/proj (<FP>)
+This platform's registry has no enforce.git_push yet: set it in projects/proj.yaml once it does: enforce.git_push: {"branches": "all", "emails": ["42+octo@users.noreply.github.com"]}
+--- stderr
+
+=== revoke: setup proj --revoke
+[exit 0]
+--- stdout
+✓ deploy key 102 deleted from o/proj
+✓ the key for proj is deleted here
+--- stderr
+
+=== revoke again: setup proj --revoke
+[exit 0]
+--- stdout
+proj has no grant here
+--- stderr
+
+=== onboard, public, nobody chose: onboard proj
+[exit 0]
+--- stdout
+An owner to-do asks for brunna push setup proj
+--- stderr

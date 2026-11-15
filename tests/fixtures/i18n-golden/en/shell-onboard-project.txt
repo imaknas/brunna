@@ -2,7 +2,7 @@
 exit 1
 --- stdout
 --- stderr
-onboard-project: usage: onboard-project.sh [--public] [--no-remote] <local project path>
+onboard-project: usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]... <local project path>
 
 === unknown flag
 exit 1

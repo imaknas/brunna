@@ -1,6 +1,5 @@
 {
  "unknown argument: {arg}": "未知參數:{arg}",
- "usage: onboard-project.sh [--public] [--no-remote] <local project path>": "用法: onboard-project.sh [--public] [--no-remote] <本機專案路徑>",
  "cannot reach the hub machine ({host}). This script creates a bare repo there, so it stopped before doing anything (this run had no side effects): run it again once the hub machine is reachable.": "連不上 hub 主機({host})。這支腳本會在 hub 主機上建 bare repo,連不上就不做任何事——等 hub 主機恢復連線再重跑,這次呼叫沒有任何副作用。",
  "cannot read the project registry ({path})": "讀不到專案登錄({path})",
  "To reconnect an existing project (new machine, folder gone, fresh clone) use bin/recover-project.sh {name} [path]": "要把既有專案接回來(新機器、資料夾不見、重新 clone)請用 bin/recover-project.sh {name} [路徑]",
@@ -38,5 +37,11 @@
  "[9/11] Cloned the librarian's memory copy to ~/.memory-copies/{name}": "[9/11] 已 clone librarian 用的 memory 副本到 ~/.memory-copies/{name}",
  "[8/11] Memory bare repo created ({path}), agent-memory branch pushed": "[8/11] 已建 memory bare repo({path}),agent-memory 分支已推送",
  "{path} is not an existing folder": "{path} 不是已存在的資料夾",
- "{path} is not inside a folder the owner named for projects": "{path} 不在主人指定放專案的資料夾裡"
+ "{path} is not inside a folder the owner named for projects": "{path} 不在主人指定放專案的資料夾裡",
+ "--push takes none, others or all": "--push 只能是 none、others 或 all",
+ "--push-email takes an address": "--push-email 後面要接一個地址",
+ "usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]... <local project path>": "用法: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <地址>]... <本機專案路徑>",
+ "--push {push} is for a sandboxed project: add --sandbox": "--push {push} 是給沙盒專案用的:加上 --sandbox",
+ "ONBOARD_REGISTRY_EXTRA is not valid JSON": "ONBOARD_REGISTRY_EXTRA 不是合格的 JSON",
+ "Warning: the platform's push for {name} was not set up; run brunna push setup {name}": "警告:{name} 的平台推送沒設好;請跑 brunna push setup {name}"
 }

@@ -148,8 +148,8 @@ def parse_origin(origin: str | None) -> tuple[str, str]:
     path = path[:-4] if path.endswith(".git") else path
     if host not in KNOWN_HOSTS:
         raise Refused(_("paths.origin {url}: {host} is not GitHub. A forge without GitHub's deploy keys gets no platform "
-                        "push (and an ssh alias isn't read: the push reads no ssh config); push it yourself with brunna "
-                        "push --owner", url=origin, host=host))
+                        "push (and an ssh alias isn't read: the push reads no ssh config); push it yourself with {cli} "
+                        "push --owner", url=origin, host=host, cli=names.current("cli")))
     if not REPO.fullmatch(path) or ".." in path:
         raise Refused(_("paths.origin {url} doesn't name one repo (<owner>/<repo>)", url=origin))
     return host, path
@@ -316,9 +316,11 @@ def status(project: str) -> dict:
     try:
         g = read_grant(project)
     except NotSetUp as e:
-        state = "not_set_up" if needed(doc) or grant_dir(project).exists() else "not_needed"
-        return {**row, "state": state, "detail": _("{why}; the owner runs {command}", why=e,
-                                                   command=setup_command(project))}
+        if not needed(doc) and not grant_dir(project).exists():
+            return {**row, "state": "not_needed", "detail": _("no grant, and none needed while the platform pushes "
+                                                              "nothing for it")}
+        return {**row, "state": "not_set_up", "detail": _("{why}; the owner runs {command}", why=e,
+                                                          command=setup_command(project))}
     return {**row, "repo": g["repo"], "fingerprint": g.get("fingerprint"), "created": g.get("created"),
             "detail": _("deploy key {id} on {repo}", id=g.get("deploy_key_id"), repo=g["repo"])}
 

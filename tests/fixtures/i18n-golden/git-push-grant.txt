@@ -1,0 +1,137 @@
+=== usage: 
+[exit 2]
+--- stdout
+--- stderr
+用法:brunna push setup <專案> [--branches none|others|all] [--email <地址>]… [--yes] [--grant-only] | brunna push setup <專案> --revoke
+
+=== usage, two projects: setup a b
+[exit 2]
+--- stdout
+--- stderr
+用法:brunna push setup <專案> [--branches none|others|all] [--email <地址>]… [--yes] [--grant-only] | brunna push setup <專案> --revoke
+
+=== bad --branches: setup proj --branches most --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:--branches 只能是 none、others 或 all
+
+=== bad --email: setup proj --email nope --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:不是 email 地址:nope
+
+=== not registered: setup nosuch --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:nosuch 不在登錄裡
+
+=== not sandboxed: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 沒有沙盒:它的 agent 用你自己的 git 推,沒有平台推送要設定
+
+=== origin git@gitlab.com:o/proj.git: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:paths.origin git@gitlab.com:o/proj.git:gitlab.com 不是 GitHub。沒有 GitHub deploy key 的 forge 就沒有平台推送(ssh 別名也不會讀:推送不讀任何 ssh 設定);請自己用 brunna push --owner 推
+
+=== origin /srv/git/proj.git: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:paths.origin /srv/git/proj.git 不是 GitHub 的遠端:平台只透過 deploy key 推到 GitHub(不推別的 forge,也不推本機路徑)
+
+=== origin git@github.com:o/a/b.git: setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:paths.origin git@github.com:o/a/b.git 沒有指向單一個 repo(<owner>/<repo>)
+
+=== origin (native): setup proj --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:它沒有遠端(paths.origin):沒有地方可以推
+
+=== status before: status proj
+[exit 0]
+--- stdout
+proj: not_needed — 沒有授權,平台不替它推任何東西時也不需要
+--- stderr
+
+=== public, nobody answering: none: setup proj --yes
+[exit 0]
+--- stdout
+這個遠端是公開的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
+這個平台的登錄還沒有 enforce.git_push:等它有了,在 projects/proj.yaml 設定:enforce.git_push: {"branches": "none", "emails": []}
+--- stderr
+
+=== the key doesn't work: setup proj --yes --branches all
+[exit 1]
+--- stdout
+這個遠端是公開的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
+--- stderr
+失敗:新的 deploy key 不能用(GitHub 拒絕了這把 deploy key(它被刪了,或是加它的 gh 登入被撤銷了));已經再刪掉了
+
+=== interactive: setup proj
+[exit 0]
+--- stdout
+這個遠端是私有的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
+平台可以替 proj 推哪些分支?none:你自己推;others:預設分支以外的每個分支;all:連預設分支也推。
+none、others 還是 all? [all] all
+✓ 已把可寫的 deploy key 102 加到 o/proj,也檢查過了(<FP>)
+平台推送的 commit 可以帶哪些 email(用逗號分隔) [owner@example.org, 42+octo@users.noreply.github.com] 
+這個平台的登錄還沒有 enforce.git_push:等它有了,在 projects/proj.yaml 設定:enforce.git_push: {"branches": "all", "emails": ["owner@example.org", "42+octo@users.noreply.github.com"]}
+--- stderr
+
+=== again: the grant is kept: setup proj --yes --branches others --email a@b.example
+[exit 0]
+--- stdout
+這個遠端是私有的。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
+✓ 授權已經有了:o/proj 上的 deploy key 102(<FP>)
+這個平台的登錄還沒有 enforce.git_push:等它有了,在 projects/proj.yaml 設定:enforce.git_push: {"branches": "others", "emails": ["a@b.example"]}
+--- stderr
+
+=== status: status proj
+[exit 0]
+--- stdout
+proj: ok — o/proj 上的 deploy key 102
+--- stderr
+
+=== origin changed: status proj
+[exit 1]
+--- stdout
+proj: not_set_up — 授權是給 o/proj 的,但 paths.origin 現在是 o/other:origin 改了,這份授權就不適用了;主人跑 brunna push setup proj
+--- stderr
+
+=== unknown visibility: the noreply address only: setup proj --yes --branches all
+[exit 0]
+--- stdout
+這個遠端是看不出公開與否(當作公開)。在公開的遠端上,你允許的每個分支一推上去就公開了;從分支建置的網站或部署(gh-pages、託管服務的「production branch」、preview deploy)也會跑它。「others」保住的是預設分支的 CI 和部署由你決定,不是讓內容保密。
+✓ 授權已經有了:o/proj 上的 deploy key 102(<FP>)
+這個平台的登錄還沒有 enforce.git_push:等它有了,在 projects/proj.yaml 設定:enforce.git_push: {"branches": "all", "emails": ["42+octo@users.noreply.github.com"]}
+--- stderr
+
+=== revoke: setup proj --revoke
+[exit 0]
+--- stdout
+✓ 已從 o/proj 刪掉 deploy key 102
+✓ 這裡 proj 的金鑰已刪除
+--- stderr
+
+=== revoke again: setup proj --revoke
+[exit 0]
+--- stdout
+這裡沒有 proj 的授權
+--- stderr
+
+=== onboard, public, nobody chose: onboard proj
+[exit 0]
+--- stdout
+已開一個主人待辦,請跑 brunna push setup proj
+--- stderr
