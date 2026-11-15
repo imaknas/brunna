@@ -7,8 +7,19 @@ nothing to push: the remote's main is already at <SHA>
 === .github refused: brunna push proj main --yes
 [exit 2]
 --- stdout
+!! .github/ differs from main on the remote: CI runs what it says, with the repo's secrets (allowed by enforce.git_ci)
+push proj main → <TMP>/remote.git
+  range: <SHA>..<SHA>, 2 commits
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! author emails not in the remote's recent history: someone@else.example
+  changed paths:
+  !!A .github/workflows/ci.yml
+    A b.txt
+checks: origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci !!, identity ✓, secrets ✓, names – (a private remote)
+!! [ci] <SHA> changes .github/ against the remote's default branch: CI would run it with the repo's secrets; only the owner allows that (enforce.git_ci)
 --- stderr
-refused: <SHA> changes .github/ against the remote's main: CI would run it with the repo's secrets; the owner allows that with enforce.git_ci: true in the registry
+refused: a check refused it (<SHA> changes .github/ against the remote's default branch: CI would run it with the repo's secrets; only the owner allows that (enforce.git_ci)): only your interactive y pushes past a check, never --yes
 
 === no terminal: brunna push proj main
 [exit 2]
@@ -22,6 +33,7 @@ push proj main → <TMP>/remote.git
   changed paths:
   !!A .github/workflows/ci.yml
     A b.txt
+checks: origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci ✓, identity ✓, secrets ✓, names – (a private remote)
 --- stderr
 refused: no terminal to confirm on: run it in a terminal, or add --yes
 
@@ -37,6 +49,7 @@ push proj main → <TMP>/remote.git
   changed paths:
   !!A .github/workflows/ci.yml
     A b.txt
+checks: origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci ✓, identity ✓, secrets ✓, names – (a private remote)
 --- stderr
 refused: not pushed
 
@@ -52,6 +65,7 @@ push proj main → <TMP>/remote.git
   changed paths:
   !!A .github/workflows/ci.yml
     A b.txt
+checks: origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci ✓, identity ✓, secrets ✓, names – (a private remote)
 To <TMP>/remote.git
    <SHA>..<SHA>  <SHA> -> main
 pushed main: <SHA>..<SHA>. The project's own repo is untouched: its origin/main moves with its next fetch
@@ -186,4 +200,4 @@ refused: proj is not in the registry
 === usage: brunna push
 [exit 2]
 --- stderr
-usage: brunna push <project> [<branch>] [--yes]
+refused: brunna is not sandboxed: push with git as usual; for another project use brunna push --owner <project> <branch>

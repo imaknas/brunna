@@ -93,9 +93,11 @@ owner(你本人;不是專案 session 的指令):
                         專案的 skills(在它的 skills/ 資料夾開發):列出改了什麼(diff),你打 yes 或給審查印出的
                         核准代碼之後才裝進它的 agent 載入 skills 的資料夾(bin/skills_sync.py,
                         docs/design/skills-sync.md);有改動等你審時平台會提醒你
-  brunna push <專案> [<分支>] [--yes]
+  brunna push --owner <專案> [<分支>] [--yes] | setup <專案> [--branches none|others|all] [--email <位址>…]
                         用你的 git 把沙盒專案的分支推到登錄裡的遠端,從平台自己的 bare repo 推,從不在專案的 repo
-                        裡跑(bin/git_remote.py):只做 fast-forward、不推 tag;先列出要推的 commit 再問你
+                        裡跑(bin/git_remote.py):只做 fast-forward、不推 tag;先列出要推的 commit 和每項檢查再問你
+                        (檢查沒過只有你回答 y 才推,--yes 不行);setup:平台可以替專案的 session 推什麼
+                        (enforce.git_push)
 專案的 session 用的(規則檔裡寫的就是這些;權限規則只放行這幾個,不放行上面的管理指令):
   brunna send | inbox | show | ack | pass | done | thread | open-questions …   = 專案信箱(bin/hubbus 同名的子指令)
   brunna merge-branch …    = bin/merge-branch(平行 session 的合併閘門)
@@ -107,6 +109,8 @@ owner(你本人;不是專案 session 的指令):
                                                        由平台代跑)
   brunna agent <名稱> [--schema F] < 提示           = bin/hub-run --agent(專案在登錄 agents: 宣告的受限 agent 呼叫,
                                                        由平台在它的資料夾裡代跑)
+  brunna push [<分支>] [--no-wait | --wait <秒>]   = 在沙盒專案的資料夾裡跑 bin/git_remote.py:由平台檢查並推送
+                                                       這個分支(docs/design/platform-push.md)
   brunna install-cli [--dir <資料夾>]   在 <資料夾>(預設 ~/.local/bin)放 brunna 的轉接腳本(要在 PATH 上)
   brunna mcp               平台的 MCP 伺服器(stdio):任何支援 MCP 的 coding agent 都能收發信箱、寫筆記(= bin/mcp_server.py)
   brunna mcp config        印出要登記進工具 MCP 設定的那一段(平台不替你改工具的設定;docs/mcp.md)

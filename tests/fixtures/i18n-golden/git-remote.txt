@@ -7,8 +7,19 @@
 === .github refused: brunna push proj main --yes
 [exit 2]
 --- stdout
+!! .github/ 跟遠端的 main 不一樣:CI 會照它跑,而且拿得到 repo 的 secrets(enforce.git_ci 允許)
+推送 proj main → <TMP>/remote.git
+  範圍:<SHA>..<SHA>,2 個 commit
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! 遠端最近的歷史裡沒出現過的作者 email:someone@else.example
+  改到的路徑:
+  !!A .github/workflows/ci.yml
+    A b.txt
+檢查:origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci !!, identity ✓, secrets ✓, names –(私有遠端)
+!! [ci] <SHA> 改了 .github/(和遠端預設分支比):CI 會帶著 repo 的機密跑它;只有擁有者能允許(enforce.git_ci)
 --- stderr
-拒絕:<SHA> 的 .github/ 跟遠端的 main 不一樣:CI 會拿 repo 的 secrets 跑它;Alex 在登錄寫 enforce.git_ci: true 才允許
+拒絕:有檢查拒絕了(<SHA> 改了 .github/(和遠端預設分支比):CI 會帶著 repo 的機密跑它;只有擁有者能允許(enforce.git_ci)):只有你在終端機回答 y 才能越過檢查,--yes 不行
 
 === no terminal: brunna push proj main
 [exit 2]
@@ -22,6 +33,7 @@
   改到的路徑:
   !!A .github/workflows/ci.yml
     A b.txt
+檢查:origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci ✓, identity ✓, secrets ✓, names –(私有遠端)
 --- stderr
 拒絕:沒有終端機可以確認:在終端機裡跑,或加 --yes
 
@@ -37,6 +49,7 @@
   改到的路徑:
   !!A .github/workflows/ci.yml
     A b.txt
+檢查:origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci ✓, identity ✓, secrets ✓, names –(私有遠端)
 --- stderr
 拒絕:沒有推
 
@@ -52,6 +65,7 @@
   改到的路徑:
   !!A .github/workflows/ci.yml
     A b.txt
+檢查:origin ✓, ref ✓, fast-forward ✓, objects ✓, size ✓, ci ✓, identity ✓, secrets ✓, names –(私有遠端)
 To <TMP>/remote.git
    <SHA>..<SHA>  <SHA> -> main
 推好了 main:<SHA>..<SHA>。專案自己的 repo 沒動:它的 origin/main 等它下次 fetch 才會跟上
@@ -186,4 +200,4 @@ To <TMP>/remote.git
 === usage: brunna push
 [exit 2]
 --- stderr
-用法:brunna push <專案> [<分支>] [--yes]
+拒絕:brunna 沒有沙盒:照常用 git 推;別的專案用 brunna push --owner <專案> <分支>

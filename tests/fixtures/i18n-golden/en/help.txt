@@ -102,10 +102,11 @@ owner (you; not commands for project sessions):
                         into the folders its agents load skills from after you type yes, or with the approval code
                         its review printed (bin/skills_sync.py, docs/design/skills-sync.md); the platform reminds you
                         when changes wait for review
-  brunna push <project> [<branch>] [--yes]
+  brunna push --owner <project> [<branch>] [--yes] | setup <project> [--branches none|others|all] [--email <address>…]
                         push a sandboxed project's branch to its registry remote with your git, from a bare repo the
                         platform owns, never in the project's repo (bin/git_remote.py): fast-forward only, no tags; it
-                        shows the commits and asks first
+                        shows the commits and every check, and asks first (only your y passes a failed check, never
+                        --yes); setup: what the platform may push for the project's sessions (enforce.git_push)
 for project sessions (these are what the rules files name; the permission rules allow only these, not the admin commands above):
   brunna send | inbox | show | ack | pass | done | thread | open-questions …   = the project mailbox (bin/hubbus subcommands of the
                         same name)
@@ -118,6 +119,8 @@ for project sessions (these are what the rules files name; the permission rules 
                                                        its registry models:, run by the platform)
   brunna agent <name> [--schema F] < prompt         = bin/hub-run --agent (a confined agent call the project declares
                                                        in its registry agents:, run by the platform in its folder)
+  brunna push [<branch>] [--no-wait | --wait <s>]  = bin/git_remote.py in a sandboxed project's folder: the platform
+                                                       checks and pushes the branch (docs/design/platform-push.md)
   brunna install-cli [--dir <folder>]   put brunna's forwarding script in <folder> (default ~/.local/bin; must be on PATH)
   brunna mcp               the platform's MCP server (stdio): any coding agent with MCP can use the mailbox and write notes
                         (= bin/mcp_server.py)

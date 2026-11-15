@@ -1176,8 +1176,8 @@ def doctor_lines() -> list[tuple[str, str, str]]:
     for rt in dict.fromkeys([runtime_ports.default_name(), *runtime_ports.installed()]):
         try:
             if rt != "none" and "session_write" not in runtime_ports.capabilities(rt):
-                out.append(("info", _("push requests: not supported for {runtime}'s sessions ({why})", runtime=rt,
-                                      why=runtime_ports.missing_label(rt, "session_write")), ""))
+                out.append(("info", _("{runtime}'s sessions can't ask the platform to push (brunna push): it has no "
+                                      "{why}", runtime=rt, why=runtime_ports.missing_label(rt, "session_write")), ""))
         except (KeyError, ImportError):
             continue
     try:

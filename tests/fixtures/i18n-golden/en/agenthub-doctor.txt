@@ -55,6 +55,8 @@ $ agenthub doctor    # launchd, problems
     → to be notified, add an alerts section as in hub.example.json
 ! background services, project settings: 2 changes not applied yet
     → brunna config plan, then brunna config apply
+· gitleaks is not installed: platform pushes are scanned by the built-in rules only
+    → install gitleaks (8.19 or newer) for a wider scan
 
 6 problems, 5 reminders
 --- stderr
@@ -100,6 +102,8 @@ $ agenthub doctor    # launchd, all fine
 ✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
 ✓ the scheduler just ticked
 ✓ background services, project settings: match the config
+· gitleaks is not installed: platform pushes are scanned by the built-in rules only
+    → install gitleaks (8.19 or newer) for a wider scan
 
 no problems, 4 reminders
 --- stderr
@@ -133,6 +137,8 @@ $ agenthub doctor    # systemd, runtime none
     → bin/schedulectl status; see .logs/scheduler-stderr.log
 ! background services, project settings: 1 change not applied yet
     → brunna config plan, then brunna config apply
+· gitleaks is not installed: platform pushes are scanned by the built-in rules only
+    → install gitleaks (8.19 or newer) for a wider scan
 
 3 problems, 5 reminders
 --- stderr
@@ -162,6 +168,8 @@ $ agenthub doctor    # no service manager, unnamed assistant
 ✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
 ! the scheduler has not ticked yet, and no service manager runs it here (see the scheduler line above)
 ✓ background services, project settings: match the config
+· gitleaks is not installed: platform pushes are scanned by the built-in rules only
+    → install gitleaks (8.19 or newer) for a wider scan
 
 2 problems, 4 reminders
 --- stderr
@@ -220,6 +228,9 @@ $ agenthub doctor    # two coding agents
 ✓ sandboxed projects' own services and jobs: run isolated (seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
 ! the scheduler has not ticked yet, and no service manager runs it here (see the scheduler line above)
 ✓ background services, project settings: match the config
+· gitleaks is not installed: platform pushes are scanned by the built-in rules only
+    → install gitleaks (8.19 or newer) for a wider scan
+· acp's sessions can't ask the platform to push (brunna push): it has no way to let only a sandboxed project's sessions write a folder (brunna push requests)
 
 1 problem, 15 reminders
 --- stderr
