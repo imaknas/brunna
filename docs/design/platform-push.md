@@ -118,14 +118,20 @@ A second blind review of r1 found one blocking point and thirteen should-fix; al
 
 ### As built (11-16)
 
-The core is in `bin/git_remote.py` (forms, pipeline, worker, setup, doctor rows), `bin/push_checks.py`,
-`bin/push_queue.py` and `take_push_requests` in `bin/hubbus`; the tests are `tests/test_platform_push.py`. Not in it:
-- **the grant** ("If the grant") and the onboarding questions (section 2), built separately. The credential step calls
-  `git_push_grant.ssh_env(project)` when that module exists, refuses with a setup to-do when it doesn't or raises
-  `NotSetUp`, and never falls back to the owner's credential. A local-path origin needs none. `git_push_grant.push_url`
-  and `setup` are called when they exist (an https origin's ssh URL, the key at setup);
-- **the daily probe in `brunna/secrets` and the status-page rows** (section 9, step 5): doctor has the rows. Until the
-  probe is built, the first request after a broken key finds it, with the to-do;
+The core is in `bin/git_remote.py` (forms, pipeline, worker, doctor rows), `bin/push_checks.py`,
+`bin/push_queue.py` and `take_push_requests` in `bin/hubbus`; the tests are `tests/test_platform_push.py`. With the
+grant (`bin/git_push_grant.py`, below):
+- **the credential step** overlays `git_push_grant.ssh_env(project)` last on an environment built from scratch, and
+  pushes to `git_push_grant.push_url(project)`; no module, or `NotSetUp`, refuses with an owner to-do, never a fallback
+  to the owner's credential. A local-path origin needs no key;
+- **check 8's and S-l's visibility** is the grant's anonymous probe (`git_push_grant.visibility`), a local path
+  private;
+- **`brunna push setup`** is the grant's (key, policy, the repo's identity); `git_remote.py push setup` hands over to
+  it. Setup doesn't record `git_push.visibility` yet, so S-l's mismatch to-do waits for that;
+- doctor shows the grant's `status` and probes each project's credential as the worker would.
+
+Not in it:
+- **the status-page rows** (section 9, step 5): doctor has the rows;
 - **the owner form without an emails list:** check 6 isn't a refusal there (the owner form worked before the field
   existed); the plan still flags emails the remote hasn't seen;
 - **the session's side of "who may request"** is checked in the rendered settings, and through the real tool by the

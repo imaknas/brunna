@@ -71,8 +71,9 @@ enforce:
     emails: [1234+me@users.noreply.github.com]   # what a pushed commit's author and committer may be
 ```
 
-`brunna push setup garden-app` writes it for you: it checks whether the remote is public to an anonymous visitor,
-proposes the emails, and asks. On a public remote every branch it may push is published as soon as it lands, and
+`brunna push setup garden-app` sets it up: it makes the platform's push key for that repo (a write deploy key, added
+with your `gh`; GitHub only), asks what may be pushed and with which email, writes the field, and sets the repo's
+commit identity to that email. On a public remote every branch it may push is published as soon as it lands, and
 `others` keeps only the default branch's CI and deploys yours. Before anything leaves, the platform checks every new
 commit and file, not only what a diff shows: fast-forward only (no force, tags or deletes), the commit asked for and
 nothing newer, no submodules, Git LFS or signed commits, size limits, no change to any forge's CI files unless
