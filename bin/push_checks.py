@@ -27,6 +27,7 @@ once each, with caps on entries, depth and time (review B2), after the sizes are
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import pathlib
@@ -35,6 +36,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from typing import NamedTuple
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -53,6 +55,10 @@ CHUNK = 4 << 20                # blobs joined for one gitleaks run
 BATCH = 16 << 20               # blobs read at once
 MAX_ENTRIES = 200_000          # tree entries walked in one push (review B2)
 MAX_DEPTH = 256                # folders deep
+MAX_PATH = 4096                # one path's characters
+MAX_PATH_BYTES = 32 << 20      # every new tree's paths together
+MAX_TREE = 16 << 20            # one tree object (about 400 000 entries)
+MAX_TREES = 64 << 20           # every new tree object together
 NEUTRAL = b"gitleaks-allow-neutralised"
 CI_ENTRIES = (".github", ".gitlab-ci.yml", ".circleci", ".buildkite", ".travis.yml", "Jenkinsfile", "azure-pipelines.yml",
               "bitbucket-pipelines.yml", ".gitea", ".forgejo", ".woodpecker", ".woodpecker.yml")
@@ -76,6 +82,7 @@ FILENAME_RULES = [
 ]
 NOREPLY = re.compile(r"@users\.noreply\.github\.com$|noreply", re.I)
 TOKEN = re.compile(r"[^\s\"'`,;<>(){}\[\]|]+")
+LONG_TOKEN = re.compile(r"[^\s\"'`,;<>(){}\[\]|]{513,}")   # a word longer than MAX_VALUE
 
 
 class Finding(NamedTuple):
@@ -102,8 +109,9 @@ class Objects:
 
     def __init__(self, git, new: str, tips: list[str]):
         self.git, self.new, self.tips = git, new, tips
-        out = git("rev-list", "--objects", new, "--not", *tips).decode(errors="replace")
-        oids = [line.split(" ", 1)[0] for line in out.splitlines() if line.strip()]
+        # ids only: the names rev-list would print are paths, as long as the project makes them (the re-review's B2)
+        out = git("rev-list", "--objects", "--no-object-names", new, "--not", *tips).decode(errors="replace")
+        oids = [line.strip() for line in out.splitlines() if line.strip()]
         self.types, self.sizes = {}, {}
         if oids:
             got = git("cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
@@ -177,8 +185,15 @@ class Objects:
         on the entries, the depth and the time: a tree that names one subtree twice, k levels deep, would otherwise list
         2^k paths (review B2); past a cap the push is refused as a size finding, never walked on."""
         import time
-        self.read(self.trees)   # every new tree in one batch: their size is bounded by the size check that ran first
-        new_trees, entries, seen, first = set(self.trees), [], set(), {}
+        # a tree's size says how many entries it has, before it is read: one too wide, or all of them too large, is
+        # refused unread
+        if (wide := max((self.sizes[t] for t in self.trees), default=0)) > MAX_TREE:
+            raise Failure("size", _("a new tree is {mb} MB as an object: push in parts", mb=wide >> 20), fix="project")
+        if sum(self.sizes[t] for t in self.trees) > MAX_TREES:
+            raise Failure("size", _("the new trees come to more than {mb} MB: push in parts", mb=MAX_TREES >> 20),
+                          fix="project")
+        self.read(self.trees)   # every new tree in one batch, bounded just above
+        new_trees, entries, seen, first, path_bytes = set(self.trees), [], set(), {}, 0
         stack = [(self.commit_header(c, "tree")[0], "", c, 0) for c in reversed(self.commits)]
         while stack:
             tree, prefix, commit, depth = stack.pop()
@@ -191,6 +206,13 @@ class Objects:
                 raise Failure("size", _("the new trees took too long to read: push in parts"), fix="project")
             for mode, name, oid in self.tree_entries(tree):
                 path = f"{prefix}{name}"
+                # the paths are as long as the project makes them, nested: counted as they are built
+                if len(path) > MAX_PATH:
+                    raise Failure("size", _("a new path is longer than {n} characters", n=MAX_PATH), fix="project")
+                path_bytes += len(path)
+                if path_bytes > MAX_PATH_BYTES:
+                    raise Failure("size", _("the new trees' paths come to more than {mb} MB: push in parts",
+                                            mb=MAX_PATH_BYTES >> 20), fix="project")
                 entries.append((mode, path, oid))
                 if len(entries) > MAX_ENTRIES:
                     raise Failure("size", _("the new trees hold more than {n} entries: push in parts", n=MAX_ENTRIES),
@@ -357,28 +379,62 @@ def filename_hits(path: str) -> list[str]:
 # ---------- the project's declared secret values (r2 S-e) ----------
 
 def declared_file(project: str) -> pathlib.Path:
-    """<secrets>/push-declared/<project>.json: the values themselves (they are the project's secrets already, in its own
-    folder), kept where every sandbox is denied (policy.secret_dirs), owner-only (0600 in a 0700 folder). Matched as
-    substrings (review B1): a value inside a URL, a query string or a sentence is still the value."""
-    return hubconf.secrets_dir() / "push-declared" / f"{project}.json"
+    """<secrets>/push-declared/<project>.jsonl: what the platform has seen the project declare, kept where every sandbox
+    is denied (policy.secret_dirs), owner-only (0600 in a 0700 folder). Append-only: one line per value
+    ({"v": value, "name"}) or, for a value longer than MAX_VALUE, its hash ({"h": sha256, "name"}), matched against a
+    whole new file. Never rewritten, never shrunk (review B1 and its re-review)."""
+    return hubconf.secrets_dir() / "push-declared" / f"{project}.jsonl"
 
 
-def _load(f: pathlib.Path) -> dict:
+MAX_VALUE = 512          # bytes: a declared value is a short secret; a longer one is matched as a whole file
+MAX_VALUES = 4096        # values and hashes in one project's store: past it the push is refused for the owner
+STORE_CAP = 8 << 20      # the store read whole, or the push refused
+
+
+def _nfc(text: str) -> str:
+    return unicodedata.normalize("NFC", text)
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8", errors="surrogatepass")).hexdigest()
+
+
+def _load(project: str) -> list[dict]:
+    """The whole store, or Failure (fail closed: a store that can't be read whole never lets a push through, and is
+    never rewritten from a partial read)."""
+    f = declared_file(project)
     try:
-        raw = nofollow.read(f.parent, f.name, 4 << 20)
-        return json.loads(raw) if raw else {}
-    except (OSError, ValueError):
-        return {}
+        raw = nofollow.read(f.parent, f.name, STORE_CAP) if f.parent.is_dir() else None
+    except OSError as e:
+        raise Failure("secrets", _("the platform's record of this project's declared secrets can't be read whole "
+                                   "({why})", why=e.strerror or type(e).__name__), cause="declared-store") from None
+    out = []
+    for line in (raw or b"").decode("utf-8", errors="replace").splitlines():
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue   # a line cut by a crash mid-append: the ones before it stand
+        if isinstance(rec, dict) and (isinstance(rec.get("v"), str) or isinstance(rec.get("h"), str)):
+            out.append(rec)
+    return out
+
+
+def _dotenv(line: str) -> tuple[str, str] | None:
+    """(key, value) of one dotenv line: a quoted value is what is inside its quotes; an unquoted one ends at
+    whitespace followed by # (an inline comment), as dotenv reads it."""
+    k, sep, v = line.strip().removeprefix("export ").partition("=")
+    if not sep:
+        return None
+    v = v.strip()
+    if v[:1] in ("'", '"') and v.find(v[0], 1) > 0:
+        return k.strip(), v[1:v.find(v[0], 1)]
+    return k.strip(), re.split(r"\s+#", v, maxsplit=1)[0].strip()
 
 
 def _values(raw: bytes, env_key: str | None) -> list[str]:
-    text = raw.decode("utf-8", errors="replace")
+    text = _nfc(raw.decode("utf-8", errors="replace"))
     if env_key:
-        out = []
-        for line in text.splitlines():
-            k, sep, v = line.strip().removeprefix("export ").partition("=")
-            if sep and k.strip() == env_key:
-                out.append(v.strip().strip("'\""))
+        out = [kv[1] for line in text.splitlines() if (kv := _dotenv(line)) and kv[0] == env_key]
         return [v for v in out if len(v) >= MIN_SECRET]
     whole = text.strip()
     if whole and "\n" not in whole:
@@ -388,20 +444,22 @@ def _values(raw: bytes, env_key: str | None) -> list[str]:
 
 
 def remember_declared(project: str, doc: dict, log=None) -> None:
-    """Read the project's declared secret values as they are now and add them to what the platform has seen (never
-    dropped when a declaration goes: the project can change secrets:, so it can't turn the check off; r2 S-e). Only
-    entries without kind whose path is relative, read with nofollow from its own workspace or runtime folder: no link
-    followed, regular single-link files only, at most SECRET_CAP. Anything else is skipped, said only to the owner's log
-    (S3: a refusal must not tell the project anything about files it can't read)."""
+    """Add the project's declared secret values as they are now to what the platform has seen (never dropped when a
+    declaration goes: the project can change secrets:, so it can't turn the check off; r2 S-e). Only entries without kind
+    whose path is relative, read with nofollow from its own workspace or runtime folder: no link followed, regular
+    single-link files only, at most SECRET_CAP. Anything else is skipped, said only to the owner's log (S3: a refusal
+    must not tell the project anything about files it can't read). A value is kept as itself up to MAX_VALUE bytes, as
+    its hash beyond; at most MAX_VALUES in all, past which the push is refused for the owner (never one dropped)."""
     import registry
     d = registry.dirs({**doc, "name": project})
     bases = [b for b in (d.get("workspace"), d.get("runtime")) if b]
-    f = declared_file(project)
-    seen, changed = _load(f), False
+    have = _load(project)
+    seen = {r.get("v") for r in have} | {r.get("h") for r in have}
+    new = []
     for sec in doc.get("secrets") or []:
         if not isinstance(sec, dict) or sec.get("kind"):
             continue
-        rel, name = str(sec.get("path") or ""), str(sec.get("name") or sec.get("path") or "?")
+        rel, name = str(sec.get("path") or ""), str(sec.get("name") or sec.get("path") or "?")[:80]
         if not rel or rel.startswith(("/", "~")) or ".." in pathlib.PurePosixPath(rel).parts:
             if log:
                 log(f"{project}: declared secret {name}: path {rel!r} is not relative to the project's folder; skipped")
@@ -416,33 +474,77 @@ def remember_declared(project: str, doc: dict, log=None) -> None:
             if raw is None:
                 continue
             for v in _values(raw, sec.get("env_key")):
-                if v not in seen:
-                    seen[v] = {"name": name[:80], "at": datetime.date.today().isoformat()}
-                    changed = True
-    if changed:
-        f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        os.chmod(f.parent, 0o700)
-        tmp = f.with_name(f".{f.name}.{os.getpid()}.new")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            json.dump(seen, fh)
-        os.replace(tmp, f)
+                rec = {"v": v, "name": name} if len(v.encode()) <= MAX_VALUE else {"h": _sha(v), "name": name}
+                key = rec.get("v") or rec.get("h")
+                if key not in seen:
+                    seen.add(key)
+                    new.append(rec)
+    if not new:
+        return
+    if len(have) + len(new) > MAX_VALUES:
+        raise Failure("secrets", _("this project has declared more than {n} secret values; the owner looks at its "
+                                   "secrets: entries", n=MAX_VALUES), cause="declared-store")
+    f = declared_file(project)
+    f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    os.chmod(f.parent, 0o700)
+    fd = os.open(f, os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "a") as fh:
+        for rec in new:
+            fh.write(json.dumps({**rec, "at": datetime.date.today().isoformat()}, ensure_ascii=False) + "\n")
+
+
+def _trie_pattern(values: list[str]) -> str:
+    """One regex for many literals, factored as a trie: alternatives share their prefixes, so a position that starts no
+    value is left after a character or two."""
+    trie: dict = {}
+    for v in values:
+        node = trie
+        for ch in v:
+            node = node.setdefault(ch, {})
+        node[""] = True
+
+    def emit(node: dict) -> str:
+        alts = [re.escape(ch) + emit(sub) for ch, sub in sorted(node.items()) if ch]
+        end = "" in node
+        if not alts:
+            return ""
+        body = alts[0] if len(alts) == 1 else "(?:" + "|".join(alts) + ")"
+        return f"(?:{body})?" if end else body
+    return emit(trie)
 
 
 class Declared:
-    """Every value the platform has seen the project declare, matched as a substring of a text (one alternation of the
-    escaped values, longest first): → the declared names found, never the values."""
+    """Every value the platform has seen the project declare: a short one matched as a substring of a text (one
+    trie-factored regex, in chunks, checking the deadline), a long one by the hash of a whole new file. → the declared
+    names found, never the values."""
+    CHUNK = 1 << 20
 
     def __init__(self, project: str):
-        seen = _load(declared_file(project))
-        self.names = {v: (meta or {}).get("name", "?") for v, meta in seen.items() if isinstance(v, str) and v}
-        self.rx = re.compile("|".join(re.escape(v) for v in sorted(self.names, key=len, reverse=True))) \
-            if self.names else None
+        recs = _load(project)
+        self.names = {_nfc(r["v"]): r.get("name", "?") for r in recs if r.get("v")}
+        self.hashes = {r["h"]: r.get("name", "?") for r in recs if r.get("h")}
+        self.longest = max((len(v) for v in self.names), default=0)
+        self.rx = re.compile(_trie_pattern(sorted(self.names))) if self.names else None
 
-    def hits(self, texts: list[str]) -> list[str]:
-        if not self.rx:
-            return []
-        return sorted({self.names[m.group(0)] for t in texts for m in self.rx.finditer(t)})
+    def hits(self, texts: list[str], deadline: float | None = None) -> list[str]:
+        import time
+        out = set()
+        for t in texts:
+            t = _nfc(t)
+            if self.hashes:   # a long value: the whole text, or a long word in it
+                cands = {t, t.strip(), *LONG_TOKEN.findall(t)}
+                for h in {_sha(c) for c in cands} & set(self.hashes):
+                    out.add(self.hashes[h])
+            if not self.rx:
+                continue
+            step, over = self.CHUNK, max(0, self.longest - 1)
+            for i in range(0, max(len(t), 1), step):
+                if deadline is not None and time.monotonic() > deadline:
+                    raise Failure("secrets", _("the scanner failed: it ran past its time limit"))
+                for m in self.rx.finditer(t, i, min(len(t), i + step + over)):
+                    if m.group(0) in self.names:
+                        out.add(self.names[m.group(0)])
+        return sorted(out)
 
 
 # ---------- gitleaks ----------
@@ -583,20 +685,21 @@ def scan(objs: Objects, entries, first, *, project, doc, public, deadline, log=N
         ps = sorted(paths.get(oid, ()))
         return _("{path} in commit {sha}", path=(ps[0] if ps else short(oid))[:200], sha=short(first.get(oid, "?")))
 
-    def look(label: str, texts: list[str], plain: str | None = None):
-        """plain: the place named without its path, for a names finding (the path may hold the very name)."""
+    def look(label: str, texts: list[str]):
         for rule in rule_hits(texts):
             out.append(Finding("secrets", _("{where}: a secret ({rule}); rewrite the unpushed commits so it never "
                                             "appears", where=label, rule=rule)))
-        for name in declared.hits(texts):
+        for name in declared.hits(texts, deadline):
             out.append(Finding("secrets", _("{where}: the value of this project's secret {name}; rewrite the unpushed "
                                             "commits so it never appears", where=label, name=name)))
         if public:
             for t in texts:
                 # which name only in the owner's record (review S3): the project is told that one is there
                 for n in sorted({n for n, pat in private if pat.search(t)}):
-                    out.append(Finding("names", _("{where} names a private project and the remote is public",
-                                                  where=plain or label), detail=f"{n} ({label})"))
+                    # neither the name nor where it is (the re-review's 6): the owner's to-do has both
+                    out.append(Finding("names", _("a new commit's message, file or path names a private project and the "
+                                                  "remote is public; the owner has the details"),
+                                       fix="owner", cause="private-name", detail=f"{n} ({label})"))
                 if any(h in t for h in homes):
                     out.append(Finding("names", _("{where} holds the owner's home path and the remote is public",
                                                   where=label)))
@@ -610,9 +713,17 @@ def scan(objs: Objects, entries, first, *, project, doc, public, deadline, log=N
             out.append(Finding("secrets", _("{path} in commit {sha}: a file of a kind that holds secrets ({rule}); "
                                             "rewrite the unpushed commits so it never appears", path=path[:200],
                                             sha=short(first.get(oid, "?")), rule=rule)))
-    allpaths = "\n".join(p for _m, p, _o in entries)
-    if allpaths:
-        look(_("a path in the new trees"), [allpaths.replace("gitleaks:allow", NEUTRAL.decode())])
+    # the paths in chunks of about a megabyte, never one string of them all (the re-review's B2)
+    chunk, size = [], 0
+    for _m, path, _o in entries:
+        chunk.append(path)
+        size += len(path) + 1
+        if size >= 1 << 20:
+            look(_("a path in the new trees"), ["\n".join(chunk).replace("gitleaks:allow", NEUTRAL.decode())])
+            chunk, size = [], 0
+    if chunk:
+        look(_("a path in the new trees"), ["\n".join(chunk).replace("gitleaks:allow", NEUTRAL.decode())])
+    if entries:
         if public and any(user and seg == user for _m, p, _o in entries for seg in p.split("/")):
             out.append(Finding("names", _("a path in the new trees has the owner's user name as a folder and the remote "
                                           "is public")))
@@ -621,7 +732,7 @@ def scan(objs: Objects, entries, first, *, project, doc, public, deadline, log=N
             raise Failure("secrets", _("the scanner failed: it ran past its time limit"))
         texts = variants(data)
         label = where_blob(oid)
-        look(label, texts, _("a file in commit {sha}", sha=short(first.get(oid, "?"))))
+        look(label, texts)
         items += [(label, t) for t in texts]
     exe = gitleaks()
     if exe:
