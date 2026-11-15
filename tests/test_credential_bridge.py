@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -499,6 +500,111 @@ class LlmRun(Scratch):
         self.assertIn("never connected", failed[0], "the model's success doesn't make the run green")
         code, _seen, failed = self.run_llm(status=None)
         self.assertIn("never started", failed[0])
+
+
+# llm.py in a temp hub: the real one, run as run-agent-job.sh starts it (its argv, its folder, its environment), with
+# only what reaches outside stood in for: the registry entry (from $FIXTURE), the credential's freshness, the runtime
+# (it records the task instead of starting an agent, and writes the bridge's status as a connected bridge would) and
+# the bus
+REAL_LLM = r"""import importlib.util, json, os, pathlib, sys, types
+from unittest import mock
+real_bin = pathlib.Path(os.environ["REAL_BIN"])
+sys.path.insert(0, str(real_bin))
+import credentials, registry, runtime_claude, runtime_ports
+fx = json.loads(pathlib.Path(os.environ["FIXTURE"]).read_text())
+spec = importlib.util.spec_from_file_location("llm", real_bin / "llm.py")
+llm = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(llm)
+seen = {}
+
+def run(task):
+    seen.update(cwd=task.cwd, pwd=os.getcwd(), servers=[s.id for s in task.servers])
+    (pathlib.Path(task.run_dir) / "credential-upwork.status.json").write_text(json.dumps({"initialized": True}))
+    return runtime_ports.TaskResult(ok=True, text="done")
+rt = types.SimpleNamespace(run=run, describe=lambda t: [], rule_problems=lambda t, **k: [], run_server=lambda t: t,
+                           sealed=runtime_claude.sealed, tools_named=runtime_claude.tools_named,
+                           rules_tools_named=runtime_claude.rules_tools_named,
+                           credential_rules_problems=runtime_claude.credential_rules_problems,
+                           ambient_servers=lambda t: None, servers_named=lambda t: [])
+failed = []
+with mock.patch.object(runtime_ports, "load", lambda *a, **k: rt), \
+        mock.patch.object(runtime_ports, "capabilities", lambda name=None: {"agent", "confine", "rule_check"}), \
+        mock.patch.object(registry, "refresh", lambda: {"projects": {"demo": fx["doc"]}}), \
+        mock.patch.object(registry, "job_prompt", lambda stem, job: pathlib.Path(fx["prompt"])), \
+        mock.patch.object(credentials, "fresh", lambda *a, **k: "t"), \
+        mock.patch.object(llm, "job_failed", lambda point, reason: failed.append(reason)):
+    sys.argv = ["llm.py", *sys.argv[1:]]
+    code = llm.main()
+pathlib.Path(os.environ["RECORD_TO"]).write_text(json.dumps({"code": code, "failed": failed, **seen}))
+sys.exit(code)
+"""
+
+
+class RunAgentJob(Scratch):
+    """The job as the scheduler starts it: run-agent-job.sh under its legacy state name, its folder the registered
+    workspace reached through a link, then llm.py's own run (registry.scheduler_jobs's command, the real script and the
+    real llm.py; the first run on the owner's machine was refused here, 11-15: llm.py got no --cwd)."""
+
+    def setUp(self):
+        super().setUp()
+        import registry
+        self.hub = self.tmp / "hub"
+        (self.hub / "bin").mkdir(parents=True)
+        bin_ = ROOT / "bin"
+        for f in ("py", "hubpaths.sh", "i18n.py", "hubconf.py", "run-agent-job.sh", "names.py"):
+            (self.hub / "bin" / f).symlink_to(bin_ / f)
+        (self.hub / "bin" / "llm.py").write_text(REAL_LLM)
+        (self.hub / "bin" / "gen-status-page.py").write_text("pass\n")
+        (self.hub / "contracts").symlink_to(ROOT / "contracts")
+        for d in ("home", "config", "data", "secrets", "state", "ws"):
+            (self.tmp / d).mkdir(exist_ok=True)
+        (self.tmp / "config" / "hub.json").write_text(json.dumps({"owner": {"name": "alex", "tag": "Alex"}}))
+        (self.tmp / "link").symlink_to(self.tmp / "ws")   # the registered workspace, spelled another way
+        self.prompt = self.tmp / "daily.md"
+        self.prompt.write_text("do it\n")
+        job = {**self.doc["jobs"][0], "at": "09:00", "cwd": "workspace", "legacy_name": "demo-daily-check",
+               "prompt": "jobs/daily.md"}
+        self.doc = {**self.doc, "paths": {"workspace": str(self.tmp / "link")}, "jobs": [job]}
+        (self.tmp / "fixture.json").write_text(json.dumps({"doc": self.doc, "prompt": str(self.prompt)}))
+        with mock.patch.object(registry, "job_prompt", lambda stem, j: self.prompt):
+            [sched] = [j for j in registry.scheduler_jobs({"projects": {"demo": self.doc}, "modules": {}}, set())[0]
+                       if j["name"] == "demo/daily"]
+        self.command = sched["command"]
+        self.record = self.tmp / "record.json"
+
+    def run_job(self, command: str) -> dict:
+        py = os.environ.get("AGENT_HUB_PYTHON") or os.environ.get("BRUNNA_PYTHON") or sys.executable
+        env = {**{k: v for k, v in os.environ.items()
+                  if not k.startswith(("BRUNNA_", "AGENT_HUB_", "LLM_AUTH", "AGENT_JOB_", "CLAUDE_CODE_OAUTH"))},
+               "AGENT_HUB_PYTHON": py, "AGENT_HUB_ROOT": str(self.hub), "HOME": str(self.tmp / "home"),
+               "AGENT_HUB_CONFIG": str(self.tmp / "config"), "AGENT_HUB_DATA": str(self.tmp / "data"),
+               "AGENT_HUB_SECRETS": str(self.tmp / "secrets"), "AGENT_HUB_STATE": str(self.tmp / "state"),
+               "AGENT_HUB_LANG_UI": "en", "RUN_AGENT_JOB_FOREGROUND": "1", "RECORD_TO": str(self.record),
+               "REAL_BIN": str(ROOT / "bin"), "FIXTURE": str(self.tmp / "fixture.json")}
+        # the scheduler's command, with this test's hub in place of the platform's
+        command = command.replace(str(ROOT / "bin" / "run-agent-job.sh"), str(self.hub / "bin" / "run-agent-job.sh"))
+        r = subprocess.run(["/bin/bash", "-c", command], env=env, capture_output=True, text=True, timeout=120)
+        # run-agent-job.sh keeps a job's state in the hub's .state, under the job's state name
+        status = json.loads((self.hub / ".state" / "agent-jobs" / "demo-daily-check" / "status.json").read_text())
+        return {**json.loads(self.record.read_text()), "status": status, "rc": r.returncode}
+
+    def test_the_registered_folder_runs_with_its_bridge(self):
+        self.assertIn("AGENT_JOB_CREDENTIALS=daily", self.command)
+        self.assertIn("demo-daily-check", self.command, "the state folder is the legacy name's")
+        rec = self.run_job(self.command)
+        self.assertEqual((rec["code"], rec["failed"]), (0, []), rec)
+        self.assertEqual(rec["servers"], ["upwork"])
+        self.assertIsNone(rec["cwd"], "run-agent-job.sh passes no --cwd: llm.py runs in the job's folder")
+        self.assertEqual(pathlib.Path(rec["pwd"]).resolve(), (self.tmp / "ws").resolve())
+        self.assertEqual(rec["status"]["state"], "ok")
+
+    def test_another_folder_is_refused(self):
+        other = self.tmp / "other"
+        other.mkdir()
+        rec = self.run_job(self.command.replace(f" {self.tmp / 'link'} ", f" {other} "))
+        self.assertEqual(rec["code"], 1)
+        self.assertIn("folder", rec["failed"][0])
+        self.assertEqual(rec["status"]["state"], "failed")
 
 
 if __name__ == "__main__":

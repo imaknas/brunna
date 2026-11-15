@@ -632,7 +632,10 @@ def attach_credentials(point: str, spec: dict, rt, task, run_dir, dry_run: bool 
                        point=point, project=project, job=job_name)
     want_cwd = hubconf.STATE / "agent-jobs" / registry.agent_state_name(project, job) if job.get("cwd") == "state" \
         else registry.dirs(doc).get(job.get("cwd") or registry.default_cwd(doc))
-    if not want_cwd or not task.cwd or pathlib.Path(task.cwd).resolve() != pathlib.Path(want_cwd).resolve():
+    # the run's folder is task.cwd, or (as run-agent-job.sh starts it: `cd` there, no --cwd) the one llm.py runs in,
+    # which is also where the runtime starts the agent
+    here = task.cwd or os.getcwd()
+    if not want_cwd or pathlib.Path(here).resolve() != pathlib.Path(want_cwd).expanduser().resolve():
         return task, _("{point} did not start: its folder isn't the one the registry gives {project}/{job}",
                        point=point, project=project, job=job_name)
     if not rt.sealed(task):
