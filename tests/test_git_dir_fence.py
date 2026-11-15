@@ -121,9 +121,37 @@ ENV = {"PATH": "/usr/bin:/bin", "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_NO
        "GIT_AUTHOR_NAME": "a", "GIT_AUTHOR_EMAIL": "a@example.com", "GIT_COMMITTER_NAME": "a",
        "GIT_COMMITTER_EMAIL": "a@example.com", "LANG": "C"}
 PF = f".git/{names.current('repo_dir')}"   # the repo's platform folder
-PF2 = f".git/{names.other('repo_dir')}"    # its other spelling, which doesn't exist
+PF2 = f".git/{names.other('repo_dir')}"    # its other spelling (both are made by the platform in the fixture)
 UV = f"{PF}/cache/uv"
 MARKER = f"mkdir -p {UV}/sdists-v9 && : > {UV}/sdists-v9/.git"
+# renamex_np(a, b, RENAME_SWAP): a swap is checked with each end's existing type (step 1's second cold review)
+SWAP = ('"$PY" -c \'import ctypes, sys; l = ctypes.CDLL("/usr/lib/libSystem.B.dylib"); '
+        'sys.exit(0 if l.renamex_np(sys.argv[1].encode(), sys.argv[2].encode(), 2) == 0 else 1)\'')
+
+
+def per_spelling(pf: str) -> dict:
+    """The platform folder's rules, probed under one spelling."""
+    uv = f"{pf}/cache/uv"
+    marker = f"mkdir -p {uv}/sdists-v9 && : > {uv}/sdists-v9/.git"
+    return {
+        "hardlink-to-config-in-platform-folder": f"ln .git/config {pf}/hl",
+        "symlink-written-through": f"ln -s ../config {pf}/s && echo y >> {pf}/s",
+        "platform-folder-renamed": f"mv {pf} .git/elsewhere",
+        "platform-folder-removed": f"rmdir {pf}",
+        "git-below-platform-folder": f"mkdir -p {pf}/x/.git",
+        "uv-bucket-moved-out": f"{marker} && mv {uv}/sdists-v9 moved",
+        "uv-folder-moved-out": f"mkdir -p {uv} && mv {uv} moved",
+        "uv-cache-moved-out": f"{marker} && mv {pf}/cache moved",
+        "marker-elsewhere-in-cache": f"mkdir -p {uv}/other && : > {uv}/other/.git",
+        "marker-hardlinked-as-git": f"{marker} && mkdir m && ln {uv}/sdists-v9/.git m/.git",
+        "marker-as-a-folder": f"mkdir -p {uv}/sdists-v9/.git",
+        "marker-as-a-link": f"mkdir -p {uv}/sdists-v9 && ln -s ../../../.. {uv}/sdists-v9/.git",
+        "folder-moved-onto-marker": f'mkdir -p "$T/m/objects" {uv}/sdists-v9 && mv "$T/m" {uv}/sdists-v9/.git',
+        "cache-made-as-a-link": f"ln -s .. {pf}/cache",
+        "uv-made-as-a-link": f"mkdir -p {pf}/cache && ln -s .. {uv}",
+        "bucket-made-as-a-link": f"mkdir -p {uv} && ln -s ../.. {uv}/sdists-v9",
+    }
+
 
 # each: a shell snippet that exits 0 when the write it tries lands. Refused under the fence; each lands without it.
 REFUSED = {
@@ -146,22 +174,20 @@ REFUSED = {
     "head-hardlink": "mkdir t && ln f t/HEAD",
     "head-renamed-onto": "mkdir r && echo x > r/h && mv r/h r/HEAD",
     "head-copied": "mkdir u && cp f u/HEAD",
+    "head-rename-swap": f"mkdir -p s/HEAD && echo 'ref: refs/heads/main' > s/g && {SWAP} s/g s/HEAD && test -f s/HEAD",
+    "head-rename-swap-in-temp": f'mkdir -p "$T/s/HEAD" && echo x > "$T/s/g" && {SWAP} "$T/s/g" "$T/s/HEAD"'
+                                f' && test -f "$T/s/HEAD"',
     "move-git-away": "mv .git g",
     "hardlink-to-config": "ln .git/config hl",
-    "hardlink-to-config-in-platform-folder": f"ln .git/config {PF}/hl",
-    "symlink-written-through": f"ln -s ../config {PF}/s && echo y >> {PF}/s",
-    "platform-folder-renamed": f"mv {PF} .git/elsewhere",
-    "platform-folder-removed": f"rmdir {PF}",
-    "git-below-platform-folder": f"mkdir -p {PF}/x/.git",
     "worktree-gitfile-rewritten": "echo 'gitdir: /tmp' > wt/.git",
     "commit": "git commit -q --allow-empty -m x",
-    "uv-bucket-moved-out": f"{MARKER} && mv {UV}/sdists-v9 moved",
-    "uv-cache-moved-out": f"{MARKER} && mv {PF}/cache moved",
-    "marker-elsewhere-in-cache": f"mkdir -p {UV}/other && : > {UV}/other/.git",
-    "marker-hardlinked-as-git": f"{MARKER} && mkdir m && ln {UV}/sdists-v9/.git m/.git",
-    "platform-folder-made-as-a-link": f"ln -s . {PF2}",
-    "cache-made-as-a-link": f"ln -s .. {PF}/cache",
+    **{f"{k}{'' if pf == PF else ' (other spelling)'}": v for pf in (PF, PF2) for k, v in per_spelling(pf).items()},
 }
+# the chain the second cold review ran (a HEAD file by a swap, then a git-dir shape moved onto uv's marker name):
+# without the fence it lands, and git run outside (the owner's, safe.bareRepository=explicit included) enters it
+CHAIN = (f'mkdir -p "$T/m/objects" "$T/m/refs/heads" "$T/m/HEAD" && printf "[core]\\n\\tbare = false\\n" > "$T/m/config"'
+         f' && echo "ref: refs/heads/main" > "$T/m/g" && {SWAP} "$T/m/g" "$T/m/HEAD" && rm -rf "$T/m/g"'
+         f' && mkdir -p {UV}/sdists-v1/sub && mv "$T/m" {UV}/sdists-v1/.git')
 # what still works under the fence
 WORKS = {
     "status": "git status --porcelain >/dev/null",
@@ -169,8 +195,9 @@ WORKS = {
     "diff": "git diff --exit-code",
     "worktree-status": "git -C wt status --porcelain >/dev/null && git -C wt log -1 >/dev/null",
     "outbox": f"mkdir -p {PF}/outbox && echo y > {PF}/outbox/x",
-    "platform-folder-mkdir-p": f"mkdir -p {PF}",
+    "platform-folder-mkdir-p": f"mkdir -p {PF} {PF2}",
     "uv-marker": MARKER,
+    "uv-marker-other-spelling": f"mkdir -p {PF2}/cache/uv/sdists-v9 && : > {PF2}/cache/uv/sdists-v9/.git",
     "a-folder-named-head": "mkdir -p e/HEAD && echo x > e/HEAD/f",
     "names-that-only-start-with-git": "echo x > .gitignore && echo y > .gitattributes && mkdir -p .github && echo z > .github/w",
     # the test runner's way: the index and the object folder in temp, the repo's objects as an alternate
@@ -183,10 +210,10 @@ WORKS = {
 
 @unittest.skipUnless(seatbelt.can_sandbox() is None, "needs Seatbelt (sandbox-exec)")
 class Seatbelt(unittest.TestCase):
-    """Under the platform's real service profile, as a sandboxed project's service or job runs (step 1 renders the fence
-    there and in cap-run only)."""
+    """Under the platform's real profiles: the service profile, as a sandboxed project's service or job runs, and the
+    cap-run profile (step 1 renders the fence in those two only)."""
 
-    def fixture(self, platform_folder=True):
+    def fixture(self, folders=(PF, PF2)):
         tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         ws, t, home = tmp / "ws", tmp / "t", tmp / "home"
@@ -202,30 +229,45 @@ class Seatbelt(unittest.TestCase):
         git("add", "f", ".gitignore")
         git("commit", "-q", "-m", "init")
         git("worktree", "add", "-q", "-b", "w", str(ws / "wt"))   # a linked worktree, made outside the sandbox
-        if platform_folder:   # the platform makes it (the rebuild, step 2): the sandbox can't remove or rename it
-            (ws / PF).mkdir()
+        for pf in folders:   # the platform makes them (the rebuild, step 2): never made, removed or renamed from inside
+            (ws / pf).mkdir()
         # made outside any fence (the owner, another project, an unfenced session): see Limits
         (t / "pre" / ".git").mkdir(parents=True)
         (t / "pre" / ".git" / "config").write_text("[core]\n")
         (t / "preshape").mkdir()
         (t / "preshape" / "HEAD").write_text("ref: refs/heads/main\n")
-        return tmp, ws, t, {**env, "T": str(t)}
+        return tmp, ws, t, {**env, "T": str(t), "PY": sys.executable}
 
-    def run_in(self, snippet: str, fenced: bool, platform_folder=True):
-        tmp, ws, t, env = self.fixture(platform_folder)
+    def profile(self, ws, t, fenced: bool, kind: str = "service"):
+        pol = pol_for(ws, ON if fenced else {"enforce": {"sandbox": True}})
         with mock.patch.object(seatbelt, "TMP", [str(t)]):
-            prof = seatbelt.service_profile(pol_for(ws, ON if fenced else {"enforce": {"sandbox": True}}), [ws])
-        r = subprocess.run(["/usr/bin/sandbox-exec", "-p", prof, "/bin/sh", "-c", snippet], cwd=ws, env=env,
-                           capture_output=True, text=True, timeout=60)
+            return seatbelt.service_profile(pol, [ws]) if kind == "service" else seatbelt.profile(pol, "gpu")
+
+    def run_in(self, snippet: str, fenced: bool, folders=(PF, PF2), kind="service"):
+        tmp, ws, t, env = self.fixture(folders)
+        r = subprocess.run(["/usr/bin/sandbox-exec", "-p", self.profile(ws, t, fenced, kind), "/bin/sh", "-c", snippet],
+                           cwd=ws, env=env, capture_output=True, text=True, timeout=60)
         return r, ws, t
 
-    def test_every_planting_route_is_refused_and_lands_without_the_fence(self):
+    def refused(self, kind):
         for name, snippet in REFUSED.items():
             with self.subTest(name):
-                r, _ws, _t = self.run_in(snippet, fenced=False)
+                r, _ws, _t = self.run_in(snippet, fenced=False, kind=kind)
                 self.assertEqual(r.returncode, 0, f"positive control: {r.stderr}")
-                r, _ws, _t = self.run_in(snippet, fenced=True)
+                r, _ws, _t = self.run_in(snippet, fenced=True, kind=kind)
                 self.assertNotEqual(r.returncode, 0, f"landed under the fence: {r.stdout} {r.stderr}")
+
+    def works(self, kind):
+        for name, snippet in WORKS.items():
+            with self.subTest(name):
+                r, ws, _t = self.run_in(snippet, fenced=True, kind=kind)
+                self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_every_planting_route_is_refused_and_lands_without_the_fence(self):
+        self.refused("service")
+
+    def test_every_planting_route_is_refused_under_the_cap_run_profile_too(self):
+        self.refused("cap")
 
     def test_nothing_was_planted(self):
         """The refusals left no git dir, gitfile or HEAD file behind."""
@@ -235,31 +277,54 @@ class Seatbelt(unittest.TestCase):
                    and not p.is_relative_to(ws / ".git") and p not in (ws / "wt" / ".git", t / "pre" / ".git",
                                                                        t / "preshape" / "HEAD")]
         self.assertEqual(planted, [], r.stderr)
+        self.assertFalse([p for p in (ws / ".git").rglob(".git") if not p.is_file()], "a .git that isn't uv's marker")
         self.assertEqual((ws / ".git" / "config").read_text().count("x.y"), 0)
-        self.assertTrue((ws / PF).is_dir())
+        self.assertTrue((ws / PF).is_dir() and (ws / PF2).is_dir())
+
+    def test_the_swap_chain_into_uvs_marker(self):
+        """A HEAD file made by swapping it with a folder named HEAD, the git-dir shape then moved onto the marker's
+        name: lands without the fence, and git run outside enters it from a folder below; refused under it."""
+        def outside_git(ws):
+            cfg = ws.parent / "owner-gitconfig"
+            cfg.write_text("[safe]\n\tbareRepository = explicit\n")
+            return subprocess.run(["git", "-C", str(ws / UV / "sdists-v1" / "sub"), "rev-parse", "--absolute-git-dir"],
+                                  capture_output=True, text=True, env={**ENV, "GIT_CONFIG_GLOBAL": str(cfg),
+                                                                       "HOME": str(ws.parent / "home")})
+        r, ws, _t = self.run_in(CHAIN, fenced=False)
+        self.assertEqual(r.returncode, 0, f"positive control: {r.stderr}")
+        got = outside_git(ws)
+        self.assertEqual(got.stdout.strip(), str(ws / UV / "sdists-v1" / ".git"), got.stderr)
+        r, ws, _t = self.run_in(CHAIN, fenced=True)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse((ws / UV / "sdists-v1" / ".git").exists())
+        self.assertNotEqual(outside_git(ws).stdout.strip(), str(ws / UV / "sdists-v1" / ".git"))
 
     def test_git_reads_and_the_platform_folder_still_work(self):
-        for name, snippet in WORKS.items():
-            with self.subTest(name):
-                r, ws, _t = self.run_in(snippet, fenced=True)
-                self.assertEqual(r.returncode, 0, r.stderr)
+        self.works("service")
         r, ws, _t = self.run_in("git status --porcelain", fenced=True)
         self.assertFalse((ws / ".git" / "index.lock").exists(), "status's opportunistic refresh left a lock")
 
-    def test_a_missing_platform_folder(self):
-        """The sandbox may make it (a folder, as today's outbox does), but a link there gains nothing: what is written
-        through it is matched where it lands, in the git dir."""
-        r, ws, _t = self.run_in(f"mkdir {PF} && echo y > {PF}/x", fenced=True, platform_folder=False)
+    def test_they_still_work_under_the_cap_run_profile(self):
+        self.works("cap")
+
+    def test_the_cost_a_folder_named_head_stays(self):
+        """What the swap rule costs: a folder named HEAD can be made, not removed or renamed, from inside."""
+        r, _ws, _t = self.run_in("mkdir -p e/HEAD && rmdir e/HEAD", fenced=True)
+        self.assertNotEqual(r.returncode, 0)
+        r, _ws, _t = self.run_in("mkdir -p e/HEAD && rmdir e/HEAD", fenced=False)
         self.assertEqual(r.returncode, 0, r.stderr)
-        for target in ("hooks", "."):   # the git dir's hooks, the git dir itself
-            with self.subTest(target):
-                snippet = f"ln -s {target} {PF} && echo x > {PF}/pre-commit"
-                r, ws, _t = self.run_in(snippet, fenced=False, platform_folder=False)
+
+    def test_a_missing_platform_folder(self):
+        """The platform makes it; nothing inside may, neither as a folder nor as a link (which would lead writes
+        into the git dir)."""
+        for snippet in (f"mkdir {PF}", f"mkdir {PF2}", f"ln -s hooks {PF} && echo x > {PF}/pre-commit",
+                        f"ln -s . {PF2} && echo x > {PF2}/pre-commit"):
+            with self.subTest(snippet):
+                r, ws, _t = self.run_in(snippet, fenced=False, folders=())
                 self.assertEqual(r.returncode, 0, f"positive control: {r.stderr}")
-                r, ws, _t = self.run_in(snippet, fenced=True, platform_folder=False)
+                r, ws, _t = self.run_in(snippet, fenced=True, folders=())
                 self.assertNotEqual(r.returncode, 0, r.stderr)
-                self.assertFalse((ws / ".git" / "hooks" / "pre-commit").exists())
-                self.assertFalse((ws / ".git" / "pre-commit").exists())
+                self.assertFalse(any((ws / p).exists() for p in (PF, PF2, ".git/hooks/pre-commit", ".git/pre-commit")))
 
     def test_a_link_made_before_never_moves_the_exception(self):
         """The profile is computed on every start. A link at the platform folder's unused spelling or at its cache/,
@@ -276,11 +341,10 @@ class Seatbelt(unittest.TestCase):
                        "marker-through-the-link": f"mkdir -p {uv}/sdists-v9 && : > {uv}/sdists-v9/.git"}
             for name, attack in attacks.items():
                 with self.subTest(setup=setup, attack=name):
-                    tmp, ws, t, env = self.fixture()
-                    with mock.patch.object(seatbelt, "TMP", [str(t)]):
-                        before = seatbelt.service_profile(pol_for(ws, ON), [ws])
-                        subprocess.run(["/bin/sh", "-c", setup], cwd=ws, env=env, check=True)   # outside any fence
-                        prof = seatbelt.service_profile(pol_for(ws, ON), [ws])
+                    tmp, ws, t, env = self.fixture(folders=(PF,))
+                    before = self.profile(ws, t, True)
+                    subprocess.run(["/bin/sh", "-c", setup], cwd=ws, env=env, check=True)   # outside any fence
+                    prof = self.profile(ws, t, True)
                     self.assertEqual(prof, before, "the link changed the rules")
                     config = (ws / ".git" / "config").read_text()
                     r = subprocess.run(["/usr/bin/sandbox-exec", "-p", prof, "/bin/sh", "-c", attack], cwd=ws,

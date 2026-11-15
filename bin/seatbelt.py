@@ -201,10 +201,13 @@ def git_fence_rules(pol: dict) -> list[str]:
     - no entry named .git, nor anything below one, anywhere: not in its folders, not in the temp area (a tree built
       there and moved in is checked only at the rename's two ends), with each repo's platform folder left out;
     - no entry named HEAD that isn't a folder, anywhere (no git-dir shape under another name; a folder HEAD/ is
-      ordinary);
-    - in each repo's platform folder: no .git below it but uv's marker, exactly; the folder itself and every folder on
-      the way to the marker can't be removed or renamed (moving the bucket out would carry the marker with it), nor
-      made as a link.
+      ordinary), and no folder HEAD/ removed or renamed: a swap (renamex_np RENAME_SWAP) is checked with each end's
+      existing type, so a folder HEAD/ swapped with a file would land a HEAD file anywhere (step 1's second cold
+      review; the cost: a fenced writer can't remove or rename a folder named HEAD);
+    - in each repo's platform folder: no .git below it but uv's marker, exactly, and only as a regular file (a folder
+      moved onto the marker's name would be a git dir); the folder itself is made by the platform, never from inside
+      (nor removed or renamed), and every folder on the way to the marker can't be removed or renamed (moving the
+      bucket out would carry the marker with it), nor made as a link.
     Its paths are written as the policy names them below the folder that holds the .git (_fence_spellings): a link
     the project made there leads a write elsewhere, where the deny matches it, and never moves the exception.
     Seatbelt matches the path the volume resolves, so a folded spelling (.GIT, head) is the same entry (measured,
@@ -220,14 +223,17 @@ def git_fence_rules(pol: dict) -> list[str]:
     out = ["; git dirs (git through the platform): no .git anywhere, no HEAD that isn't a folder, each repo's platform "
            "folder kept",
            f'(deny file-write* (require-all (regex #"/({names})(/|$)"){keep}))',
-           f'(deny file-write* (require-all (regex #"/({files})$") (require-not (vnode-type DIRECTORY))))']
+           f'(deny file-write* (require-all (regex #"/({files})$") (require-not (vnode-type DIRECTORY))))',
+           f'(deny file-write-unlink (require-all (regex #"/({files})$") (vnode-type DIRECTORY)))']
     for d in dirs:
         marks = []
         for m in f.get("markers") or []:
             for root in _fence_spellings(m["root"]):
                 if not (root == d or root.startswith(d + "/")):
                     continue
-                marks.append(f'(require-not (regex #"^{re.escape(root)}/{_glob_re(m["glob"])}$"))')
+                marker = f'(regex #"^{re.escape(root)}/{_glob_re(m["glob"])}$")'
+                marks.append(f"(require-not {marker})")
+                out.append(f"(deny file-write* (require-all {marker} (require-not (vnode-type REGULAR-FILE))))")
                 # the folders from d down to the marker's own folder: pinned as entries
                 parts = pathlib.PurePosixPath(root).relative_to(d).parts + pathlib.PurePosixPath(m["glob"]).parts[:-1]
                 for i in range(1, len(parts) + 1):
@@ -236,8 +242,7 @@ def git_fence_rules(pol: dict) -> list[str]:
                             f'(deny file-write-create (require-all (regex #"^{path}$") (vnode-type SYMLINK)))']
         out.append(f'(deny file-write* (require-all (regex #"^{re.escape(d)}/(.*/)?({names})(/|$)")'
                    + "".join(" " + x for x in marks) + "))")
-        out += [f"(deny file-write-unlink (literal {q(d)}))",
-                f"(deny file-write-create (require-all (literal {q(d)}) (vnode-type SYMLINK)))"]
+        out += [f"(deny file-write-unlink (literal {q(d)}))", f"(deny file-write-create (literal {q(d)}))"]
     return out
 
 
