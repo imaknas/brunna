@@ -102,6 +102,9 @@ class Upgrade(unittest.TestCase):
                            ("commit-hub-files.sh", "#!/bin/bash\necho \"$@\" >> \"$AGENT_HUB_ROOT/commits.log\"\n")):
             (self.hub / "bin" / name).write_text(body)
             (self.hub / "bin" / name).chmod(0o755)
+        # the letter to the upgraded project (run as `python hubbus …`): its arguments, one line per call
+        (self.hub / "bin" / "hubbus").write_text(
+            "import json, os, sys\nopen(os.environ['AGENT_HUB_ROOT'] + '/letters.log', 'a').write(json.dumps(sys.argv[1:]) + '\\n')\n")
         fakebin = t / "fakebin"
         fakebin.mkdir()
         (fakebin / "gh").write_text(FAKE_GH)
@@ -146,6 +149,12 @@ class Upgrade(unittest.TestCase):
         self.assertEqual(self.record()["idea-7"]["stage"], "done")
         res, code = self.upgrade()
         self.assertEqual((code, res["result"]), (0, "already"))
+        # its sessions hear once what changed and what is theirs now
+        letters = [json.loads(l) for l in (self.hub / "letters.log").read_text().splitlines()]
+        self.assertEqual(len(letters), 1, letters)
+        args = letters[0]
+        self.assertEqual([args[args.index(k) + 1] for k in ("--to", "--type", "--id")], ["idea-7", "info", "idea-upgraded-idea-7"])
+        self.assertIn(str(self.remote()), args[args.index("--text") + 1])
 
     def test_the_sandboxs_hooks_and_config_never_run_with_the_users_authority(self):
         """Round 6: the upgrade ran `git status` and `git push` (with the user's GitHub credentials) in the sandbox's

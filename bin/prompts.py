@@ -96,6 +96,8 @@ def listed_rules(rules_file: pathlib.Path, project: dict | None) -> list[str]:
                   file=sys.stderr)
     if (project or {}).get("commits") == "conventional" and "conventional-commits" not in listed:
         listed.append("conventional-commits")
+    if (project or {}).get("type") == "idea" and "idea-sandbox" not in listed:   # what it can't do, and how to grow up
+        listed.append("idea-sandbox")
     return listed
 
 

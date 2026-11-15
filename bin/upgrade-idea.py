@@ -293,10 +293,27 @@ def main(argv: list[str]) -> int:
     subprocess.run([str(HUB / "bin" / "gen-index-roster.sh")], check=False)
     subprocess.run([str(HUB / "bin" / "commit-hub-files.sh"), f"upgrade idea {name} → project {final} (upgrade-idea.py)",
                     f"projects/{final}.yaml", "mirror-list.txt", "index.md"], check=False)
+    tell_project(final, url)
     record(name, name=final, origin=url, stage="done")
     if not JSON:
         print(_("Done: {name} is now the project {new} ({url})", name=name, new=final, url=url))
     done("upgraded", 0, name=final, origin=url)
+
+
+def tell_project(name: str, url: str) -> None:
+    """The upgraded project's sessions hear what changed and what is theirs now (one info letter; the same id on a
+    rerun, so the bus keeps one). A letter that can't be sent doesn't undo the upgrade: it is said on stderr."""
+    text = _("This project is no longer an idea sandbox: it is a project with its GitHub repo {url} (only main was "
+             "pushed; the memory branch stays on this machine). What stays: its sandbox, network list, capabilities "
+             "and privacy are as they were, so pushing and gh still go through the platform (write to brunna) or "
+             "{owner}. What is yours now: README and STATE.md wording that says sandbox or idea, and declaring "
+             "tests if the project has none (a manifest.update).", url=url, owner=hubconf.owner_tag())
+    r = subprocess.run([sys.executable, str(HUB / "bin" / "hubbus"), "send", "--from", hubconf.hub_project(), "--to",
+                        name, "--type", "info", "--id", f"idea-upgraded-{name}", "--text", text],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        print(_("the letter to {project} was not sent: {why}", project=name, why=r.stderr.strip()[-200:]),
+              file=sys.stderr)
 
 
 if __name__ == "__main__":

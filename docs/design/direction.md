@@ -206,7 +206,9 @@ Built: steps 0–2 and step 4, the waiting report. Left:
 
 - **Event jobs:** a receiver for outside sources (CI, webhooks) with its auth; waking the scheduler when an event is
   published.
-- **Idea sandboxes:** an archive endpoint for dropped ideas.
+- **Idea sandboxes:** an archive endpoint for dropped ideas. Growing up (11-15, `idea-sandboxes.md` "Growing up") is
+  built: the nightly signal list, the sessions' rules text and the letter after an upgrade; pushing from an upgraded
+  sandboxed project waits on the git broker (`git-broker.md`).
 - **Mail handler:** one that may change code (`mailbox-routing.md` step 4).
 - **Budgets:** per-project model budgets (today there is one platform-wide daily budget).
 - **Config pipeline:** an applier for `sync-local-setup` (`new-user.md` 1.5).
@@ -269,7 +271,6 @@ Built: steps 0–2 and step 4, the waiting report. Left:
 
 - Project agent calls from a sandboxed project, at the daily cap, and on timeout. The unsandboxed path ran 11-13.
 - herdr in the Linux container: the rules block and letter delivery. Only the macOS hook was checked.
-- A first real `upgrade-idea --apply`.
 - The live test of `show_file` with an idea sandbox.
 - capabilities' 11-08 A1 check in a session the owner opens.
 - `mailbox-session-first.md` step 4's systemd `KillMode` change, which was read, not run.

@@ -1,5 +1,9 @@
 # Idea sandboxes: "projects for exploring" the assistant's ideas
 
+> **11-15 update, growing up**: the first real upgrade (`upgrade-idea --apply`, 11-15) came only after the project's
+> session hit the sandbox's walls (no remote, no `gh`), though its registry entry had shown for a day that it was no
+> longer an exploration. The owner asked for the change to be systematic; see "Growing up" at the end.
+
 > **10-25 update**: names are no longer limited to `idea-<n>`: an idea uses a human-readable code from the start (e.g.
 > room-3d), with the same rules as ordinary project names; whether something is an idea sandbox depends only on
 > `type: idea` in the registry (decided by the owner, the assistant's m10251646). Where `idea-<n>` appears below, it is
@@ -204,3 +208,29 @@ sandboxes have no remote either).
 **Needed from the assistant**: the write-confirmation card (`write_file`/`run_command`, the same three options);
 sending `mode` after "allow hands-on work" is tapped on the card; when `lease-runner.v1.schema.json` changes, sync it
 the same day.
+
+## Growing up (11-15)
+
+The owner's request (a project's letter, 11-15): an idea sandbox that has become a project should be noticed by the
+platform, not by a session that can't push. Built:
+
+- **Signals, registry facts only** (`bin/check-idea-upgrades.py`, platform job `brunna/idea-upgrades`, nightly after
+  the librarian and todo, zero LLM): an idea sandbox whose entry declares secrets, tests, `metered_models`, services or
+  jobs, or network hosts beyond the package indexes (`PACKAGE_HOSTS`). Commit counts and ages were left out: they would
+  be guesses. Each one goes into a fixed block of `todo.md` and the digest, with the upgrade command. Listing is a
+  question; only the owner upgrades. `--keep <project>` records the signals it has, and it is listed again only when a
+  new one appears (`.state/idea-upgrades-kept.json`). Checked against the first real case: its entry would have been
+  listed from 11-15 05:47, when it declared its first credential.
+- **The sessions know** (`templates/rules/idea-sandbox.md`, added by `prompts.listed_rules` for `type: idea`, like
+  `conventional-commits`): what the sandbox blocks (no remote, no `gh`, git settings the platform's), that an upgrade
+  keeps the sandbox, and how to ask for one (a `request` to brunna). The upgrade removes the rule (the type changes).
+- **One flow, no new letter type**: a `request` (or the nightly list) → the owner's yes → `upgrade-idea.py`. It now ends
+  with an info letter to the project (`idea-upgraded-<name>`): its repo, that only main was pushed, what stays (the
+  sandbox, network, capabilities, privacy), and what is the project's now (README and STATE.md wording, declaring tests).
+
+Not done:
+- **Pushing from an upgraded sandboxed project**: `upgrade-idea` pushes main once from the platform's own copy; later
+  pushes, `gh`, and the project's git config wait on the git broker (`git-broker.md`), which also owns "only main goes to
+  the public remote". Until then the owner pushes, or the project writes to brunna.
+- Turning the sandbox off on upgrade stays a separate decision of the owner (a security field).
+

@@ -26,5 +26,7 @@
  "{path}: its git could not be asked ({why})": "{path}:問不到它的 git({why})",
  "{path} has no branch checked out (detached HEAD); check one out first": "{path} 沒有 checkout 任何 branch(detached HEAD);先 checkout 一個",
  "{path}: its history could not be bundled ({why})": "{path}:它的歷史打不成 bundle({why})",
- "{path}: origin could not be set ({why})": "{path}:設不了 origin({why})"
+ "{path}: origin could not be set ({why})": "{path}:設不了 origin({why})",
+ "This project is no longer an idea sandbox: it is a project with its GitHub repo {url} (only main was pushed; the memory branch stays on this machine). What stays: its sandbox, network list, capabilities and privacy are as they were, so pushing and gh still go through the platform (write to brunna) or {owner}. What is yours now: README and STATE.md wording that says sandbox or idea, and declaring tests if the project has none (a manifest.update).": "這個專案已經不是想法沙盒，而是有自己 GitHub repo {url} 的正式專案(只推了 main;memory 分支留在這台機器)。不變的：沙盒、網路清單、能力和隱私設定都照舊，所以 push 和 gh 仍然要透過平台(寫信給 brunna)或 {owner}。現在歸你的:README 和 STATE.md 裡寫著沙盒或想法的字樣，還有專案若沒有測試就宣告(manifest.update)。",
+ "the letter to {project} was not sent: {why}": "給 {project} 的信沒寄出:{why}"
 }

@@ -92,6 +92,16 @@ jobs:
   max_attempts_per_day: 3
   run: bin/py bin/check-state-anchors.py --apply
   cwd: hub
+# idea sandboxes whose registry entry declares what an exploration doesn't need (secrets, tests, metered models,
+# services/jobs, network beyond package indexes) → a fixed block in todo.md + today's digest, asking the owner whether
+# to upgrade (docs/design/idea-sandboxes.md "Growing up"); todo regenerates the file, so this comes after it
+- name: idea-upgrades
+  at: 03:00
+  after:
+  - todo
+  max_attempts_per_day: 3
+  run: bin/py bin/check-idea-upgrades.py --apply
+  cwd: hub
 # regenerates the roster in index.md, commits today's digest, index.md, review-log.md, todo.md
 - name: librarian-publish
   at: 03:00
@@ -100,6 +110,7 @@ jobs:
   - todo
   - memory-gaps
   - state-anchors
+  - idea-upgrades
   max_attempts_per_day: 3
   run: bin/librarian-publish.sh
   cwd: hub

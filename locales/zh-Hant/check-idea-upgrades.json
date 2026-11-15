@@ -1,0 +1,14 @@
+{
+  "credentials of its own ({names})": "自己的憑證({names})",
+  "declared tests": "宣告了測試",
+  "a provider billed per use": "按量計費的模型供應商",
+  "services or jobs that run on their own": "自己會跑的服務或排程",
+  "network access beyond package indexes ({hosts})": "套件來源以外的網路存取({hosts})",
+  "**{project}**: an idea sandbox that already has {signals}. Upgrade it to a project? `bin/upgrade-idea.py {project} [--public]` (a dry run first; the sandbox stays on); to keep it an idea: `bin/check-idea-upgrades.py --keep {project}`": "**{project}**:想法沙盒已經有{signals}。要升級成正式專案嗎?`bin/upgrade-idea.py {project} [--public]`(先 dry-run;沙盒會保留);要維持想法:`bin/check-idea-upgrades.py --keep {project}`",
+  "{project} is not an idea sandbox": "{project} 不是想法沙盒",
+  "{project} stays an idea; asked again only when a new signal appears": "{project} 維持想法沙盒;出現新的訊號才會再問",
+  "Idea sandboxes that look like projects": "看起來已經是專案的想法沙盒",
+  " (mechanical check)": "(機械檢查)",
+  "Their registry entries declare what an exploration doesn't need. Upgrading gives a project its GitHub repo and type; only the owner decides it.": "它們的登錄宣告了單純探索用不到的東西。升級會給專案自己的 GitHub repo 跟類型;只有擁有者能決定。",
+  "idea upgrade check: {n} {n:idea sandbox|idea sandboxes} to ask about": "想法沙盒升級檢查:{n} 個要問"
+}
