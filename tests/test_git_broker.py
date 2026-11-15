@@ -785,7 +785,9 @@ class Limits(Fixture):
         self.assertIn("stopped after", r.stderr.decode())
         time.sleep(0.5)
         ps = subprocess.run(["ps", "-ax", "-o", "command="], capture_output=True, text=True, timeout=30).stdout
-        self.assertFalse([x for x in ps.splitlines() if "hash-object -w fifo" in x], "the killed call left a process")
+        # this test's own git only (its hooks folder is in this test's shared folder): other tests run beside it
+        self.assertFalse([x for x in ps.splitlines() if "hash-object -w fifo" in x and str(self.shared) in x],
+                         "the killed call left a process")
 
     def test_the_concurrency_cap_queues(self):
         self.made()
@@ -795,7 +797,10 @@ class Limits(Fixture):
         a = subprocess.Popen(["/usr/bin/sandbox-exec", "-p", self.service_profile(), str(WRAPPER), "hash-object",
                               "-w", "fifo"], cwd=self.ws, env=self.project_env(), stdout=subprocess.PIPE,
                              stderr=subprocess.PIPE)
-        time.sleep(1.5)
+        deadline = time.monotonic() + 30   # until the first call holds the project's one slot
+        while not (self.broker.slots.get("pa") and self.broker.slots["pa"]._value == 0):
+            self.assertLess(time.monotonic(), deadline, "the first call never reached the broker")
+            time.sleep(0.05)
         b = subprocess.Popen(["/usr/bin/sandbox-exec", "-p", self.service_profile(), str(WRAPPER), "hash-object",
                               "-w", "--stdin"], cwd=self.ws, env=self.project_env(), stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE)
