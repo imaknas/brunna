@@ -3,6 +3,24 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.20.0 (2026-11-15)
+
+### New
+
+- **git-broker:** The git fence behind enforce.git: platform
+
+### Fixed
+
+- **llm:** A credentials job's folder is the one run-agent-job.sh starts llm.py in
+- **credentials:** The agent stopping the bridge at the end of a run isn't a crash
+- **agent-jobs:** A run's status clears the last run's exit and stderr when it starts
+- **git-broker:** The fence never resolves a path below the .git
+- **git-broker:** A swap can't land a HEAD file, nor a folder uv's marker
+- **git-broker:** A switched-on project is red until the broker exists
+- **seatbelt:** Nothing mounted, attached or unmounted from inside a sandbox
+- **seatbelt:** No-mounts tests count and detach only their own disks
+- **seatbelt:** Raw disk devices denied, no-mounts routes each with a control
+
 ## v0.19.0 (2026-11-14)
 
 ### New
