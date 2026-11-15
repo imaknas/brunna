@@ -1,0 +1,4 @@
+#!/bin/sh
+# The platform's git for a sandboxed process of a project whose git goes through the platform: this folder holds only
+# this file and is put first on its PATH (docs/design/git-broker.md, "The wrapper"); the logic is bin/git_wrapper.py.
+exec "${0%/*}/../py" "${0%/*}/../git_wrapper.py" "$@"

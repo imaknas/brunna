@@ -354,10 +354,10 @@ class Doctor(unittest.TestCase):
     BARE_NO = ("safe.bareRepository isn't explicit in your git config: a folder shaped like a git dir moved into a "
                "sandboxed project is entered by your git, and no project's git fence holds without it")
     BARE_FIX = "git config --global safe.bareRepository explicit"
-    GIT_ON = ("{project}: enforce.git is on, but the platform's git broker isn't built yet: git's own writes from its "
-              "services and jobs, and the platform's git work done as the project, fail; its sessions aren't fenced "
-              "either")
-    GIT_ON_FIX = "switch enforce.git off until the broker is built (docs/design/git-broker.md)"
+    GIT_ON = ("{project}: enforce.git is on ({rebuilt}), but the platform's git broker isn't finished: git's own "
+              "writes from its services and jobs, and the platform's git work done as the project, fail; its sessions "
+              "aren't fenced either")
+    GIT_ON_FIX = "switch enforce.git off until the broker is finished (docs/design/git-broker.md)"
     GIT_NO_PRE = "{project}: enforce.git is on, but its git dirs aren't fenced without safe.bareRepository=explicit"
     GIT_NO_OS = ("{project}: its git goes through the platform (enforce.git), but its services and jobs are not run here "
                  "({reason})")
@@ -366,7 +366,7 @@ class Doctor(unittest.TestCase):
 
     def git_rows(self, no_sandbox=None):
         texts = {T(self.BARE_OK), T(self.BARE_NO)}
-        heads = tuple(T(x, project="\0", reason="\0").split("\0")[1]
+        heads = tuple(T(x, project="\0", reason="\0", rebuilt="\0").split("\0")[1]
                       for x in (self.GIT_ON, self.GIT_NO_PRE, self.GIT_NO_OS, self.GIT_EXEMPT))
         return [r for r in self.doctor(no_sandbox) if r[1] in texts
                 or r[1].startswith(tuple("boxed" + h for h in heads))]
@@ -382,10 +382,18 @@ class Doctor(unittest.TestCase):
         self.assertEqual(self.git_rows(), [("warn", T(self.BARE_NO), self.BARE_FIX)])
 
     def test_a_switched_on_project_is_red_until_the_broker_exists(self):
+        """Through all of step 2, rebuilt or not (docs/design/git-broker.md, "Step 2 build list", slice a's doctor)."""
         self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True, "git": "platform"}}}
         self.guarantees = [*self.guarantees, "git-dirs-fenced"]
         self.assertEqual(self.git_rows(), [("ok", T(self.BARE_OK), ""),
-                                           ("bad", T(self.GIT_ON, project="boxed"), T(self.GIT_ON_FIX))])
+                                           ("bad", T(self.GIT_ON, project="boxed", rebuilt=T("not rebuilt")),
+                                            T(self.GIT_ON_FIX))])
+        rec = self.tmp / "state" / "git-broker" / "boxed" / "repos.json"
+        rec.parent.mkdir(parents=True)
+        rec.write_text('{"repos": [{"git": "/w/.git", "dev": 1, "ino": 2, "workspace": true, '
+                       '"at": "2026-11-15T10:00:00+08:00"}]}')
+        self.assertEqual(self.git_rows()[1], ("bad", T(self.GIT_ON, project="boxed", rebuilt=T(
+            "rebuilt {time}", time="2026-11-15T10:00:00+08:00")), T(self.GIT_ON_FIX)))
 
     def test_an_exempt_switched_on_project_is_said_unfenced(self):
         self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True, "git": "platform"}}}

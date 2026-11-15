@@ -324,6 +324,8 @@
  "{project}: enforce.git is on, but it is in service_sandbox_exempt: its services and jobs run with no sandbox, so nothing is fenced": "{project}:enforce.git 開著,但它在 service_sandbox_exempt 裡:它的服務和工作完全沒有沙盒,什麼都沒圍起來",
  "take it out of service_sandbox_exempt, or switch enforce.git off": "把它從 service_sandbox_exempt 拿掉,或關掉 enforce.git",
  "{project}: its git goes through the platform (enforce.git), but its services and jobs are not run here ({reason})": "{project}:它的 git 走平台(enforce.git),但它的服務和工作在這裡不會執行({reason})",
- "{project}: enforce.git is on, but the platform's git broker isn't built yet: git's own writes from its services and jobs, and the platform's git work done as the project, fail; its sessions aren't fenced either": "{project}:enforce.git 開著,但平台的 git broker 還沒做好:它的服務和工作自己用 git 寫入,以及平台以專案身分做的 git 工作,都會失敗;它的 session 也還沒圍起來",
- "switch enforce.git off until the broker is built (docs/design/git-broker.md)": "broker 做好之前先關掉 enforce.git(docs/design/git-broker.md)"
+ "{project}: enforce.git is on ({rebuilt}), but the platform's git broker isn't finished: git's own writes from its services and jobs, and the platform's git work done as the project, fail; its sessions aren't fenced either": "{project}:enforce.git 開著({rebuilt}),但平台的 git broker 還沒做完:它的服務和工作自己用 git 寫入,以及平台以專案身分做的 git 工作,都會失敗;它的 session 也還沒圍起來",
+ "rebuilt {time}": "已於 {time} 重建",
+ "not rebuilt": "還沒重建",
+ "switch enforce.git off until the broker is finished (docs/design/git-broker.md)": "broker 做完之前先關掉 enforce.git(docs/design/git-broker.md)"
 }

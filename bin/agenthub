@@ -1563,11 +1563,14 @@ def doctor_git_platform(add) -> None:
         elif not held:
             add("bad", _("{project}: enforce.git is on, but its git dirs aren't fenced without safe.bareRepository=explicit",
                          project=project), fix)
-        else:   # until the broker (step 2) exists, switching on only breaks the project's git writes
-            add("bad", _("{project}: enforce.git is on, but the platform's git broker isn't built yet: git's own writes "
-                         "from its services and jobs, and the platform's git work done as the project, fail; its "
-                         "sessions aren't fenced either", project=project),
-                _("switch enforce.git off until the broker is built (docs/design/git-broker.md)"))
+        else:   # until the broker is finished (step 2's slices, steps 3 to 6), switching on breaks git writes
+            import git_broker
+            at = git_broker.rebuilt(project)
+            add("bad", _("{project}: enforce.git is on ({rebuilt}), but the platform's git broker isn't finished: git's "
+                         "own writes from its services and jobs, and the platform's git work done as the project, "
+                         "fail; its sessions aren't fenced either", project=project,
+                         rebuilt=_("rebuilt {time}", time=at) if at else _("not rebuilt")),
+                _("switch enforce.git off until the broker is finished (docs/design/git-broker.md)"))
 
 
 def doctor_checkout_race(add, why_no_sandbox, installed) -> None:
@@ -2464,6 +2467,9 @@ COMMANDS = {
     # step 2.3 adds the hook install): the registry index rebuilt by the code that just landed
     "land": cmd_land,
     "user-settings": cmd_user_settings,
+    # the platform's git (docs/design/git-broker.md, "The wrapper"): the same program sandboxed processes find first on
+    # PATH; argv, stdio and the exit code are its own. Not a session subcommand until step 4
+    "git": lambda argv: os.execv(sys.executable, [sys.executable, str(BIN / "git_wrapper.py"), *argv]),
     **{name: session_command(name) for name in SESSION_COMMANDS},
 }
 

@@ -1,0 +1,174 @@
+$ git frob
+git:這裡做不了(git frob 不是平台的 git 會執行的指令(別名也一樣被拒));什麼都沒執行
+$ git submodule add u
+git:這裡做不了(不支援 submodule(擁有者的決定));什麼都沒執行
+$ git bisect start
+git:這裡做不了(bisect 不在允許清單裡);什麼都沒執行
+$ git daemon
+git:這裡做不了(它會把 repo 對外提供出去);什麼都沒執行
+$ git commit --exe x
+git:這裡做不了(不認得的選項 --exe);什麼都沒執行
+$ git commit --author
+git:這裡做不了(--author 需要一個值);什麼都沒執行
+$ git gc --quiet=1
+git:這裡做不了(--quiet 不接受值);什麼都沒執行
+$ git gc x
+git:這裡做不了(gc 不接受參數);什麼都沒執行
+$ git commit -S -m x
+git:這裡做不了(簽章不經過平台:你的金鑰從不用在專案的請求上);什麼都沒執行
+$ git tag -s v1
+git:這裡做不了(簽章不經過平台:你的金鑰從不用在專案的請求上);什麼都沒執行
+$ git clone --bare u
+git:這裡做不了(bare 或分開的 git dir 是你自己的 git 會走進去的形狀);什麼都沒執行
+$ git merge -s evil x
+git:這裡做不了(只能用 git 內建的合併策略(ort, recursive, resolve, octopus, ours, subtree):其他名稱會讓 git 去找程式來執行);什麼都沒執行
+$ git add -p
+git:這裡做不了(git add -p 是互動式的:請寫成 patch 再用 git apply --cached);什麼都沒執行
+$ git commit -e -m x
+git:這裡做不了(-e 會開編輯器,平台的 git 還不能執行編輯器);什麼都沒執行
+$ git commit --fixup=reword:HEAD
+git:這裡做不了(--fixup=reword:HEAD 會開編輯器,平台的 git 還不能執行編輯器);什麼都沒執行
+$ git commit  [EDITOR=vim]
+git:這裡做不了(這個 commit 沒有訊息,而平台的 git 還不能執行你的編輯器:請用 -m 或 -F 給訊息);什麼都沒執行
+$ git notes add
+git:這裡做不了(notes 沒有 -m 會開編輯器,平台的 git 還不能執行編輯器);什麼都沒執行
+$ git notes --ref refs/heads/x add -m n
+git:這裡做不了(--ref 只能指 notes 的 ref);什麼都沒執行
+$ git notes add -m n a b
+git:這裡做不了(notes add 只接受一個物件);什麼都沒執行
+$ git notes edit
+git:這裡做不了(notes edit 不在允許清單裡);什麼都沒執行
+$ git -c core.fsmonitor=x add .
+git:這裡做不了(-c core.fsmonitor 不在會傳過去的設定之列);什麼都沒執行
+$ git -c user.name add .
+git:這裡做不了(-c user.name 沒有給值);什麼都沒執行
+$ git -c commit.gpgSign=true add .
+git:這裡做不了(-c commit.gpgSign 只能是 commit.gpgSign=false);什麼都沒執行
+$ git -c user.name=a\nb add .
+git:這裡做不了(-c user.name:值不是單純的文字);什麼都沒執行
+$ git add .  [GIT_SSH_COMMAND=x]
+git:這裡做不了(GIT_SSH_COMMAND 不會傳進平台的 git);什麼都沒執行
+$ git add .  [GIT_TRACE=/tmp/t]
+git:這裡做不了(GIT_TRACE 指定了 git 會寫入的檔案);什麼都沒執行
+$ git config --global a.b c
+git:這裡做不了(透過平台只能改 repo 自己的設定);什麼都沒執行
+$ git config --add a.b c
+git:這裡做不了(config --add 不在允許清單裡);什麼都沒執行
+$ git config --bool a.b c
+git:這裡做不了(設定操作只接受單純的值);什麼都沒執行
+$ git config --unset a b
+git:這裡做不了(config --unset 只接受一個鍵);什麼都沒執行
+$ git config set a.b
+git:這裡做不了(config 只接受一個鍵和一個值);什麼都沒執行
+$ git remote add o
+git:這裡做不了(remote add:要 2 個參數);什麼都沒執行
+$ git remote add o/x u
+git:這裡做不了(o/x 不是單純的 remote 名稱);什麼都沒執行
+$ git remote set-branches o x
+git:這裡做不了(remote set-branches 不在允許清單裡);什麼都沒執行
+$ git reflog expire
+git:這裡做不了(reflog expire 不在允許清單裡);什麼都沒執行
+$ git archive --remote=u
+git:這裡做不了(archive --remote 會連到別的 repo);什麼都沒執行
+$ git fsck --lost-found
+git:這裡做不了(fsck --lost-found 會寫進 git dir);什麼都沒執行
+$ git format-patch -o d
+git:這裡做不了(format-patch 會寫檔案:請用 --stdout);什麼都沒執行
+$ git hash-object -w --literally f
+git:這裡做不了(hash-object --literally 會寫入 git 不會檢查的物件);什麼都沒執行
+$ git credential-store
+git:這裡做不了(不替專案執行它);什麼都沒執行
+--- git_allow.py
+它會把 repo 對外提供出去
+-c <key> 不在會傳過去的設定之列
+git:這裡做不了(<why>);什麼都沒執行
+簽章不經過平台:你的金鑰從不用在專案的請求上
+-c <key> 沒有給值
+-c <key>:值不是單純的文字
+git <sub> 不是平台的 git 會執行的指令(別名也一樣被拒)
+notes <action> 不在允許清單裡
+remote <action> 不在允許清單裡
+不支援 submodule(擁有者的決定)
+它會在歷史上執行程式
+它會執行呼叫端自己的程式
+hook 只透過平台的轉送器執行
+bisect 不在允許清單裡
+它會用擁有者的設定寄信
+沙盒裡永遠碰不到憑證
+它會不經檢查寫入物件和 ref
+bundle 是平台自己用的
+replace ref 會改變擁有者的 git 看到的內容
+它會寫擁有者的全域設定並排程工作
+bare 或分開的 git dir 是你自己的 git 會走進去的形狀
+-c <key> 只能是 <key>=<value>
+不替專案執行它
+reflog <action> 不在允許清單裡
+config <option> 不在允許清單裡
+透過平台只能改 repo 自己的設定
+gc 不接受參數
+設定操作只接受單純的值
+remote <action>:要 <n> 個參數
+<name> 不是單純的 remote 名稱
+只能用 git 內建的合併策略(<names>):其他名稱會讓 git 去找程式來執行
+archive --remote 會連到別的 repo
+fsck --lost-found 會寫進 git dir
+format-patch 會寫檔案:請用 --stdout
+hash-object --literally 會寫入 git 不會檢查的物件
+不認得的選項 <option>
+notes 沒有 -m 會開編輯器,平台的 git 還不能執行編輯器
+notes <action> 只接受一個物件
+git <sub> <option> 是互動式的:請寫成 patch 再用 git apply --cached
+<option> 會開編輯器,平台的 git 還不能執行編輯器
+這個 commit 沒有訊息,而平台的 git 還不能執行你的編輯器:請用 -m 或 -F 給訊息
+config --unset 只接受一個鍵
+config 只接受一個鍵和一個值
+<option> 需要一個值
+--ref 只能指 notes 的 ref
+--fixup=<value> 會開編輯器,平台的 git 還不能執行編輯器
+<option> 不接受值
+<var> 不會傳進平台的 git
+<var> 指定了 git 會寫入的檔案
+--- git_broker.py
+不支援 submodule(擁有者的決定)
+<key>:push 只會送到平台算出的目的地
+<key>:<ref> 屬於預設分支
+<key> 不是專案可以改的設定
+<key>:不允許這個值
+這個系統不支援經由平台的 git(<why>);什麼都沒執行
+<project> 沒有開啟經由平台的 git;什麼都沒執行
+<project> 沒有工作區;什麼都沒執行
+沒有先證明是哪個專案;什麼都沒執行
+在 <project> 的資料夾裡找不到證明;什麼都沒執行
+沒有收到請求;什麼都沒執行
+請求格式不對;什麼都沒執行
+不服務 <project>:<other> 的資料夾包含或共用它的資料夾,<other> 可以冒充它;什麼都沒執行
+工作資料夾不是絕對路徑;什麼都沒執行
+<path> 不在 <project> 自己的資料夾裡,它的 git 只在那裡服務:請用專案裡的 worktree;什麼都沒執行
+fatal:不是 git repository:<path>
+這個 worktree 的指標和它的 repo 對不上;什麼都沒執行
+這個 repo(<path>)不是平台替 <project> 建的;什麼都沒執行
+分割的 index 沒辦法檢查;什麼都沒執行
+名為 HEAD 的追蹤路徑不能經由平台 commit(<path>):這個名字的檔案是 git dir 的形狀;什麼都沒執行
+error:沒有這個 remote:'<name>'
+<key>:只能是登錄替 <project> 宣告的 URL
+<path> 不在 <project> 自己的資料夾裡;什麼都沒執行
+git init 失敗:<why>
+git <sub> 在原地、在你自己的沙盒裡執行,不經過平台;什麼都沒執行
+經由平台的 git <sub> 還沒做好(git broker 之後的步驟);什麼都沒執行
+工作資料夾解析不出來;什麼都沒執行
+<project> 的 git 經由平台(enforce.git),但它的 repo 還沒重建:由擁有者執行重建;在那之前 git 不能在這裡寫入;什麼都沒執行
+平台記錄之後,這個 repo 的 git dir 被換掉了;什麼都沒執行
+讀不了 index,沒辦法檢查;什麼都沒執行
+讀不了 repo 的設定(<why>);什麼都沒執行
+error:remote <name> 已經存在。
+error:無法鎖定設定檔:config.lock 已存在(另一個 git 正在改它);什麼都沒執行
+<path> 裡已經有 .git;什麼都沒執行
+fatal:無法建立 '<path>':檔案已存在(這個 repository 裡似乎有另一個 git 正在執行)
+設定寫不進去:<why>
+git:<s> 秒後停止(平台對單次呼叫的上限)
+名為 HEAD 的追蹤路徑不能經由平台進入 index(<path>):這個名字的檔案是 git dir 的形狀;index 沒有改變
+<key> 決定 repo 的儲存方式
+--- git_wrapper.py
+git:連不上平台的 git broker(<why>):git <sub> 要經由它寫入,所以現在做不了;什麼都沒執行
+git:平台的 git broker 關掉了連線;這次呼叫的結果不明
+git:這個程序無法證明自己是 broker 在這個 socket 上服務的專案(<why>);什麼都沒執行

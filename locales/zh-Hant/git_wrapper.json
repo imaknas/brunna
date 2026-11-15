@@ -1,0 +1,5 @@
+{
+ "git: the platform's git broker can't be reached ({why}): git {sub} writes through it, so it can't be done now; nothing was run": "git:連不上平台的 git broker({why}):git {sub} 要經由它寫入,所以現在做不了;什麼都沒執行",
+ "git: the platform's git broker closed the connection; the call's outcome is unknown": "git:平台的 git broker 關掉了連線;這次呼叫的結果不明",
+ "git: this process can't prove the project the broker serves on this socket ({why}); nothing was run": "git:這個程序無法證明自己是 broker 在這個 socket 上服務的專案({why});什麼都沒執行"
+}

@@ -305,6 +305,16 @@
     "cap_runner": {
       "type": "object"
     },
+    "git_broker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "timeout_s": {"type": "integer", "minimum": 1, "description": "the limit for one git call through the platform (default 600); its process group is killed at it"},
+        "long_timeout_s": {"type": "integer", "minimum": 1, "description": "the limit for gc (default 1800; fetch and clone later)"},
+        "concurrency": {"type": "integer", "minimum": 1, "description": "git calls per project at once through the broker (default 8); the rest wait"}
+      },
+      "description": "the git broker's limits (docs/design/git-broker.md, open point 17)"
+    },
     "status_page": {
       "type": "object",
       "properties": {"url": {"type": "string"}},

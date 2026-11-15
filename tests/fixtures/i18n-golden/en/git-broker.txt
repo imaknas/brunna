@@ -1,0 +1,174 @@
+$ git frob
+git: can't be done here (git frob isn't one the platform's git runs (an alias is refused the same way)); nothing was run
+$ git submodule add u
+git: can't be done here (submodules aren't served (the owner's decision)); nothing was run
+$ git bisect start
+git: can't be done here (bisect isn't in the allowlist); nothing was run
+$ git daemon
+git: can't be done here (it serves the repo); nothing was run
+$ git commit --exe x
+git: can't be done here (unknown option --exe); nothing was run
+$ git commit --author
+git: can't be done here (--author needs a value); nothing was run
+$ git gc --quiet=1
+git: can't be done here (--quiet takes no value); nothing was run
+$ git gc x
+git: can't be done here (gc takes no arguments); nothing was run
+$ git commit -S -m x
+git: can't be done here (signing isn't done through the platform: your key is never used on a project's request); nothing was run
+$ git tag -s v1
+git: can't be done here (signing isn't done through the platform: your key is never used on a project's request); nothing was run
+$ git clone --bare u
+git: can't be done here (a bare or separate git dir is a shape your own git would enter); nothing was run
+$ git merge -s evil x
+git: can't be done here (only git's own merge strategies (ort, recursive, resolve, octopus, ours, subtree): another name makes git look for a program); nothing was run
+$ git add -p
+git: can't be done here (git add -p is interactive: write the patch and use git apply --cached); nothing was run
+$ git commit -e -m x
+git: can't be done here (-e opens an editor, which the platform's git can't run yet); nothing was run
+$ git commit --fixup=reword:HEAD
+git: can't be done here (--fixup=reword:HEAD opens an editor, which the platform's git can't run yet); nothing was run
+$ git commit  [EDITOR=vim]
+git: can't be done here (this commit has no message, and your editor can't be run through the platform's git yet: give it with -m or -F); nothing was run
+$ git notes add
+git: can't be done here (notes without -m opens an editor, which the platform's git can't run yet); nothing was run
+$ git notes --ref refs/heads/x add -m n
+git: can't be done here (--ref names only notes refs); nothing was run
+$ git notes add -m n a b
+git: can't be done here (notes add takes one object); nothing was run
+$ git notes edit
+git: can't be done here (notes edit isn't in the allowlist); nothing was run
+$ git -c core.fsmonitor=x add .
+git: can't be done here (-c core.fsmonitor isn't one of the settings passed on); nothing was run
+$ git -c user.name add .
+git: can't be done here (-c user.name without a value); nothing was run
+$ git -c commit.gpgSign=true add .
+git: can't be done here (-c commit.gpgSign only as commit.gpgSign=false); nothing was run
+$ git -c user.name=a\nb add .
+git: can't be done here (-c user.name: the value isn't plain); nothing was run
+$ git add .  [GIT_SSH_COMMAND=x]
+git: can't be done here (GIT_SSH_COMMAND isn't passed through the platform's git); nothing was run
+$ git add .  [GIT_TRACE=/tmp/t]
+git: can't be done here (GIT_TRACE names a file git would write); nothing was run
+$ git config --global a.b c
+git: can't be done here (only the repo's own config is changed through the platform); nothing was run
+$ git config --add a.b c
+git: can't be done here (config --add isn't in the allowlist); nothing was run
+$ git config --bool a.b c
+git: can't be done here (the config op takes plain values); nothing was run
+$ git config --unset a b
+git: can't be done here (config --unset takes one key); nothing was run
+$ git config set a.b
+git: can't be done here (config takes one key and one value); nothing was run
+$ git remote add o
+git: can't be done here (remote add: 2 arguments expected); nothing was run
+$ git remote add o/x u
+git: can't be done here (o/x isn't a plain remote name); nothing was run
+$ git remote set-branches o x
+git: can't be done here (remote set-branches isn't in the allowlist); nothing was run
+$ git reflog expire
+git: can't be done here (reflog expire isn't in the allowlist); nothing was run
+$ git archive --remote=u
+git: can't be done here (archive --remote reaches another repo); nothing was run
+$ git fsck --lost-found
+git: can't be done here (fsck --lost-found writes into the git dir); nothing was run
+$ git format-patch -o d
+git: can't be done here (format-patch writes files: use --stdout); nothing was run
+$ git hash-object -w --literally f
+git: can't be done here (hash-object --literally writes objects git wouldn't check); nothing was run
+$ git credential-store
+git: can't be done here (it isn't run for a project); nothing was run
+--- git_allow.py
+it serves the repo
+-c <key> isn't one of the settings passed on
+git: can't be done here (<why>); nothing was run
+signing isn't done through the platform: your key is never used on a project's request
+-c <key> without a value
+-c <key>: the value isn't plain
+git <sub> isn't one the platform's git runs (an alias is refused the same way)
+notes <action> isn't in the allowlist
+remote <action> isn't in the allowlist
+submodules aren't served (the owner's decision)
+it runs programs over the history
+it runs a program of the caller's
+hooks run through the platform's forwarder only
+bisect isn't in the allowlist
+it sends mail with the owner's settings
+credentials are never reached from a sandbox
+it writes objects and refs unchecked
+bundles are the platform's own
+replace refs change what the owner's git shows
+it writes the owner's global config and schedules jobs
+a bare or separate git dir is a shape your own git would enter
+-c <key> only as <key>=<value>
+it isn't run for a project
+reflog <action> isn't in the allowlist
+config <option> isn't in the allowlist
+only the repo's own config is changed through the platform
+gc takes no arguments
+the config op takes plain values
+remote <action>: <n> arguments expected
+<name> isn't a plain remote name
+only git's own merge strategies (<names>): another name makes git look for a program
+archive --remote reaches another repo
+fsck --lost-found writes into the git dir
+format-patch writes files: use --stdout
+hash-object --literally writes objects git wouldn't check
+unknown option <option>
+notes without -m opens an editor, which the platform's git can't run yet
+notes <action> takes one object
+git <sub> <option> is interactive: write the patch and use git apply --cached
+<option> opens an editor, which the platform's git can't run yet
+this commit has no message, and your editor can't be run through the platform's git yet: give it with -m or -F
+config --unset takes one key
+config takes one key and one value
+<option> needs a value
+--ref names only notes refs
+--fixup=<value> opens an editor, which the platform's git can't run yet
+<option> takes no value
+<var> isn't passed through the platform's git
+<var> names a file git would write
+--- git_broker.py
+submodules aren't served (the owner's decision)
+<key>: pushes go only where the platform computes it
+<key>: <ref> is the default branch's
+<key> isn't one of the settings a project changes
+<key>: that value isn't allowed
+git through the platform isn't supported on this system (<why>); nothing was run
+git through the platform isn't on for <project>; nothing was run
+<project> has no workspace; nothing was run
+no proof of the project came first; nothing was run
+the proof wasn't found in <project>'s folder; nothing was run
+no request came; nothing was run
+the request isn't well formed; nothing was run
+<project> isn't served: <other>'s folders hold or share its own, so <other> could act as it; nothing was run
+the working folder isn't an absolute path; nothing was run
+<path> isn't inside <project>'s own folders, where its git is served: use a worktree inside the project; nothing was run
+fatal: not a git repository: <path>
+this worktree's pointers don't agree with its repo; nothing was run
+this repo (<path>) isn't one the platform made for <project>; nothing was run
+a split index can't be checked; nothing was run
+a tracked path named HEAD can't be committed through the platform (<path>): a file of that name is a git-dir shape; nothing was run
+error: No such remote: '<name>'
+<key>: only the URL the registry declares for <project>
+<path> isn't inside <project>'s own folders; nothing was run
+git init failed: <why>
+git <sub> runs in place, inside your own sandbox, not through the platform; nothing was run
+git <sub> through the platform isn't built yet (a later step of the git broker); nothing was run
+the working folder can't be resolved; nothing was run
+<project>'s git goes through the platform (enforce.git), but its repo isn't rebuilt yet: the owner runs the rebuild; git can't write here until then; nothing was run
+this repo's git dir was replaced since the platform recorded it; nothing was run
+the index can't be read to check it; nothing was run
+the repo's config can't be read (<why>); nothing was run
+error: remote <name> already exists.
+error: could not lock config file: config.lock exists (another git is changing it); nothing was run
+<path> already holds a .git; nothing was run
+fatal: Unable to create '<path>': File exists (another git process seems to be running in this repository)
+the config couldn't be written: <why>
+git: stopped after <s> seconds (the platform's limit for one call)
+a tracked path named HEAD can't enter the index through the platform (<path>): a file of that name is a git-dir shape; the index is unchanged
+<key> says how the repo is stored
+--- git_wrapper.py
+git: the platform's git broker can't be reached (<why>): git <sub> writes through it, so it can't be done now; nothing was run
+git: the platform's git broker closed the connection; the call's outcome is unknown
+git: this process can't prove the project the broker serves on this socket (<why>); nothing was run
