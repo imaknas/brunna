@@ -90,8 +90,9 @@ A second blind review of r1 found one blocking point and thirteen should-fix; al
   renamed old blob is caught.
 - **S-d:** a blob is also scanned as UTF-16 (a byte order mark or alternating NULs) and with its NULs stripped.
 - **S-e, declared values can't be turned off.** `secrets:` is the project's, so the check matches every value the
-  platform has ever seen declared: salted hashes of values of 12 characters or more, kept in the platform's folder and
-  never dropped when a declaration goes. A file with another hard link isn't read.
+  platform has ever seen declared: values of 12 characters or more, never dropped when a declaration goes (built first
+  as salted hashes; the code review's B1 replaced them, "After the code review" below). A file with another hard link
+  isn't read.
 - **S-f:** take-in writes a fresh platform-made `requests/<id>.json` from the parsed fields, removes the original,
   refuses a file with another hard link, and the worker reads its copy with a cap.
 - **S-g:** the worker pushes the requested sha, checked to be reachable from the branch, not the branch's tip. A queued
@@ -136,7 +137,39 @@ Not in it:
 - **the owner form without an emails list:** check 6 isn't a refusal there (the owner form worked before the field
   existed); the plan still flags emails the remote hasn't seen;
 - **the session's side of "who may request"** is checked in the rendered settings, and through the real tool by the
-  conformance check `session-write` (it needs the tool's login, so not in the test suite).
+  conformance check `session-write` (it needs the tool's login, so not in the test suite);
+- **gitleaks' path context:** `gitleaks stdin` sees no path, so its path-based rules don't apply; the built-in filename
+  rules cover new files' names.
+
+### After the code review (11-16)
+
+A blind review of the core found two blocking points and three should-fix:
+- **B1, declared values only as whole words.** A value inside a URL (`user:VALUE@host`), a query string, a sentence, or
+  one holding a character a word split on, was never matched. The values are now kept owner-only
+  (`<secrets>/push-declared/<project>.json`, 0600 in a 0700 folder, which every sandbox denies) and matched as
+  substrings (one alternation of the escaped values). The salted hashes are gone.
+- **B2, a tree bomb.** A tree naming one subtree twice, k levels deep, listed 2^k paths before any size check, outside
+  the scan's time limit (k=21: 6.3 M entries, 3 GB). Now:
+  - the sizes are checked first;
+  - every new tree is read in one batch and walked once, by its id, iteratively, under the first path it is reached
+    at;
+  - the walk is capped at 200 000 entries and 256 levels and bounded by the scan's deadline, each a size finding;
+  - on Linux the worker runs under an 8 GB RLIMIT_AS (macOS doesn't enforce it, and there the caps are the bound).
+- **S1, a flood of request files.** Take-in reads `taken.jsonl` once, reads at most the daily cap plus one request per
+  tick, deletes the rest unread with one letter, and keeps 7 days of `taken.jsonl`.
+- **S2, leases.** A lease runs in the workspace and loads its local settings, the session rendering with the push rule
+  and folder. The lease's own `--settings` (`runtime_claude.lease_settings`) now denies the push commands and the
+  folder (deny wins, and the sandbox takes the Edit denies in). `platform_settings` builds on the same denies, which
+  only narrows.
+- **S3:** a names finding tells the project that a private project is named, not which; the name, and the path it was
+  in, go only to `pushes.jsonl` and the owner's flags.
+- **Nits:**
+  - a folder, a link or a FIFO by a request's or a result's name is removed, never read, so it can't block the queue;
+  - a worker recorded without a start time counts as live only while a worker could still be running;
+  - the grant's probe treats `http://` origins as their own probe URL and `git://` as unknown (it said private);
+  - `brunna push setup` records `git_push.visibility`, so the S-l check works;
+  - S-l refuses one way only: a remote recorded as private that now looks public is refused; one recorded as public
+    that now looks private only raises the setup to-do.
 
 ## 1. Two axes, and when to sandbox
 
