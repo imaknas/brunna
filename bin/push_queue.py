@@ -195,16 +195,36 @@ def alive(w: dict) -> bool:
         return False
     except PermissionError:
         pass
+    if worker_age(w) >= WORKER_MAX_S:
+        # a worker counts only while one could still be running: a reused pid never keeps a request waiting, and a
+        # stuck one is stopped by tick and its slot freed
+        return False
     if not w.get("start"):
-        # no start time recorded: the pid counts only while a worker could still be running (a reused pid later never
-        # keeps a request waiting)
-        try:
-            spawned = datetime.datetime.fromisoformat(w.get("spawned_at") or w.get("started_at") or "")
-        except ValueError:
-            return False
-        return (datetime.datetime.now().astimezone() - spawned).total_seconds() < WORKER_MAX_S
+        return True
     import runtime_ports
     return runtime_ports.process_start(pid) == w["start"]
+
+
+def worker_age(w: dict) -> float:
+    """Seconds since the worker was started (spawned_at, else started_at); unknown counts as too old."""
+    try:
+        spawned = datetime.datetime.fromisoformat(w.get("spawned_at") or w.get("started_at") or "")
+    except ValueError:
+        return float("inf")
+    return (datetime.datetime.now().astimezone() - spawned).total_seconds()
+
+
+def stop_stuck(w: dict, log) -> None:
+    """A worker past WORKER_MAX_S whose pid still runs with its recorded start: killed (its process group), said."""
+    import signal
+    import runtime_ports
+    pid = w.get("pid")
+    if not isinstance(pid, int) or pid <= 0 or worker_age(w) < WORKER_MAX_S:
+        return
+    if w.get("start") and runtime_ports.process_start(pid) == w["start"]:
+        with contextlib.suppress(OSError):
+            os.killpg(os.getpgid(pid), signal.SIGKILL)
+        log(_("a push worker ran past its limit and was stopped (pid {pid})", pid=pid))
 
 
 def parse(raw: bytes, rid: str) -> dict:
@@ -292,6 +312,24 @@ def _clear(r: pathlib.Path, rel: str) -> None:
         os.close(fd)
 
 
+_SAID: set = set()
+
+
+def _clear_said(r: pathlib.Path, rel: str, log=None) -> bool:
+    """_clear, an entry that can't be removed (a folder of mode 000, a race) said once to the owner's log and left:
+    one never stops take-in (the fourth review's 1). → whether it went."""
+    try:
+        _clear(r, rel)
+        return True
+    except OSError as e:
+        key = (rel, e.errno)
+        if log and key not in _SAID:
+            _SAID.add(key)
+            log(_("{entry} in the push request folder can't be removed ({why}); left there", entry=rel,
+                  why=e.strerror or e))
+        return False
+
+
 def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[str]:
     """One project's request folder → its queue. → the ids handled. letter(project, text, key): an info letter to the
     project; confirm_session(project, session) → the session when hubbus saw it there, else None. At most the daily cap
@@ -301,7 +339,7 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
     ensure_folder(project, log)
     r = root()
     names = nofollow.entries(r, project) or []
-    _old_results(project, names)
+    _old_results(project, names, log)
     reqs, cleared = [], 0
     for n in names:
         if not n.endswith(REQUEST) or n.startswith("."):
@@ -310,21 +348,21 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
             st = nofollow.lstat(r, f"{project}/{n}")
             stale = st is not None and n.startswith(".") and st.st_mtime < time.time() - 3600
             if cleared < CLEAR_RUN and (stale or (not n.startswith(".") and not n.endswith(RESULT))):
-                _clear(r, f"{project}/{n}")
+                _clear_said(r, f"{project}/{n}", log)
                 cleared += 1
             continue
         st = nofollow.lstat(r, f"{project}/{n}")
         if st is None:
             continue
         if not stat.S_ISREG(st.st_mode):   # a folder, a link, a FIFO by a request's name: gone, never read
-            _clear(r, f"{project}/{n}")
+            _clear_said(r, f"{project}/{n}", log)
             continue
         reqs.append((st.st_mtime, n))
     reqs.sort()
     most = limits()["requests_per_day"] + 1
     if len(reqs) > most:
         for _m, n in reqs[most:]:
-            _clear(r, f"{project}/{n}")
+            _clear_said(r, f"{project}/{n}", log)
         sent = broker(project) / "flood-letter"
         today = datetime.date.today().isoformat()
         if letter and _read_json(sent, "") != today:   # at most one a day, recorded here
@@ -352,7 +390,7 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
                                              "project", "request"), log)
             elif not ID.fullmatch(rid):
                 misnamed.append(n[:80])
-            _clear(r, rel)
+            _clear_said(r, rel, log)
             continue
         if rid in seen.ids:
             nofollow.remove(r, rel)   # taken in before: the earlier result stands
@@ -402,14 +440,14 @@ def _queue(project: str, rid: str, fields: dict, log, seen: Taken) -> None:
                      **({"supersedes": supersedes} if supersedes else {})})
 
 
-def _old_results(project: str, names) -> None:
+def _old_results(project: str, names, log=None) -> None:
     """Results older than RESULT_KEEP_S go; anything but a plain file by a result's name goes at once."""
     cut = time.time() - RESULT_KEEP_S
     for n in names:
         if n.endswith(RESULT):
             st = nofollow.lstat(root(), f"{project}/{n}")
             if st and (not stat.S_ISREG(st.st_mode) or st.st_mtime < cut):
-                _clear(root(), f"{project}/{n}")
+                _clear_said(root(), f"{project}/{n}", log)
 
 
 # ---------- workers ----------
@@ -425,6 +463,8 @@ def tick(spawn=None, letter=None, log=None) -> list[str]:
         if w and alive(w):
             running += 1
             continue
+        if w:
+            stop_stuck(w, log)
         if not reqs:
             if w:
                 (broker(project) / "worker.json").unlink(missing_ok=True)
