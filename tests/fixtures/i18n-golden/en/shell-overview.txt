@@ -18,7 +18,7 @@ Path: <TMP>/ws/beta
 origin: (native)
 
 -- bound services --
-(no services registered)
+  - local.beta.tts [NOT running] (registry) — tts: bin/serve --port 8765
 
 -- STATE.md --
 (no STATE.md readable on this machine: tried <TMP>/ws/beta/.agent-memory/STATE.md and <TMP>/copies/beta/STATE.md, neither exists)
@@ -46,7 +46,7 @@ Path: <TMP>/ws/beta
 origin: (native)
 
 -- bound services --
-(no services registered)
+  - local.beta.tts [NOT running] (registry) — tts: bin/serve --port 8765
 
 -- STATE.md --
 (no STATE.md readable on this machine: tried <TMP>/ws/beta/.agent-memory/STATE.md and <TMP>/copies/beta/STATE.md, neither exists)
