@@ -241,6 +241,19 @@ And four should-fix:
   - the tick's and the day's letter ids are the platform's own, with a random part, and the day's letter is recorded so
     it goes once.
 
+A fourth review found nothing blocking. Fixed from it:
+- **An entry that can't be removed** (a folder of mode 000, a race) is said once to the owner's log and left. Take-in
+  goes on, so a valid request beside it is still answered.
+- **dotenv:**
+  - a quote that never closes makes only that statement bad, as in python-dotenv, and the next lines are still read;
+  - every non-empty value of a repeated key is kept.
+- **The match** checks the deadline every 4096 places, so a text that repeats one key stops close to the deadline.
+- **Names:** a name that isn't UTF-8 counts as the bytes the tree holds. Keys are taken after NFC.
+- **Workers:** a worker counts as live for at most `WORKER_MAX_S`, start time recorded or not. A stuck one is killed
+  (its process group) and its slot freed.
+- **The limit of S-2, stated:** a value over 512 bytes is found whole (its hash), or by an unchanged first or last 512
+  bytes. A piece of its middle alone is not found.
+
 ## 1. Two axes, and when to sandbox
 
 A project has two settings, and neither depends on the other:
