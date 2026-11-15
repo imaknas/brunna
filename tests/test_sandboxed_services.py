@@ -250,8 +250,8 @@ kill -0 "$OUTSIDE_PID" 2>/dev/null || echo signal-blocked
 /usr/bin/security list-keychains >/dev/null 2>&1 || echo keychain-blocked
 mkdir -p "$WS/mnt"
 if [ -n "$IMG" ]; then   # macOS: an image it could have written, over its own folder and at /Volumes
-  hdiutil attach -nobrowse -noautoopen -mountpoint "$WS/mnt" "$IMG" >/dev/null 2>&1
-  diskutil image attach --nobrowse "$IMG" >/dev/null 2>&1
+  /usr/bin/hdiutil attach -nobrowse -noautoopen -mountpoint "$WS/mnt" "$IMG" >/dev/null 2>&1
+  /usr/sbin/diskutil image attach --nobrowse "$IMG" >/dev/null 2>&1
   /sbin/mount_devfs devfs "$WS/mnt" >/dev/null 2>&1
 else
   mount -t tmpfs none "$WS/mnt" >/dev/null 2>&1
@@ -320,12 +320,12 @@ class Conformance(unittest.TestCase):
     def mounted(tmp, img) -> list[str]:
         """Seen from outside: mounts under the probe's folder, and (macOS) any attach of its image."""
         if sys.platform == "darwin":
-            table = subprocess.run(["mount"], capture_output=True, text=True).stdout.splitlines()
+            table = subprocess.run(["/sbin/mount"], capture_output=True, text=True).stdout.splitlines()
         else:
             table = pathlib.Path("/proc/self/mounts").read_text().splitlines()
         out = [x for x in table if str(tmp) in x]
         if img is not None:
-            info = subprocess.run(["hdiutil", "info"], capture_output=True, text=True).stdout
+            info = subprocess.run(["/usr/bin/hdiutil", "info"], capture_output=True, text=True).stdout
             out += [b for b in info.split("=" * 48) if str(img) in b]
         return out
 
@@ -334,12 +334,13 @@ class Conformance(unittest.TestCase):
         """Whatever a failing probe left mounted or attached."""
         import re
         for x in cls.mounted(tmp, None):
-            subprocess.run(["umount", "-f", x.split(" on ")[1].split(" (")[0] if " on " in x else x.split()[1]],
+            subprocess.run(["/sbin/umount" if sys.platform == "darwin" else "umount", "-f",
+                            x.split(" on ")[1].split(" (")[0] if " on " in x else x.split()[1]],
                            capture_output=True)
         if img is not None:
             for block in cls.mounted(tmp, img):
                 for dev in re.findall(r"^(/dev/disk\d+)\s", block, re.M):
-                    subprocess.run(["hdiutil", "detach", "-quiet", "-force", dev], capture_output=True)
+                    subprocess.run(["/usr/bin/hdiutil", "detach", "-quiet", "-force", dev], capture_output=True)
 
     def test_what_counts_as_a_temp_area_sandboxes_write(self):
         for t in [*seatbelt.TMP, *landlock.TMP]:
@@ -400,7 +401,7 @@ class Conformance(unittest.TestCase):
         if sys.platform == "darwin":   # made outside: bytes the service could have written itself
             (tmp / "img-src" / ".git").mkdir(parents=True)
             img = ws / "x.dmg"
-            subprocess.run(["hdiutil", "create", "-quiet", "-srcfolder", str(tmp / "img-src"), "-fs", "HFS+",
+            subprocess.run(["/usr/bin/hdiutil", "create", "-quiet", "-srcfolder", str(tmp / "img-src"), "-fs", "HFS+",
                             "-volname", f"brunnaconf{os.getpid()}", str(img)], check=True, capture_output=True)
             env["IMG"] = str(img)
         self.addCleanup(self.unmount, tmp, img)

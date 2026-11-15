@@ -18,7 +18,8 @@ The base is "allow everything, then block the dangerous parts" (a deny-list; tri
            credentials, platform state (.state whole, policy.platform_state: .logs, the data and evals dirs) and the
            bus, Keychain files; the folders above its own can be stat'ed (only
            those directories themselves: not listed, nothing in them read), or resolving the path to its own folder
-           fails (git 2.56 resolves every component of `git -C <dir>` and dies on the workspace root)
+           fails (git 2.56 resolves every component of `git -C <dir>` and dies on the workspace root); no raw disk
+           device is read or written (/dev/disk*, /dev/rdisk*: an attached image's blocks past every read deny)
   network  fully off (127.0.0.1 and unix sockets included); Seatbelt can't filter by domain
   other    blocks the Keychain system services (the hole the runtime's sandbox can't close), opening apps, Apple Events,
            launchctl/crontab/at, inspecting or signalling other processes, and every mount (mount_denies)
@@ -46,6 +47,12 @@ KEYCHAIN_SERVICES = ["com.apple.SecurityServer", "com.apple.securityd.xpc", "com
 MOUNT_SERVICE_PREFIXES = ["com.apple.DiskArbitration.", "com.apple.diskimage", "com.apple.system.hdiejectd",
                           "com.apple.storagekitd", "com.apple.filesystems.", "com.apple.fskit.", "com.apple.netauth.",
                           "com.apple.automountd"]
+# named on their own as well: diskutil's attach door is DiskImages2's bundled XPC service, which runs in a sandbox of
+# its own and not the caller's; the prefix above catches it only because the names happen to share it
+MOUNT_SERVICE_NAMES = ["com.apple.diskimagescontroller"]
+# the raw devices of disks and attached images (an image the owner attached has devices the owner can read: its
+# blocks, decrypted, past every read deny on where it is mounted)
+DISK_DEVICES = r"^/dev/r?disk[0-9]"
 MOUNT_IOKIT_SERVICES = ["IOHDIXController", "AppleDiskImagesController"]
 MOUNT_IOKIT_CLIENTS = ["IOHDIXControllerUserClient"]
 NO_EXEC = ["/usr/bin/open", "/usr/bin/osascript", "/bin/launchctl", "/usr/bin/crontab", "/usr/bin/at", "/usr/bin/batch",
@@ -255,23 +262,29 @@ def git_fence_rules(pol: dict) -> list[str]:
 def mount_denies() -> list[str]:
     """No mount from inside, anywhere (guarantee no-mounts; docs/design/capabilities.md, "11-15: no mounts"): a disk
     image the process wrote, attached and mounted over a folder, puts files it never wrote through the file system
-    (a .git with a hostile config) where its write rules don't reach. Three layers, each measured on its own route:
+    (a .git with a hostile config) where its write rules don't reach. Four layers, each measured on its own route:
     - the mount operations themselves: mount(2), a remount and unmount by the process (mount_devfs, mount_hfs,
       mount_nfs, mount_smbfs, …), and a mount a daemon makes at a mount point the caller names (DiskArbitration
       checks the caller's sandbox: `hdiutil attach -mountpoint`, `diskutil mount -mountPoint`);
-    - the daemons that attach images, mount at a place they choose (/Volumes), unmount or change disks for a caller:
-      DiskArbitration, diskimagesiod/spawner (diskutil image attach), hdiejectd, storagekitd, FSKit/UserFS, NetAuth,
-      the automounter; by name, as Seatbelt can only deny a mach service it is told about;
-    - the disk-image driver's own door (hdiutil opens IOHDIXController's user client directly to make the device).
+    - the services that attach images, mount at a place they choose (/Volumes), unmount or change disks for a caller:
+      DiskArbitration, diskimagescontroller (DiskImages2's bundled XPC service: diskutil image attach goes through
+      it, and it reaches diskimagesiod from its own sandbox, so denying diskimagesiod alone leaves the attach
+      working), diskimagesiod/spawner, hdiejectd, storagekitd, FSKit/UserFS, NetAuth, the automounter; by name, as
+      Seatbelt can only deny a mach or XPC service it is told about (a bundled XPC service is matched by global-name
+      too, measured);
+    - the disk-image driver's own door (hdiutil opens IOHDIXController's user client directly to make the device);
+    - LaunchServices, `(deny lsopen)` in _isolation (not repeated here): opening a .dmg starts DiskImageMounter outside
+      the sandbox, which attaches and mounts it at /Volumes; with this block alone and lsopen allowed, it does.
     Not an exec deny: that names one path, and the door is the services (a copied hdiutil, killed at exec on macOS 27
     by code signing, is not a promise)."""
     return [
-        "; no mounts: none made, remounted or unmounted by the process, none asked of the daemons that mount, attach "
-        "disk images or change disks, nor of the disk-image driver",
+        "; no mounts: none made, remounted or unmounted by the process, none asked of the services that mount, attach "
+        "disk images or change disks, nor of the disk-image driver (LaunchServices: the lsopen deny below)",
         "(deny file-mount)",
         "(deny file-mount-update)",
         "(deny file-unmount)",
-        "(deny mach-lookup " + " ".join(f"(global-name-prefix {q(s)})" for s in MOUNT_SERVICE_PREFIXES) + ")",
+        "(deny mach-lookup " + " ".join([*(f"(global-name-prefix {q(s)})" for s in MOUNT_SERVICE_PREFIXES),
+                                         *(f"(global-name {q(s)})" for s in MOUNT_SERVICE_NAMES)]) + ")",
         "(deny iokit-open-service " + " ".join(f"(iokit-registry-entry-class {q(c)})" for c in MOUNT_IOKIT_SERVICES)
         + ")",
         "(deny iokit-open-user-client " + " ".join(f"(iokit-user-client-class {q(c)})" for c in MOUNT_IOKIT_CLIENTS)
@@ -312,6 +325,8 @@ def _isolation(pol: dict, writable: list[pathlib.Path], writable_extra: list[pat
         "(allow file-read* " + " ".join(own + [f"(subpath {q(r)})" for r in readable]) + ")",
         "; the folders above them: stat only (resolving a path to its own folder walks through them)",
         "(allow file-read-metadata " + " ".join(ancestors(configured)) + ")",
+        "; the raw devices of disks and attached images: their blocks would bypass every read deny above",
+        f'(deny file-read* file-write* (regex #"{DISK_DEVICES}"))',
         "; the Keychain system services",
         "(deny mach-lookup " + " ".join(f"(global-name {q(s)})" for s in KEYCHAIN_SERVICES) + ")",
         *mount_denies(),
