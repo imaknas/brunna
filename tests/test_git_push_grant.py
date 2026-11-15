@@ -531,6 +531,65 @@ class Grant(Base):
         self.assertEqual(self.commits[0][1:], ("projects/proj.yaml",))
         self.assertEqual(len(self.ident), 1)
 
+    def test_writing_the_policy_keeps_every_comment_and_byte_but_its_own_block(self):
+        """The entry's nested and inline comments are the owner's decisions: a write changes only enforce.git_push,
+        the first time (added) and the second (replaced), and the file reads back as exactly the entry intended."""
+        import yaml
+        reg = self.tmp / "reg" / "proj.yaml"
+        before = ("# project registry: proj\n"
+                  "v: 1\n"
+                  "name: proj   # the folder's name\n"
+                  "paths:\n"
+                  "  # where it lives\n"
+                  "  workspace: ~/workspace/proj   # moved 11-01\n"
+                  "  origin: git@github.com:o/proj.git\n"
+                  "privacy:\n"
+                  "  reflection: exclude   # the owner 11-15: colleagues' records\n"
+                  "enforce:\n"
+                  "  sandbox: true   # other people's data\n"
+                  "  capabilities:\n"
+                  "    - gpu   # the owner agreed 10-25\n"
+                  "  # work stays off: the owner 11-02\n"
+                  "  work: false\n"
+                  "\n"
+                  "# jobs below\n"
+                  "jobs:\n"
+                  "  - {name: nightly, at: '03:00', run: make nightly}   # flow style kept\n")
+        reg.write_text(before)
+
+        def outside(text):   # every line but the git_push block's
+            out, skip = [], False
+            for ln in text.splitlines(keepends=True):
+                if ln.startswith("  git_push:"):
+                    skip = True
+                    continue
+                if skip and ln.startswith("    "):
+                    continue
+                skip = False
+                out.append(ln)
+            return "".join(out)
+        with mock.patch("sys.stdout", io.StringIO()):
+            self.assertTrue(gpg.write_policy("proj", {"branches": "all", "emails": ["a@b.example"]}))
+        first = reg.read_text()
+        self.assertEqual(outside(first), before, "everything but the block is byte-identical")
+        self.assertEqual(yaml.safe_load(first)["enforce"]["git_push"], {"branches": "all", "emails": ["a@b.example"]})
+        self.assertLess(first.index("git_push:"), first.index("\n\n# jobs below"), "inside enforce:")
+        # the second write replaces the block (and keeps the field it doesn't set) and a comment on its line
+        reg.write_text(first.replace("  git_push:\n", "  git_push:   # set by brunna push setup\n"))
+        with mock.patch("sys.stdout", io.StringIO()):
+            gpg.write_policy("proj", {"branches": "others", "emails": ["x@y.example", "z@y.example"]})
+        second = reg.read_text()
+        self.assertEqual(outside(second), before)
+        self.assertIn("  git_push:   # set by brunna push setup\n", second)
+        self.assertEqual(yaml.safe_load(second)["enforce"]["git_push"],
+                         {"branches": "others", "emails": ["x@y.example", "z@y.example"]})
+        self.assertEqual(second.count("git_push:"), 1)
+        # a layout it doesn't edit is refused, and the file is left as it was
+        reg.write_text("v: 1\nname: proj\nenforce: {sandbox: true}   # flow style\n")
+        with self.assertRaises(gpg.Refused), mock.patch("sys.stdout", io.StringIO()):
+            gpg.write_policy("proj", {"branches": "all", "emails": []})
+        self.assertEqual(reg.read_text(), "v: 1\nname: proj\nenforce: {sandbox: true}   # flow style\n")
+
     def test_default_emails_by_visibility(self):
         self.assertEqual(gpg.default_emails("public"), ["42+octo@users.noreply.github.com"])
         self.assertEqual(gpg.default_emails("unknown"), ["42+octo@users.noreply.github.com"])

@@ -822,6 +822,11 @@ The owner took all three recommendations:
   (checked at run time); until then setup says what to set. The project repo's `user.name`/`user.email` are then set,
   as the project (`project-git-job.py set-identity`), to the allowed address (the noreply one when it is allowed), so a
   public remote's sessions don't commit with the global email and get every push refused. The rules text says so.
+- **The registry entry is edited as text:** `write_policy` replaces or adds only the `git_push:` block under
+  `enforce:` and leaves every other byte, so the nested and inline comments that record the owner's decisions stay;
+  the result must read back as exactly the entry intended, or nothing is written. **Known issue:** `upgrade-idea.py`
+  still rewrites the whole entry with `yaml.safe_dump` and keeps only the lines that start with `#`, so an upgraded
+  idea loses its nested and inline comments.
 - **Onboarding:** `onboard-project.sh` and `connect.py` take `--sandbox`/`--no-sandbox`, `--push`, `--push-email`, and
   connect asks both questions. `connect_project` may ask for `sandbox` and always passes `--push none`.
   `upgrade-idea.py --push`; the lease-runner passes `none`. With nobody answering, the anonymous probe decides

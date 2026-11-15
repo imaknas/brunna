@@ -589,8 +589,48 @@ def commit_registry(message: str, *files: str) -> None:
     subprocess.run([str(BIN / "commit-hub-files.sh"), message, *files], check=False)
 
 
+def with_git_push(text: str, git_push: dict) -> str:
+    """The registry entry's text with only its enforce.git_push block written (replaced, or added at the end of
+    enforce:), every other byte as it was: the entry's comments record the owner's decisions. Refused for a layout this
+    doesn't edit (no block-style enforce:, a flow-style git_push)."""
+    import yaml
+    lines = text.splitlines(keepends=True)
+    top = next((i for i, ln in enumerate(lines) if re.fullmatch(r"enforce:[ \t]*(#.*)?\n?", ln)), None)
+    if top is None:
+        raise Refused(_("its registry entry has no block-style enforce: to add git_push to; set it by hand"))
+    end = top + 1   # the enforce block: everything up to the next line that starts a top-level key
+    while end < len(lines) and (not lines[end].strip() or lines[end][0] in " \t#"):
+        end += 1
+    body = [i for i in range(top + 1, end) if lines[i].strip() and not lines[i].lstrip().startswith("#")]
+    if not body:
+        raise Refused(_("its registry entry has no block-style enforce: to add git_push to; set it by hand"))
+    indent = re.match(r"[ \t]*", lines[body[0]]).group(0)
+    rendered = yaml.safe_dump({"git_push": git_push}, allow_unicode=True, sort_keys=False, default_flow_style=False,
+                              width=200)
+    block = ["".join((indent, ln, "\n")) for ln in rendered.splitlines()]
+    at = next((i for i in body if re.match(re.escape(indent) + r"git_push:", lines[i])), None)
+    if at is None:   # added after enforce's last line of content
+        last = body[-1]
+        if not lines[last].endswith("\n"):
+            lines[last] += "\n"
+        return "".join(lines[:last + 1] + block + lines[last + 1:])
+    if not re.fullmatch(re.escape(indent) + r"git_push:[ \t]*(#.*)?\n?", lines[at]):
+        raise Refused(_("its registry entry's enforce.git_push isn't in block style; set it by hand"))
+    comment = re.search(r"[ \t]+#.*", lines[at])
+    if comment:   # the comment on the git_push: line stays
+        block[0] = block[0].rstrip("\n") + comment.group(0).rstrip("\n") + "\n"
+    stop = at + 1   # its own lines: everything indented deeper (blank lines between them included)
+    while stop < end and (not lines[stop].strip() or re.match(re.escape(indent) + r"[ \t]", lines[stop])):
+        stop += 1
+    # blank and comment lines at its end belong to what follows (a note above the next key)
+    while stop > at + 1 and (not lines[stop - 1].strip() or lines[stop - 1].lstrip().startswith("#")):
+        stop -= 1
+    return "".join(lines[:at] + block + lines[stop:])
+
+
 def write_policy(project: str, policy: dict) -> bool:
     """enforce.git_push into the registry entry (validated first), committed like every script-written registry change.
+    Only that block of the file changes (with_git_push), and the result must read back as exactly the entry intended.
     → whether it was written; when the registry doesn't know the field yet, says what to set instead."""
     shown = json.dumps(policy, ensure_ascii=False)
     if not field_supported():
@@ -607,8 +647,15 @@ def write_policy(project: str, policy: dict) -> bool:
     if (errs := registry.validate(doc, project)):
         raise Refused(_("enforce.git_push {policy} isn't valid for {name}: {errors}", policy=shown, name=project,
                         errors="; ".join(errs)))
-    head = "".join(line for line in text.splitlines(keepends=True) if line.startswith("#"))
-    reg.write_text(head + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200))
+    new = with_git_push(text, enf["git_push"])
+    try:
+        back = yaml.safe_load(new)
+    except yaml.YAMLError:
+        back = None
+    if back != doc or registry.validate(back, project):
+        raise Refused(_("writing enforce.git_push into projects/{name}.yaml wouldn't read back as intended; set it by "
+                        "hand: enforce.git_push: {policy}", name=project, policy=shown))
+    reg.write_text(new)
     commit_registry(f"chore(registry): {project} git_push {policy.get('branches')} (brunna push setup)",
                     f"projects/{project}.yaml")
     registry.refresh()

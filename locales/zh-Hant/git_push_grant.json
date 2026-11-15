@@ -70,5 +70,8 @@
  "this platform's registry doesn't know enforce.git_push yet, so no grant is made: update brunna, then run {command}": "這個平台的登錄還不認得 enforce.git_push,所以不做授權:更新 brunna 之後再跑 {command}",
  "The platform pushes nothing for {name} now; its deploy key stays at GitHub until you run {command} --revoke": "平台現在不替 {name} 推任何東西;它的 deploy key 會留在 GitHub,直到你跑 {command} --revoke",
  "the grant couldn't be checked ({why}); it is kept: run this again once GitHub answers": "沒辦法檢查授權({why});先留著:等 GitHub 有回應再跑一次",
- "deploy key {id} was already gone from {repo}": "{repo} 上的 deploy key {id} 早就不在了"
+ "deploy key {id} was already gone from {repo}": "{repo} 上的 deploy key {id} 早就不在了",
+ "its registry entry has no block-style enforce: to add git_push to; set it by hand": "它的登錄項目沒有區塊格式的 enforce: 可以加 git_push;請手動設定",
+ "its registry entry's enforce.git_push isn't in block style; set it by hand": "它的登錄項目裡 enforce.git_push 不是區塊格式;請手動設定",
+ "writing enforce.git_push into projects/{name}.yaml wouldn't read back as intended; set it by hand: enforce.git_push: {policy}": "把 enforce.git_push 寫進 projects/{name}.yaml 後讀回來會跟預期不同;請手動設定:enforce.git_push: {policy}"
 }
