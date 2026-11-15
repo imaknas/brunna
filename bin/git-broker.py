@@ -21,6 +21,7 @@ def main(argv: list[str]) -> int:
     if argv:
         print(__doc__)
         return 0 if argv[0] in ("-h", "--help") else 2
+    git_broker.raise_nofile()   # launchd's default soft limit (256) is a few dozen calls
     broker = git_broker.Broker()
     try:
         broker.start()

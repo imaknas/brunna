@@ -7,10 +7,12 @@ sandbox doesn't fence git dirs (Linux's Landlock); the broker's refusal there is
 
     bin/run-tests   (or brunna test)
 """
+import errno
 import json
 import os
 import pathlib
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -26,6 +28,7 @@ import git_allow  # noqa: E402
 import git_broker  # noqa: E402
 import hubconf  # noqa: E402
 import isolation  # noqa: E402
+import landlock  # noqa: E402
 import names  # noqa: E402
 import policy  # noqa: E402
 import seatbelt  # noqa: E402
@@ -90,7 +93,7 @@ class Fixture(unittest.TestCase):
         # the messages are read in English here (each language's: tests/test_i18n_golden_git_broker.py)
         for p in (mock.patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(self.owner_cfg), "GIT_CONFIG_NOSYSTEM": "1",
                                                "AGENT_HUB_LANG_UI": "en", "BRUNNA_LANG_UI": "en"}),
-                  mock.patch.object(seatbelt, "TMP", [str(self.t)])):
+                  mock.patch.object(seatbelt, "TMP", [str(self.t)]), mock.patch.object(landlock, "TMP", [])):
             p.start()
             self.addCleanup(p.stop)
         self.docs = {
@@ -338,7 +341,10 @@ class WriterProfile(Fixture):
                   "alternates": gd / "objects" / "info" / "alternates",
                   "http-alternates": gd / "objects" / "info" / "http-alternates", "commondir": gd / "commondir",
                   "gitdir": gd / "gitdir", "config.lock": gd / "CONFIG.lock", "shallow": gd / "shallow",
-                  "info/grafts": gd / "info" / "grafts"}
+                  "info/grafts": gd / "info" / "grafts", "rebase-merge/": gd / "rebase-merge" / "git-rebase-todo",
+                  "rebase-apply/": gd / "rebase-apply" / "patch", "sequencer/": gd / "sequencer" / "todo",
+                  "info/sparse-checkout": gd / "info" / "sparse-checkout",
+                  "a worktree's rebase-merge/": gd / "worktrees" / "w" / "rebase-merge" / "done"}
         prof = self.p1(progs=[PY])
         for name, path in writes.items():
             code = f"import os; os.makedirs({str(path.parent)!r}, exist_ok=True); open({str(path)!r}, 'a').write('x')"
@@ -429,6 +435,28 @@ class B2(Fixture):
         ctl = self.owner_git("apply", "--cached", inp=self.PATCH)   # control: plain git takes it
         self.assertEqual(ctl.returncode, 0)
         self.assertIn("x/HEAD", self.owner_git("ls-files").stdout)
+
+    GITLINK = ("diff --git a/sub b/sub\nnew file mode 160000\nindex 0000000..1111111\n--- /dev/null\n+++ b/sub\n"
+               "@@ -0,0 +1 @@\n+Subproject commit 1111111111111111111111111111111111111111\n")
+
+    def test_a_gitlink_is_refused_in_the_same_scan(self):
+        """No submodule entry enters the index or a commit through the platform (the review's N1)."""
+        self.made()
+        index, head = (self.ws / ".git" / "index").read_bytes(), self.head()
+        r = self.wrapped("apply", "--cached", stdin=self.GITLINK.encode())
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("submodule", r.stderr.decode())
+        self.assertEqual((self.ws / ".git" / "index").read_bytes(), index)
+        self.owner_git("update-index", "--add", "--cacheinfo", "160000,1111111111111111111111111111111111111111,sub")
+        index = (self.ws / ".git" / "index").read_bytes()
+        r = self.wrapped("commit", "-q", "-m", "gitlink")
+        self.assertEqual(r.returncode, 2)
+        self.assertIn("submodule", r.stderr.decode())
+        self.assertEqual(((self.ws / ".git" / "index").read_bytes(), self.head()), (index, head))
+        self.assertEqual(self.owner_git("commit", "-q", "-m", "gitlink").returncode, 0)   # control: plain git takes it
+        self.assertIn("160000 commit", self.owner_git("ls-tree", "HEAD").stdout)
+        self.owner_git("rm", "-q", "--cached", "sub")
+        self.assertEqual(self.owner_git("apply", "--cached", inp=self.GITLINK).returncode, 0)
 
     def test_a_commit_of_an_index_holding_head_is_refused(self):
         self.made()
@@ -559,6 +587,28 @@ class Identity(Fixture):
                 self.assertIn("isn't served", err)
         self.docs = base
         code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "x"])   # control: no overlap
+        self.assertEqual(code, 0, err)
+
+    def test_a_workspace_in_the_shared_temp_area_isnt_served(self):
+        self.made()
+        with mock.patch.object(seatbelt, "TMP", [str(self.ws.parent)]):
+            code, _o, err = self.client(["commit", "--allow-empty", "-m", "x"])
+        self.assertEqual(code, 2)
+        self.assertIn("temp area", err)
+        code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "x"])   # control: outside it
+        self.assertEqual(code, 0, err)
+
+    def test_a_recorded_repo_inside_another_projects_folders(self):
+        """pb (sandboxed, not switched on) may write the folder holding one of pa's recorded repos: pa isn't served,
+        though pa's own nonce folder is outside pb's roots."""
+        self.made()
+        self.broker.make_repo("pa", self.ws / "sub" / "r")
+        self.docs["pb"] = {**self.docs["pb"], "allow_write": [str(self.ws / "sub")]}
+        code, _o, err = self.client(["commit", "--allow-empty", "-m", "x"])
+        self.assertEqual(code, 2)
+        self.assertIn("is inside pb's folders", err)
+        self.docs["pb"] = {k: v for k, v in self.docs["pb"].items() if k != "allow_write"}
+        code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "x"])   # control
         self.assertEqual(code, 0, err)
 
     def test_a_cwd_outside_the_projects_folders(self):
@@ -711,6 +761,40 @@ class ConfigOp(Fixture):
         lock.unlink()
         self.assertEqual(self.wrapped("config", "user.name", "Proj").returncode, 0)
 
+    def test_config_lock_is_taken_before_anything_is_read(self):
+        """With the owner's config.lock there, the op stops on the lock and reads nothing (the config here is a FIFO,
+        which a read would refuse another way: the control, without the lock)."""
+        self.made()
+        cfg = self.ws / ".git" / "config"
+        saved = cfg.read_bytes()
+        cfg.unlink()
+        os.mkfifo(cfg)
+        self.addCleanup(lambda: (cfg.unlink(), cfg.write_bytes(saved)))
+        lock = self.ws / ".git" / "config.lock"
+        lock.write_text("the owner's\n")
+        r = self.wrapped("config", "user.name", "Proj", timeout=60)
+        self.assertEqual(r.returncode, 255, r.stderr)
+        self.assertIn("config.lock", r.stderr.decode())
+        self.assertEqual(lock.read_text(), "the owner's\n")
+        lock.unlink()
+        r = self.wrapped("config", "user.name", "Proj", timeout=60)
+        self.assertNotIn(r.returncode, (0, 255), r.stderr)
+        self.assertNotIn("config.lock", r.stderr.decode())
+        self.assertFalse(lock.exists(), "the op left its lock")
+
+    def test_a_remote_name_with_a_dot(self):
+        self.made()
+        url = "https://example.invalid/pa.git"
+        for args in (("remote", "add", "a.b", url), ("remote", "set-url", "a.b", url)):
+            r = self.wrapped(*args)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.owner_git("config", "--get", "remote.a.b.url").stdout.strip(), url)
+        r = self.wrapped("remote", "add", "a.b", url)
+        self.assertEqual(r.returncode, 3, "the remote a.b is known by its whole name")
+        r = self.wrapped("remote", "remove", "a.b")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("a.b", self.config())
+
     def test_a_fifo_include_doesnt_hang_it(self):
         self.made()
         fifo = self.tmp / "fifo"
@@ -827,6 +911,49 @@ class Limits(Fixture):
         lock.unlink()
         self.assertEqual(self.wrapped("add", "g").returncode, 0)
 
+    def test_a_timeout_leaves_no_index_lock(self):
+        """commit -a -F - whose stdin never ends (the review's S1): the message is read before git starts, so git never
+        holds index.lock waiting for it; the call stops at the timeout and leaves nothing."""
+        self.made()
+        (self.ws / "f").write_text("changed\n")
+        self.settings["timeout_s"] = 3
+        r, w = os.pipe()
+        self.addCleanup(os.close, w)
+        p = subprocess.Popen(["/usr/bin/sandbox-exec", "-p", self.service_profile(), str(WRAPPER), "commit", "-a",
+                              "-F", "-"], cwd=self.ws, env=self.project_env(), stdin=r, stdout=subprocess.PIPE,
+                             stderr=subprocess.PIPE)
+        os.close(r)
+        _out, err = p.communicate(timeout=60)
+        self.assertEqual(p.returncode, 124, err)
+        self.assertFalse((self.ws / ".git" / "index.lock").exists())
+        self.assertEqual(self.wrapped("add", "f").returncode, 0, "the project's next call is blocked")
+
+    def test_stopping_lets_git_remove_its_lock(self):
+        """_stop sends SIGTERM to the group first, and git removes its index.lock; the control, SIGKILL alone, leaves
+        it."""
+        self.made()
+        (self.ws / "f").write_text("changed\n")
+        lock = self.ws / ".git" / "index.lock"
+        for graceful in (True, False):
+            with self.subTest(graceful=graceful):
+                r, w = os.pipe()
+                p = subprocess.Popen(["git", "commit", "-a", "-F", "-"], cwd=self.ws, stdin=r, start_new_session=True,
+                                     env=plain_env(self.home, self.owner_cfg), stdout=subprocess.DEVNULL,
+                                     stderr=subprocess.DEVNULL)
+                os.close(r)
+                deadline = time.monotonic() + 30
+                while not lock.exists():
+                    self.assertLess(time.monotonic(), deadline, "git never took the lock")
+                    time.sleep(0.05)
+                if graceful:
+                    git_broker._stop(p)
+                else:
+                    os.killpg(p.pid, signal.SIGKILL)
+                p.wait(timeout=30)
+                os.close(w)
+                self.assertEqual(lock.exists(), not graceful)
+                lock.unlink(missing_ok=True)
+
     def test_the_log_holds_no_argument_values(self):
         self.made()
         self.assertEqual(self.wrapped("commit", "-q", "--allow-empty", "-m", "VALUE-9f8e7d").returncode, 0)
@@ -836,6 +963,137 @@ class Limits(Fixture):
         self.assertEqual({k: rec[k] for k in ("project", "socket", "sub", "path", "exit")},
                          {"project": "pa", "socket": "service", "sub": "commit", "path": "p1", "exit": 0})
         self.assertIn("ms", rec)
+
+
+@unittest.skipUnless(FENCED, "needs Seatbelt with git-dirs-fenced")
+class Bounds(Fixture):
+    """What any sandboxed process can hold of the broker before proving its project (the review's S2): until the
+    socket deny reaches every sandboxed project's profiles (step 6), each is bounded, and a bound reached refuses with a
+    reason instead of exhausting the service."""
+
+    def idle(self, name="pa", kind="service") -> socket.socket:
+        """A connection that takes its nonce and then says nothing."""
+        s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        s.settimeout(30)
+        git_broker.unix_connect(s, self.state / "git-broker" / name / kind)
+        self.addCleanup(s.close)
+        self.assertEqual(git_broker.recv(s)[0], b"N")
+        return s
+
+    def unproved(self) -> int:
+        with self.broker.lock:
+            return sum(self.broker.unproved.values())
+
+    def settle(self, want: int):
+        deadline = time.monotonic() + 30
+        while self.unproved() != want:
+            self.assertLess(time.monotonic(), deadline, f"unproved stays {self.unproved()}")
+            time.sleep(0.05)
+
+    def test_the_handshake_has_one_deadline(self):
+        """A caller dripping bytes gains no time: the whole handshake ends within handshake_s."""
+        self.made()
+        self.settings["handshake_s"] = 1
+        s = self.idle()
+        t0 = time.monotonic()
+        closed = False
+        for b in b"P\0\0\0\x01":   # a frame of one byte, its header dripped and its byte never sent
+            try:
+                s.send(bytes([b]))
+            except OSError:
+                closed = True
+                break
+            time.sleep(0.3)
+        if not closed:
+            s.settimeout(5)
+            try:
+                s.recv(1 << 16)   # the broker closes it: b"" (each recv alone would have waited for its own time)
+                closed = True
+            except TimeoutError:
+                closed = False
+            except OSError:
+                closed = True
+        self.assertTrue(closed, "the dripping caller was still held")
+        self.assertLess(time.monotonic() - t0, 10)
+        self.settle(0)
+        code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "x"])   # control: in time
+        self.assertEqual(code, 0, err)
+
+    def test_unproved_connections_per_socket(self):
+        self.made()
+        self.settings.update(unproved_per_socket=2, unproved_total=100)
+        held = [self.idle(), self.idle()]
+        code, _o, err = self.client(["commit", "--allow-empty", "-m", "x"])
+        self.assertEqual(code, 2)
+        self.assertIn("busy", err)
+        code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "x"], kind="session")   # another socket
+        self.assertEqual(code, 0, err)
+        for h in held:
+            h.close()
+        self.settle(0)
+        code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "y"])   # control: room again
+        self.assertEqual(code, 0, err)
+
+    def test_unproved_connections_in_all(self):
+        self.made()
+        self.made("pc", self.wsc)
+        self.settings.update(unproved_per_socket=10, unproved_total=2)
+        held = [self.idle(), self.idle()]
+        code, _o, err = self.client(["commit", "--allow-empty", "-m", "x"], name="pc", cwd=self.wsc)
+        self.assertEqual(code, 2)
+        self.assertIn("busy", err)
+        for h in held:
+            h.close()
+        self.settle(0)
+        code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "x"], name="pc", cwd=self.wsc)
+        self.assertEqual(code, 0, err)
+
+    def test_the_queue_is_bounded(self):
+        self.made()
+        os.mkfifo(self.ws / "fifo")
+        self.settings.update(concurrency=1, queue=1)
+        self.broker.slots.clear()
+
+        def start(*args, stdin=None):
+            return subprocess.Popen(["/usr/bin/sandbox-exec", "-p", self.service_profile(), str(WRAPPER), *args],
+                                    cwd=self.ws, env=self.project_env(), stdin=subprocess.PIPE,
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+        def until(cond, what):
+            deadline = time.monotonic() + 30
+            while not cond():
+                self.assertLess(time.monotonic(), deadline, what)
+                time.sleep(0.05)
+        a = start("hash-object", "-w", "fifo")
+        until(lambda: self.broker.slots.get("pa") and self.broker.slots["pa"]._value == 0, "a never ran")
+        b = start("hash-object", "-w", "--stdin")
+        b.stdin.write(b"queued\n")
+        b.stdin.close()
+        until(lambda: self.broker.waiting.get("pa") == 1, "b never queued")
+        r = self.wrapped("hash-object", "-w", "--stdin", stdin=b"refused\n")
+        self.assertEqual(r.returncode, 2, r.stderr)
+        self.assertIn("already wait", r.stderr.decode())
+        with open(self.ws / "fifo", "w") as f:
+            f.write("first\n")
+        for p in (a, b):
+            _o, err = p.communicate(timeout=60)
+            self.assertEqual(p.returncode, 0, err)
+        r = self.wrapped("hash-object", "-w", "--stdin", stdin=b"control\n")   # control: the queue is free again
+        self.assertEqual(r.returncode, 0, r.stderr)
+
+    def test_out_of_descriptors_backs_off_and_serves_on(self):
+        self.made()
+        real, fails = self.broker._accept, [3]
+
+        def accept(listener):
+            if fails[0]:
+                fails[0] -= 1
+                raise OSError(errno.EMFILE, "Too many open files")
+            return real(listener)
+        self.broker._accept = accept
+        code, _o, err = self.client(["commit", "-q", "--allow-empty", "-m", "x"])
+        self.assertEqual(code, 0, err)
+        self.assertEqual(self.broker.backoffs, 3)
 
 
 class Unsupported(unittest.TestCase):
@@ -869,6 +1127,31 @@ class Unsupported(unittest.TestCase):
         self.addCleanup(c.close)
         git_broker.unix_connect(c, path)
         self.assertEqual(os.getcwd(), here)
+
+    def test_the_service_raises_its_open_file_limit(self):
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        self.addCleanup(resource.setrlimit, resource.RLIMIT_NOFILE, (soft, hard))
+        low = 256 if hard == resource.RLIM_INFINITY else min(256, hard)
+        resource.setrlimit(resource.RLIMIT_NOFILE, (low, hard))   # control: launchd's default
+        want = 8192 if hard == resource.RLIM_INFINITY else min(8192, hard)
+        self.assertGreaterEqual(git_broker.raise_nofile(), min(want, 4096))
+
+    def test_the_log_is_bounded(self):
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="g")).resolve()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        b = git_broker.Broker(tmp / "s", tmp / "sh", projects=dict)
+        rec = {"project": "pa", "socket": "service", "sub": "add", "path": "p1", "exit": 0, "ms": 1}
+        for n in range(30):
+            b.log(rec)
+        self.assertFalse((tmp / "s" / "git-broker" / "log.jsonl.1").exists(), "control: under the bound, one file")
+        with mock.patch.object(git_broker, "LOG_MAX", 400):
+            for n in range(30):
+                b.log(rec)
+        log = tmp / "s" / "git-broker" / "log.jsonl"
+        self.assertTrue((tmp / "s" / "git-broker" / "log.jsonl.1").exists())
+        self.assertLess(log.stat().st_size, 400 + 200)
+        self.assertLess((tmp / "s" / "git-broker" / "log.jsonl.1").stat().st_size, 400 + 200)
 
     def test_the_folding_matches_heads(self):
         for p in (b"HEAD", b"x/HEAD", b"x/head", b"x/He\xe2\x80\x8cAD", b"a/b/HEAD.", b"HEAD "):

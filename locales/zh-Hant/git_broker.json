@@ -37,5 +37,12 @@
  "the config couldn't be written: {why}": "設定寫不進去:{why}",
  "git: stopped after {s} seconds (the platform's limit for one call)": "git:{s} 秒後停止(平台對單次呼叫的上限)",
  "a tracked path named HEAD can't enter the index through the platform ({path}): a file of that name is a git-dir shape; the index is unchanged": "名為 HEAD 的追蹤路徑不能經由平台進入 index({path}):這個名字的檔案是 git dir 的形狀;index 沒有改變",
- "{key} says how the repo is stored": "{key} 決定 repo 的儲存方式"
+ "{key} says how the repo is stored": "{key} 決定 repo 的儲存方式",
+ "{project} isn't served: its workspace is in the temp area every sandboxed project writes; nothing was run": "不服務 {project}:它的工作區在每個沙盒專案都能寫的暫存區;什麼都沒執行",
+ "the platform's git broker is busy (too many connections are still proving their project); nothing was run": "平台的 git broker 正忙(太多連線還在證明自己是哪個專案);什麼都沒執行",
+ "{project} isn't served: its repo {path} is inside {other}'s folders, which {other} writes; nothing was run": "不服務 {project}:它的 repo {path} 在 {other} 的資料夾裡,{other} 能寫;什麼都沒執行",
+ "a submodule entry can't be committed through the platform ({path}): submodules aren't served (the owner's decision); nothing was run": "submodule 條目不能經由平台 commit({path}):不支援 submodule(擁有者的決定);什麼都沒執行",
+ "a submodule entry can't enter the index through the platform ({path}): submodules aren't served (the owner's decision); the index is unchanged": "submodule 條目不能經由平台進入 index({path}):不支援 submodule(擁有者的決定);index 沒有改變",
+ "the message on stdin is over {n} bytes; nothing was run": "stdin 上的訊息超過 {n} 位元組;什麼都沒執行",
+ "{n} calls of {project}'s already wait for their turn; nothing was run": "{project} 已經有 {n} 個呼叫在排隊;什麼都沒執行"
 }

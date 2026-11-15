@@ -137,7 +137,11 @@ class WriterProfile(unittest.TestCase):
         for name in ("[cC][oO][nN][fF][iI][gG]", "[hH][oO][oO][kK][sS](/|$)", "[iI][nN][fF][oO]/[aA][tT][tT][rR]",
                      "[sS][hH][aA][lL][lL][oO][wW]", "[iI][nN][fF][oO]/[gG][rR][aA][fF][tT][sS]",
                      "[oO][bB][jJ][eE][cC][tT][sS]/[iI][nN][fF][oO]/[aA][lL][tT]",
-                     "[wW][oO][rR][kK][tT][rR][eE][eE][sS]/[^/]+/([cC][oO][mM][mM][oO][nN][dD][iI][rR]|"):
+                     "[wW][oO][rR][kK][tT][rR][eE][eE][sS]/[^/]+/([cC][oO][mM][mM][oO][nN][dD][iI][rR]|",
+                     "[rR][eE][bB][aA][sS][eE]-[mM][eE][rR][gG][eE](/|$)", "[rR][eE][bB][aA][sS][eE]-[aA][pP][pP][lL][yY]",
+                     "[sS][eE][qQ][uU][eE][nN][cC][eE][rR](/|$)",
+                     "[iI][nN][fF][oO]/[sS][pP][aA][rR][sS][eE]-[cC][hH][eE][cC][kK][oO][uU][tT]",
+                     "[wW][oO][rR][kK][tT][rR][eE][eE][sS]/[^/]+/([rR][eE][bB][aA][sS][eE]-[mM][eE][rR][gG][eE]|"):
             self.assertIn(f'(regex #"^{re.escape(str(GD))}/{name}', text, name)
         pins = next(x for x in got if x.startswith("(deny file-write-unlink"))
         for p in ("[oO][bB][jJ][eE][cC][tT][sS]", "[rR][eE][fF][sS]", "[lL][oO][gG][sS]", "[iI][nN][fF][oO]",

@@ -311,7 +311,11 @@
       "properties": {
         "timeout_s": {"type": "integer", "minimum": 1, "description": "the limit for one git call through the platform (default 600); its process group is killed at it"},
         "long_timeout_s": {"type": "integer", "minimum": 1, "description": "the limit for gc (default 1800; fetch and clone later)"},
-        "concurrency": {"type": "integer", "minimum": 1, "description": "git calls per project at once through the broker (default 8); the rest wait"}
+        "concurrency": {"type": "integer", "minimum": 1, "description": "git calls per project at once through the broker (default 8); the rest wait"},
+        "queue": {"type": "integer", "minimum": 0, "description": "git calls of one project that may wait for a turn (default 16); one more is refused with the reason"},
+        "handshake_s": {"type": "integer", "minimum": 1, "description": "the time a connection has to prove its project and send its request, whole (default 10)"},
+        "unproved_per_socket": {"type": "integer", "minimum": 1, "description": "connections still proving their project held per socket (default 16); more are turned away"},
+        "unproved_total": {"type": "integer", "minimum": 1, "description": "connections still proving their project held in all (default 64)"}
       },
       "description": "the git broker's limits (docs/design/git-broker.md, open point 17)"
     },

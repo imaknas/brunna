@@ -407,7 +407,11 @@ def service_profile(pol: dict, dirs: list[pathlib.Path], port: int | None = None
 # the entries git needs stay pinned (not removed, renamed or made as a link). r2 B1, r3 S-b, open point 22.
 GIT_WRITER_DENIED = ("config", "commondir", "gitdir", "shallow", "hooks(/|$)", "modules(/|$)", "remotes(/|$)",
                      "branches(/|$)", "info/attributes", "info/grafts", "objects/info/alternates",
-                     "objects/info/http-alternates", "worktrees/[^/]+/(commondir|gitdir|config)")
+                     "objects/info/http-alternates", "worktrees/[^/]+/(commondir|gitdir|config)",
+                     # state git reads back as steps or as what to check out (defence in depth: no slice-a op writes
+                     # them; slice b's broker writes the sequencer state itself; the slice's review, N2)
+                     "rebase-merge(/|$)", "rebase-apply(/|$)", "sequencer(/|$)", "info/sparse-checkout",
+                     "worktrees/[^/]+/(rebase-merge|rebase-apply|sequencer|info/sparse-checkout)(/|$)")
 GIT_WRITER_PINS = ("objects", "objects/info", "refs", "logs", "worktrees", "info")
 
 
