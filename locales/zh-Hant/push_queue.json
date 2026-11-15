@@ -27,5 +27,6 @@
  "{project}: the push worker could not be started: {e!r}": "{project}:推送 worker 起不來:{e!r}",
  "{project}: the result of {id} could not be written: {e}": "{project}:{id} 的結果寫不進去:{e}",
  "⚠️ the owner to-do {key} could not be closed ({why})": "⚠️ 擁有者待辦 {key} 關不掉({why})",
- "⚠️ the owner to-do {key} could not be sent ({why})": "⚠️ 擁有者待辦 {key} 送不出去({why})"
+ "⚠️ the owner to-do {key} could not be sent ({why})": "⚠️ 擁有者待辦 {key} 送不出去({why})",
+ "{n} push request files in {project}'s folder were over what one day allows and have been deleted unread": "{project} 資料夾裡有 {n} 個推送請求檔超過一天允許的數量,沒讀就刪了"
 }

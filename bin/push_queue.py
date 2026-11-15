@@ -53,6 +53,8 @@ SHA = re.compile(r"^(?:[0-9a-f]{40}|[0-9a-f]{64})$")
 REQUEST, RESULT = ".request.json", ".result.json"
 CAP = 64 << 10
 RESULT_KEEP_S = 7 * 86400
+TAKEN_KEEP_S = 7 * 86400       # taken.jsonl: ids seen (a request file older than this is long answered)
+WORKER_MAX_S = 3 * 1800 + 900  # the lock (git_remote.TIMEOUT_S), the bundle, the push, and a margin
 ATTEMPTS = 2                   # workers started for one request before it ends as worker lost
 DEFAULTS = {"requests_per_day": 20, "concurrency": 2, "max_commits": 500, "max_total_mb": 200, "scan_timeout_s": 300,
             "wait_s": 90}
@@ -188,7 +190,13 @@ def alive(w: dict) -> bool:
     except PermissionError:
         pass
     if not w.get("start"):
-        return True
+        # no start time recorded: the pid counts only while a worker could still be running (a reused pid later never
+        # keeps a request waiting)
+        try:
+            spawned = datetime.datetime.fromisoformat(w.get("spawned_at") or w.get("started_at") or "")
+        except ValueError:
+            return False
+        return (datetime.datetime.now().astimezone() - spawned).total_seconds() < WORKER_MAX_S
     import runtime_ports
     return runtime_ports.process_start(pid) == w["start"]
 
@@ -224,9 +232,53 @@ def write_result(project: str, res: dict, log=None) -> None:
     nofollow.replace(root(), f"{project}/{res['id']}{RESULT}", json.dumps(res, ensure_ascii=False).encode())
 
 
+class Taken:
+    """taken.jsonl read once per take-in (review S1): the ids seen, today's count; appended to as requests come in, and
+    lines older than TAKEN_KEEP_S dropped once per take-in."""
+
+    def __init__(self, project: str):
+        self.project = project
+        self.f = broker(project) / "taken.jsonl"
+        cut = (datetime.datetime.now().astimezone() - datetime.timedelta(seconds=TAKEN_KEEP_S)).isoformat()
+        recs = taken(project)
+        keep = [t for t in recs if str(t.get("at", "")) >= cut]
+        if len(keep) != len(recs):
+            self.f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+            tmp = self.f.with_name(f".{self.f.name}.{os.getpid()}.new")
+            tmp.write_text("".join(json.dumps(t, ensure_ascii=False) + "\n" for t in keep))
+            os.replace(tmp, self.f)
+        self.ids = {t.get("id") for t in keep}
+        today = datetime.date.today().isoformat()
+        self.today = sum(1 for t in keep if str(t.get("at", "")).startswith(today))
+
+    def add(self, rec: dict) -> None:
+        _taken_line(self.project, rec)
+        self.ids.add(rec.get("id"))
+        self.today += 1
+
+
+def _clear(r: pathlib.Path, rel: str) -> None:
+    """One entry gone: a folder (empty or not) removed, anything else unlinked; never followed."""
+    st = nofollow.lstat(r, rel)
+    if st is None:
+        return
+    if stat.S_ISDIR(st.st_mode):
+        import shutil
+        try:
+            nofollow.remove_dir(r, rel)
+        except OSError:
+            # not empty: it is in the project's own folder, reached without following a link (the folder itself was
+            # checked a moment ago); removed whole
+            shutil.rmtree(r / rel, ignore_errors=True)
+    else:
+        nofollow.remove(r, rel)
+
+
 def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[str]:
     """One project's request folder → its queue. → the ids handled. letter(project, text, key): an info letter to the
-    project; confirm_session(project, session) → the session when hubbus saw it there, else None."""
+    project; confirm_session(project, session) → the session when hubbus saw it there, else None. At most the daily cap
+    plus one request files are read per take-in; the rest are deleted with one letter (review S1: the dispatch tick holds
+    the mail while it runs)."""
     log = log or (lambda m: None)
     ensure_folder(project, log)
     r = root()
@@ -237,9 +289,24 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
         if not n.endswith(REQUEST) or n.startswith("."):
             continue
         st = nofollow.lstat(r, f"{project}/{n}")
-        reqs.append((st.st_mtime if st else 0, n))
+        if st is None:
+            continue
+        if not stat.S_ISREG(st.st_mode):   # a folder, a link, a FIFO by a request's name: gone, never read
+            _clear(r, f"{project}/{n}")
+            continue
+        reqs.append((st.st_mtime, n))
+    reqs.sort()
+    most = limits()["requests_per_day"] + 1
+    if len(reqs) > most:
+        for _m, n in reqs[most:]:
+            _clear(r, f"{project}/{n}")
+        if letter:
+            letter(project, _("{n} push request files in {project}'s folder were over what one day allows and have been "
+                              "deleted unread", n=len(reqs) - most, project=project), f"push-flood-{project}")
+        reqs = reqs[:most]
+    seen = Taken(project)
     done = []
-    for _m, n in sorted(reqs):
+    for _m, n in reqs:
         rid = n[:-len(REQUEST)]
         rel = f"{project}/{n}"
         try:
@@ -251,32 +318,31 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
             fields = parse(raw, rid)
         except (OSError, ValueError) as e:
             why = str(e)[:200]
-            if ID.fullmatch(rid) and not any(t.get("id") == rid for t in taken(project)):
-                _taken_line(project, {"id": rid, "outcome": "malformed"})
+            if ID.fullmatch(rid) and rid not in seen.ids:
+                seen.add({"id": rid, "outcome": "malformed"})
                 write_result(project, result(project, rid, "refused", _("the request was malformed: {why}", why=why),
                                              "project", "request"), log)
             elif not ID.fullmatch(rid) and letter:
                 letter(project, _("A file in {project}'s push request folder was not a push request and has been deleted "
                                   "({name}): {why}", project=project, name=n[:80], why=why), f"push-malformed-{project}")
-            nofollow.remove(r, rel)
+            _clear(r, rel)
             continue
-        if any(t.get("id") == rid for t in taken(project)):
+        if rid in seen.ids:
             nofollow.remove(r, rel)   # taken in before: the earlier result stands
             continue
         if "session" in fields and confirm_session:
             fields["session"] = confirm_session(project, fields["session"])
-        _queue(project, rid, fields, log)
+        _queue(project, rid, fields, log, seen)
         nofollow.remove(r, rel)
         done.append(rid)
     return done
 
 
-def _queue(project: str, rid: str, fields: dict, log) -> None:
+def _queue(project: str, rid: str, fields: dict, log, seen: Taken) -> None:
     lim = limits()
     with queue_locked(project):
-        today = datetime.date.today().isoformat()
-        n_today = sum(1 for t in taken(project) if str(t.get("at", "")).startswith(today))
-        _taken_line(project, {"id": rid, "branch": fields["branch"], "sha": fields["sha"]})
+        n_today = seen.today
+        seen.add({"id": rid, "branch": fields["branch"], "sha": fields["sha"]})
         if n_today >= lim["requests_per_day"]:
             write_result(project, result(project, rid, "refused", _("the daily limit of {n} push requests is reached: "
                                                                     "ask again tomorrow", n=lim["requests_per_day"]),
@@ -306,12 +372,13 @@ def _queue(project: str, rid: str, fields: dict, log) -> None:
 
 
 def _old_results(project: str, names) -> None:
+    """Results older than RESULT_KEEP_S go; anything but a plain file by a result's name goes at once."""
     cut = time.time() - RESULT_KEEP_S
     for n in names:
         if n.endswith(RESULT):
             st = nofollow.lstat(root(), f"{project}/{n}")
-            if st and st.st_mtime < cut:
-                nofollow.remove(root(), f"{project}/{n}")
+            if st and (not stat.S_ISREG(st.st_mode) or st.st_mtime < cut):
+                _clear(root(), f"{project}/{n}")
 
 
 # ---------- workers ----------

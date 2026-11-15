@@ -361,6 +361,11 @@ def lease_settings(pol: dict) -> dict:
     deny = settings(pol)[1]
     deny += [f"Read({_rule_path(p)})" for p in pol["credential_files"]] + [f"Read({_rule_path(p)}/**)" for p in pol["credentials"]]
     deny += SECURITY_DENY
+    # a lease runs in the workspace and loads its local settings, which carry the session rendering's push rule and
+    # folder (review S2): a lease never asks the platform to push. Deny wins over that allow, and the Edit denies reach
+    # its Bash through the sandbox
+    deny += [r for p in pol.get("session_write") or [] for r in _edit(p, True)]
+    deny += [r for c in pol.get("platform_cli") or [] if c.split()[-1] == "push" for r in (f"Bash({c})", f"Bash({c} *)")]
     return {"permissions": {"deny": list(dict.fromkeys(deny))}}
 
 

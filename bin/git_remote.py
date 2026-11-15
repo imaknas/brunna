@@ -683,10 +683,16 @@ def run_checks(p: Prepared, owner_form: bool, deadline: float, logf=None) -> tup
     except push_checks.Failure as e:
         found = [push_checks.Finding(e.check, e.reason, e.fix, e.cause)]
     recorded = field(p.doc).get("visibility")
-    if recorded and recorded != ("public" if public else "private") and not owner_form:
+    if recorded == "private" and public and not owner_form:
+        # setup decided on a private remote that now looks public: refused, and setup asks again (r2 S-l)
         found.append(push_checks.Finding("names", _("the remote's visibility is {now}, but setup recorded {then}: the "
                                                     "owner runs brunna push setup again", now=vis, then=recorded),
                                          "owner", "visibility"))
+    elif recorded == "public" and not public and not owner_form:
+        # the other way is safe to push: only setup's choice is out of date, said once as a to-do
+        import push_queue
+        push_queue.raise_todo(p.project, "visibility", owner_text(p.project, p.branch, p.new, "visibility", None),
+                              log=logf)
     return found, vis
 
 
@@ -740,7 +746,7 @@ def flag_lines(found, vis: str) -> list[str]:
         else:
             marks.append(f"{c} {'!!' if c in bad else '✓'}")
     out = [_("checks: {marks}", marks=", ".join(marks))]
-    out += [f"!! [{f.check}] {visible(f.reason)}" for f in found]
+    out += [f"!! [{f.check}] {visible(f.reason)}" + (f" ({visible(f.detail)})" if f.detail else "") for f in found]
     return out
 
 
@@ -791,9 +797,27 @@ def owner_push(project: str, args: list[str]) -> int:
 
 # ---------- the worker (serve) ----------
 
+WORKER_AS = 8 << 30   # the worker's address space: what the project's objects can make it hold (review B2)
+
+
+def limit_memory() -> None:
+    """RLIMIT_AS on the worker and the git it starts, where the system enforces it (Linux; macOS ignores it, and there
+    the walk's caps are the bound)."""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        import resource
+        soft, hard = resource.getrlimit(resource.RLIMIT_AS)
+        cap = WORKER_AS if hard == resource.RLIM_INFINITY else min(WORKER_AS, hard)
+        resource.setrlimit(resource.RLIMIT_AS, (cap, hard))
+    except (ImportError, ValueError, OSError):
+        pass
+
+
 def serve(project: str, letter=None) -> int:
     """One queued request of the project, as the owner (push_queue.tick starts it detached)."""
     import push_queue
+    limit_memory()
     d = broker_dir(project)
     try:
         with locked(d, wait_s=TIMEOUT_S):
@@ -840,7 +864,8 @@ def serve_request(project: str, req: dict) -> dict:
                                                                branch=branch, sha=p.new[:12]), None, None)
         else:
             found, vis = run_checks(p, False, time.monotonic() + limits()["scan_timeout_s"], logf=say)
-            rec["checks"] = [{"check": f.check, "reason": f.reason} for f in found] or "passed"
+            rec["checks"] = [{"check": f.check, "reason": f.reason, **({"detail": f.detail} if f.detail else {})}
+                             for f in found] or "passed"
             rec["visibility"] = vis
             if found:
                 f = found[0]
@@ -925,7 +950,7 @@ def owner_text(project: str, branch: str, sha: str, cause: str, e) -> str:
                         command=f"{cli} push setup {project}"),
     }.get(cause, _("the platform couldn't push {project}'s {branch} ({sha}): {why}. You can push it yourself with "
                    "{command}", project=project, branch=branch, sha=sha[:12], why=cause, command=owner_cmd))
-    raw = getattr(e, "raw", "") or str(e)
+    raw = getattr(e, "raw", "") or (str(e) if e is not None else "")
     return head + (f"\n\n{visible(raw[-600:], lines=True)}" if raw else "")
 
 
