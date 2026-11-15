@@ -5,8 +5,8 @@ where the text above disagrees: chiefly, no process writes both the worktree and
 `safe.bareRepository=explicit` is a precondition again); r3 after a second blind review (at the very end; it holds
 over both: an unsandboxed checkout can be raced into writing anywhere the owner can write, and how far to go against
 that is the owner's choice; B-1's mitigation 3 built 11-14, mitigation 2 built and removed 11-15, the last sections);
-approved by the owner 11-15; step 1 (the fence, behind the per-project switch) built 11-15, "Step 1 as built" at the
-end; the broker itself is not built. It takes over the prevention half of
+approved by the owner 11-15; step 1 (the fence, behind the per-project switch) built 11-15, "Step 1 as built"; step
+2's build list after it (four slices, open points; not built). It takes over the prevention half of
 `git-config-fence.md` (the per-name fence, the narrow `brunna git` runner and the one-time install). That doc's scan stays
 as a second layer, and so do its config allowlist and its presets. Measured in scratch repos (git 2.50.1, macOS on a
 case-insensitive APFS volume). A sandboxed writer was stood in for by the platform's real Seatbelt profile
@@ -1635,3 +1635,604 @@ unrelated drift.
     names. It must not reuse the fence, and must never be a profile with the git-dir write and no read rules (r3 S-b).
 - **For the runtimes (step 4):** render the same port into Claude's settings and Codex's profile, each with its canary.
   Until then doctor says sessions aren't fenced.
+
+## Step 2 build list (11-15)
+
+Step 2 is "the broker and the wrapper" ("Order of work" item 2, with r2's and r3's revisions). This is its build list,
+in four slices. Each one can be merged and tested on its own, in this order: **a**, then **b**, then **c** and **d** in
+either order (both need a and b). Nothing here is built. It changes no owner decision: where the sections above
+disagree with each other or with the code, "Open points" at the end says so, and marks the ones that need the owner.
+
+### What changed since r3, and what that means here
+
+- **P2's per-request link allowance (r3, item 4 of "Step 2 gains") is dropped.** It existed only because mitigation
+  2's link rule refused P2's checkout of a tracked link. That rule was removed on 11-15 ("B-1: mitigation 2 removed").
+  Nothing refuses links now, so P2 checks tracked links out as git does. The rule's companions in the broker go with
+  it, since they were part of option 2 (the B-1 options table: "the broker's refusals"): the refusal of tracked paths
+  under `.venv` / `node_modules`, and the commit-time refusal of absolute or escaping link targets. Open point 4 asks
+  about the second.
+- **A folder named `HEAD` can't be removed or renamed by a fenced writer** (step 1's swap rule). P2 is the project's
+  fenced profile, so an operation that would make git remove or rename such a folder can't complete under P2.
+  Slice b refuses it before anything moves (below). Open point 6.
+- **uv's marker exception is regular-file-only.** P2 inherits it unchanged. P1 doesn't carry the fence at all.
+- **P1 is a new profile built from `seatbelt._isolation`**, so it carries every deny there: `mount_denies()`, the raw
+  disk device deny (`DISK_DEVICES`), `(deny lsopen)`, the Keychain denies, the process and signal denies. Network off is
+  added by P1 itself, as `seatbelt.profile()` does, since `_isolation` has no network rule. It never reuses the fence,
+  and it is never a profile with git-dir write and no read rules (r3 S-b).
+- **The owner's decisions (11-15, questions 2–6 of r3)** land as follows:
+  - push policy: slice d;
+  - no signing through the broker: slice a's allowlist and slice d;
+  - Codex app worktrees not carved: slice a (a request from outside the project's folders is refused, and the
+    message points to a worktree inside the project);
+  - no submodules: slice a's allowlist;
+  - the owner switches each project on: slice c's rebuild command, which refuses until every writer of the project is
+    fenced, so in step 2 it refuses every real project.
+
+### Global constraints (every slice)
+
+- **Throwaway projects only.** Tests make a stand-in project in the throwaway instance `bin/testguard.py` gives a run.
+  No test reads or writes a live project, the live `.state` or the instance.
+- **The user's global git config is never touched.** Every "owner's git" in a probe runs with `GIT_CONFIG_GLOBAL` set
+  to a temp file (holding `safe.bareRepository=explicit` where the precondition is meant to hold, nothing where its
+  absence is the control) and `GIT_CONFIG_NOSYSTEM=1`. The broker's own git always has its platform-written global
+  file.
+- **Linux.** Landlock lacks `git-dirs-fenced`, so the broker refuses there cleanly ("not supported on this OS", exit 2,
+  nothing run), through `isolation.unmet`. Every test that needs real Seatbelt skips with that reason elsewhere. The
+  pure tests (allowlist parsing, profile text) run on both. `bin/linux-test` and the ubuntu CI stay green.
+- **Git in a project's repo runs as the project.** Platform code never runs `git -C <workspace>` or
+  `GIT_DIR=<workspace>/.git` as the owner. The broker's own steps as the owner touch only repos the platform owns (its
+  bare repo per project, its build folders), or a project's git dir through no-follow descriptors (the config op, the
+  index lock, gitfiles, the rebuild's final rename). Slice d follows this, which departs from the text above (open
+  point 1).
+- **No runtime syntax** in the broker, the wrapper or their tests. Claude's and Codex's renderings are step 4.
+  `tests/test_runtime_boundary.py` and `tests/test_tool_agnostic.py` stay green.
+- **Merge criterion, every slice: the live check.** With no project switched on, every live project's Seatbelt
+  service and cap-run profiles, its Claude settings and env, `render-project-settings --report`'s output and
+  `sandboxed-run`'s environment render byte-identical before and after (step 1's live check, repeated). What could
+  break it, and how each is held:
+  - the socket rule in `service_profile`: rendered only when `policy.git_platform(doc)`;
+  - the wrapper first on `sandboxed-run`'s PATH: only when `policy.git_platform(doc)`;
+  - `_isolation`'s new `temp` keyword: default `True`, the output unchanged;
+  - `git` in `policy.SESSION_SUBCOMMANDS` (it changes `platform_cli()`, and so every sandboxed project's Claude
+    settings): not in step 2 (step 4);
+  - a new folder in `policy.cli_dirs()` or `deny_write`: none (the wrapper lives under the hub root, already denied);
+  - `PRE_COMMIT_HOME` in `policy.cache_env` (r2 S7): not in step 2 (step 3);
+  - `isolation.KEEP_ENV`: unchanged (the wrapper's environment rules are its own).
+- **Flagged to the owner before merge:** any new service (`local.brunna.git-broker`; open point 12) and any change to
+  cap-runner (none planned; open point 19).
+- Refusal texts go through `i18n`, with English goldens. Code comments and messages name no local path or private name.
+
+### Slice a: the channel and nonce, P1 and P2, the allowlists, the config op, "not switched on"
+
+**Built:**
+- **`bin/seatbelt.py`:**
+  - `_isolation(..., temp=True)`: with `temp=False`, the temp area leaves the write allow. The devices stay. Existing
+    callers pass nothing.
+  - `exec_guard(git_paths)`: `(deny process-exec)`, then an allow for the real git, the Command Line Tools' git and
+    git's exec-path, resolved when the broker starts (the prototype's set). Step 3 adds the hook forwarder.
+  - `git_writer_profile(pol, git_dirs, readable)` (**P1**): the network denies of `profile()`, then
+    `_isolation({**pol, "git_fence": None}, git_dirs, (), readable, temp=False)`, then P1's denied names and pins, then
+    the exec guard.
+    - `readable` is the project's workspace, its runtime folder and `pol["read"]`, so P1's reads are exactly the
+      project's (S-b).
+    - Denied names: `config*`, `commondir`, `gitdir`, `hooks/`, `info/attributes`, `modules/`, `remotes/`,
+      `branches/`, `objects/info/alternates`, `objects/info/http-alternates`, each
+      `worktrees/<n>/{commondir,gitdir,config.worktree}` (plus `shallow` and `info/grafts`, open point 22).
+    - Pinned as entries: `objects`, `objects/info`, `refs`, `logs`, `worktrees`, `info`, the platform folder.
+  - `materialiser_profile(pol, dirs)` (**P2**): `service_profile(pol, dirs)` unchanged (it carries the fence), plus the
+    exec guard (open point 3).
+  - In `service_profile`, for a switched-on project only: the socket rule in S5's measured form, with
+    `(deny network-outbound (remote unix-socket (subpath <broker folder>)))` and an allow for the project's own
+    **service** socket.
+- **`bin/policy.py`:** `git_broker(doc, name)`, `None` unless `git_platform(doc)`. Otherwise it gives the two socket
+  paths, the nonce folder (`<workspace>/.hub-run/git/`) and the wrapper's folder. `policy()` carries it as
+  `git_broker`.
+- **`bin/sandboxed-run`:** for a switched-on project, the wrapper's folder first on PATH.
+- **The wrapper:**
+  - `bin/git-wrapper/git`, a POSIX sh front, and the logic in `bin/git_wrapper.py`. The folder holds only `git`. It is
+    under the hub root, which every sandbox's `deny_write` already holds (open point 14).
+  - Outside a sandbox (`isolation.confined_now()` false), it execs the real git with argv, environment and stdio
+    unchanged.
+  - Inside a sandbox, it takes one of three paths ("The wrapper"): in place, forwarded, or refused (exit 2, "can't be
+    done here (why); nothing was run").
+  - When the broker is down, writes say so and fail; reads still run in place.
+  - `brunna git <args>`: the same program under `bin/agenthub`, not added to the session subcommands (step 4).
+- **`bin/git_allow.py`** (pure, any OS): the allowlists.
+  - Every subcommand is in exactly one class: in place, whole under P1, composed, network, config op, or refused by
+    name (open point 15 sorts the list in "The allowlists").
+  - Per subcommand, a table of exact option spellings and their arity. Short clusters and sticky values are parsed
+    against it. `--` and `--end-of-options` end the options.
+  - The global options, and the inert `-c` keys.
+  - The environment: what is passed on, what makes a call run in place, what is refused.
+  - `GIT_TEST_DISALLOW_ABBREVIATED_OPTIONS=true` is always set.
+  - Refused by name, with the owner's decisions:
+    - `submodule` and every `--recurse-submodules`;
+    - `-S`, `--gpg-sign`, `-s` on tags, `--signed`;
+    - `init --bare`, `clone --bare` / `--mirror`, `--separate-git-dir`.
+- **`bin/git_broker.py`** (the library; the slices below add to it) and **`bin/git-broker.py`** (the service; started
+  only by tests in step 2):
+  - **Two sockets per project:** `session` and `service`, in `<state>/git-broker/<project>/` (r3 S-d). A Unix socket
+    path is limited to 104 bytes on macOS. The broker checks every path when it binds and fails loudly if one is too
+    long (a hashed short name, if instance paths need it).
+  - **The nonce** (section 5 and "Identity"):
+    - the broker sends it; the caller creates `<workspace>/.hub-run/git/<nonce>`;
+    - the broker opens the workspace, `.hub-run` and `git` through `nofollow`'s directory descriptors and checks for a
+      regular file; only then does it read the request; the file is removed.
+  - **What a request may name:**
+    - the working folder and every `-C` must resolve inside the project's folders;
+    - the repo's common dir must be one the project owns (`<state>/git-broker/<project>/repos.json`: real path, device
+      and inode of its `.git`);
+    - a folder that a deeper project root claims (the rule of `test-runner.claimant`) isn't served (S6, S-h);
+    - a cwd outside the project's folders (a Codex app worktree) is refused, and the message points to a worktree
+      inside the project (r3 question 4, decided).
+  - **The answer for every project the broker may not serve,** nothing run:
+    - "git through the platform isn't on for this project" (`policy.git_platform(doc)` false);
+    - "switched on, not rebuilt": no record in `repos.json` for the workspace repo, or its `.git` has another device or
+      inode than recorded (open point 7).
+
+    Since no real project is switched on and rebuilt, every real project gets one of these.
+  - **`make_repo(project, path)`** (S-a's `init`):
+    - the folder is made through no-follow descriptors, and its real path taken from the descriptor;
+    - `git init --template=` runs under P1 with `<real path>/.git` as its only writable folder;
+    - then the presets through the config op, and the platform folder made by the broker;
+    - then the repo is recorded.
+
+    Slice a's tests make their stand-in project's repo with it. Slice b's `init` and slice c's rebuild use it.
+  - **The broker's global config** (a file in its state): the owner's `user.name` / `user.email` (read, never written),
+    `init.defaultBranch`, `safe.bareRepository=explicit`, `protocol.ext.allow=never`, `protocol.file.allow=user`,
+    `core.pager=cat`, `submodule.recurse=false`, `commit.gpgSign=false`, `tag.gpgSign=false`, `gc.auto=0`. It holds no
+    drivers, aliases, `credential.helper` or `include*`.
+  - **Every git it runs:**
+    - `-c core.hooksPath=<an empty platform folder> -c core.fsmonitor=false` on the command line (N3);
+    - `transfer.fsckObjects=true` (N1);
+    - `GIT_NO_REPLACE_OBJECTS=1`, `GIT_CONFIG_NOSYSTEM=1`, `GIT_TERMINAL_PROMPT=0`;
+    - `GIT_EDITOR=:` and `GIT_SEQUENCE_EDITOR=:`.
+
+    The forwarder fills the hooks folder in step 3. Until then, broker commits run no hooks (open point 20).
+  - **The operations of this slice** (whole under P1; their worktree is read-only to them): `add`, `rm --cached`,
+    `commit` (`-m`, `-F <file>`, `-F -`, `-a`), `hash-object -w`, `apply --cached`, `notes add|append -m`, `gc`.
+    Every other forwarded subcommand answers "not built yet" (exit 2, nothing run) until its slice lands.
+  - **The config op** (`config <key> <value>`, `--unset`, and the presets):
+    - the key and value are checked with `git_fence.check_key` / `url_ok` / `refspec_ok`, narrowed by r2 S3: no
+      `remote.*.pushurl`, no `remote.*.push`, no `branch.*.merge` naming a protected ref, and no `submodule.*`;
+    - the copy is read without following links, edited with `git config --file` in `hubconf.private_tmp()` under
+      `GIT_CONFIG_GLOBAL=/dev/null`, and installed through `config.lock`, created `O_EXCL|O_NOFOLLOW` in the git dir's
+      descriptor and renamed over `config`. Never in place.
+    - `remote add` / `set-url` / `remove` go through it, with only a URL the registry declares (the fence doc's B4).
+  - **Streams, limits, logging:**
+    - frames for stdout, stderr, the exit status and a stdin stream;
+    - a timeout per call, with the process group killed (open point 17);
+    - at most N calls per project at once, queued beyond that;
+    - `<state>/git-broker/log.jsonl`: project, subcommand, the path taken, exit code, duration, and no argument
+      values.
+- **Doctor** (`doctor_git_platform`): a switched-on project's row also says "rebuilt <time>" or "not rebuilt". It
+  stays `bad` through all of step 2 (sessions aren't fenced until step 4; hooks and the platform's flows come in steps 3
+  and 5).
+
+**Out of scope:**
+- the composed operations, `init`, `clone`, `worktree`, ref writes by name (b);
+- the rebuild (c);
+- everything on the network (d);
+- the hook forwarder, the commit gate on it, drivers, the pre-commit framework's repos, lint-staged's token (step 3);
+- Claude's `allowUnixSockets`, PATH and fence; Codex's profile and PATH; `brunna git` in the session subcommands; the
+  rules text (step 4);
+- `project_git`'s write ops, memory sync, `merge-branch`, `with-lock.sh`, `sync-local-setup`, and `session_worktree`'s
+  `worktree add` (step 5);
+- declaring the service, and the status page's rows (step 6; open point 12);
+- the editor callback (step 8). Until then, a caller's own editor is refused with the reason.
+
+**Tests.** Every refused probe has a positive control without the fence or the broker, and the control lands.
+- **`tests/test_git_allow.py`** (any OS):
+  - each class, and each refusal with its reason: unknown subcommands and options, abbreviations, sticky shorts, `-c`
+    keys, environment variables, an alias (refused as an unknown subcommand), the signing and submodule options;
+  - a selecting environment goes in place.
+- **`tests/test_git_broker_profiles.py`** (profile text, any OS):
+  - **P1 carries `_isolation` whole.** Every line of `_isolation(pol', …, temp=False)` except its write allow is in
+    P1, so a deny added to `_isolation` later fails this test if P1 is ever built another way.
+  - By name: each line of `mount_denies()`, the `DISK_DEVICES` deny, `(deny lsopen)`, the Keychain `mach-lookup`
+    deny, and the network denies.
+  - No temp area in P1's write allow, and no fence rule in P1.
+  - P1's denied names and pins, and the exec guard after everything.
+  - P1's builder refuses a policy with no read denies.
+  - P2 is `service_profile` plus the exec guard, nothing else.
+  - With no project switched on, `_isolation`'s and `service_profile`'s output for a fixture is identical to step 1's
+    (a golden). The socket rule appears only for a switched-on fixture.
+- **`tests/test_git_broker.py`** (real Seatbelt, real git; skipped without `git-dirs-fenced`):
+  - **S-b's four reads under P1, refused:** `hash-object -w <B's file>`, the same through a folder link,
+    `commit -F <B's file>`, `apply --cached <B's patch>`. The control is a test-only writer profile with no read
+    denies, which puts B's secret into the objects. That profile exists only in the test.
+  - **P1 can't write** the worktree, the temp area, `config`, `hooks/`, `info/attributes`, the alternates files,
+    `commondir` or `gitdir`, or connect to a local listener. The control: the same writes and the connect succeed with
+    no profile, and the connect also succeeds under `service_profile`.
+  - **The exec guard,** run under P1 with the argument filter turned off: `grep -O<cmd>` and a `!` alias. No canary
+    runs. The control: the same commands under P1 without the guard run the canary. (The `rebase --exe` / `-x` probes
+    need a worktree checkout, so they are slice b's.)
+  - **Identity:**
+    - another project's service socket is refused by the socket rule (the control, without the rule, connects);
+    - an unrelated Unix socket stays reachable from a service (S5);
+    - a forged header with no proof is refused;
+    - a nonce aimed at another project's folder is refused;
+    - a FIFO or a link at `.hub-run` or `git` is refused without blocking;
+    - a nested project isn't served;
+    - a cwd outside the project's folders is refused with the message.
+  - **The answers:** not switched on, and switched on but not rebuilt (no record; a `.git` replaced since). Nothing
+    runs for either.
+  - **The wrapper:**
+    - outside a sandbox: argv, environment and exit status passed unchanged;
+    - inside: the in-place set runs in place;
+    - a selecting environment runs in place, and its write fails loudly with the sandbox's refusal;
+    - with the broker down, writes say so and reads work.
+  - **The config op:**
+    - the allowlist refuses, with value rules and S3's narrowing;
+    - the presets are written;
+    - the install fails cleanly when a `config.lock` exists;
+    - a FIFO include doesn't hang it.
+  - **This slice's operations end to end** through the wrapper, from inside a fenced `service_profile`: `add`,
+    `commit -m`, `commit -F -`, `commit -a`, `hash-object -w --stdin` with binary data, `apply --cached`.
+  - **The owner's canaries** (section 6) afterwards: none run. The control: the same plants written with no fence run.
+  - **Limits:**
+    - a timeout kills the group;
+    - the concurrency cap queues;
+    - an owner's git holding `index.lock` makes the broker wait or fail as a second terminal would;
+    - the log holds no argument values.
+  - **Goldens** for the refusal texts.
+
+**Done when:** all of the above pass on macOS; Linux skips with the reason and `bin/linux-test` is green; the
+boundary and personal-data ratchets pass; the live check is byte-identical; no service is declared.
+
+### Slice b: the composed operations
+
+**Built** (`bin/git_compose.py`, called by the broker):
+- **The protocol** (r2 B1, S-c, S-e):
+  1. The broker takes `index.lock` exclusively, through the git dir's no-follow descriptor (the one the record checks),
+     and holds it to the end.
+  2. P1 computes the next index into it.
+  3. P2 copies it into P2's own temp folder and materialises from the copy: `read-tree -m -u`,
+     `read-tree -u --reset`, or `checkout-index`.
+  4. **P2 checks its own work** on the paths this operation changes (`diff-tree` old → new, plus the conflict paths),
+     against the dirty set taken before the operation.
+  5. Only then does the broker rename the lock over `index`. P1 moves the refs (`update-ref --stdin`) and refreshes
+     the stat information.
+
+  If P2 fails or its check fails, P2 puts back what it wrote (`read-tree -m -u <new> <old>` for those paths only). The
+  lock is dropped and no ref moves. Worktree-writing operations run one at a time per worktree.
+- **The B1 table and S-f's compositions:**
+  - `switch` / `checkout <branch>`, including a remote branch under `branch.autoSetupMerge=false`. A requested
+    `--track` goes through the config op. `switch -c` with local changes.
+  - `reset --hard` / `--merge` / `--keep`; `--soft` and `--mixed` run whole under P1.
+  - `restore`, including `--source`, and `checkout <rev> -- <path>`.
+  - `merge`: clean, conflicted (the stage entries through `update-index --index-info`, with `MERGE_HEAD` /
+    `MERGE_MSG` written by P1), `--squash`, `--abort`, `--continue`.
+  - `rebase`:
+    - without conflicts through `replay`;
+    - with conflicts, stepwise with `merge-tree`, with `rebase-merge/` written by P1 in git's own format and no `exec`
+      lines, so the owner's git can continue it;
+    - `--continue`, `--skip`, `--abort`.
+  - `cherry-pick` and `revert`, the same shape.
+  - `stash push` / `pop` / `apply` / `drop`, including a pop with conflicts.
+  - `apply` (worktree only); `am` 2-way (a 3-way `am` is refused).
+  - `rm` and `mv` in the worktree: P2 runs `git rm` / `git mv` on its temp copy of the index (so a dirty file moves
+    with its changes, and only git runs under the guard); P1 makes the same change to the next index with
+    `update-index --index-info`; the check compares the two.
+  - `pull` and `clone` from a path: the source is read into a bundle under the project's own profile, and P1 fetches
+    the bundle (r2). From a URL, these are slice d's.
+  - **`init <dir>`** through `make_repo`.
+  - **Scratch repos:**
+    - made only in the project's folders and the test runner's per-run temp folder;
+    - recorded by real path plus the device and inode of their `.git`; a moved or replaced one isn't served;
+    - dropped with their folder.
+  - **`worktree add <path> [-b <branch>]`:**
+    - the path resolves inside the project's folders, outside every git dir, and doesn't exist yet;
+    - the broker makes the folder and writes its gitfile through no-follow descriptors;
+    - P1 writes the admin dir, and P2 does the checkout.
+
+    `worktree remove` and `prune`: P1 unlinks the admin files.
+- **Under P1 whole, now by name:**
+  - `branch`: create and delete; `-m` / `-M` with the config op moving the section; `-u` through the config op;
+  - `tag`, with `-a` only with `-m`;
+  - `update-ref` and `symbolic-ref` under S1: only `refs/heads/`, `refs/tags/` and `refs/notes/`, and `HEAD` →
+    `refs/heads/…` for `symbolic-ref`. Root refs, pseudo-refs and `refs/replace/` are refused;
+  - `stash create` / `store`;
+  - `update-index` (no option that names a file to write), `read-tree` without `-u`, and `write-tree`, each with B2's
+    check on its input;
+  - `fetch` from a bundle, with the broker's own refspecs.
+- **B2's check:** a tracked path whose last component folds to `HEAD` (case, and the characters git's own path check
+  ignores) is refused wherever a tree is about to be written. That covers `write-tree`, `commit`, `merge-tree`'s
+  result, `update-index` input, and a fetched branch about to be checked out.
+- **The `HEAD` folder check** (step 1's swap rule):
+  - before step 1 of the protocol, the broker compares the old and new trees;
+  - an operation that would leave no tracked entry under a folder whose name folds to `HEAD` (git would then try to
+    remove the folder), or would rename one (`mv`, `rm -r`), is refused before anything moves;
+  - the message: a sandbox here can't remove or rename a folder named `HEAD`; do this one from your own terminal.
+- **The check after a stop:** after a broker-run rebase, cherry-pick or revert stops, the broker reads
+  `rebase-merge/git-rebase-todo` and `rebase-merge/done` (N2: the sequencer refuses `exec` itself). An `exec` or `x`
+  line aborts the operation by composition: P1 puts back the refs and the index and removes the state folder, and P2
+  restores the worktree.
+
+**Out of scope:**
+- fetches, pulls and clones from URLs, and pushes (d);
+- the rebuild (c);
+- moving `session_worktree` and Claude's `WorktreeCreate` path onto the broker's `worktree add` (step 5, open point
+  18);
+- `add -p` / `-i`, `commit -p`, `checkout -p`: refused, with the `git apply --cached` way said;
+- interactive rebase and the editor callback (step 8);
+- drivers (step 3).
+
+**Tests** (real Seatbelt; each with its control):
+- **Every composition works:**
+  - clone from a path; checkout both ways; `commit -a`;
+  - merges: clean, conflicted then resolved with two parents, `--squash`, `--abort`;
+  - rebase with and without conflicts, through `--continue`, `--skip` and `--abort`;
+  - cherry-pick and revert; stash with and without conflicts;
+  - `reset --hard`, restore, `checkout <rev> -- <path>`, `switch -c` with local changes;
+  - `pull` from a path; `worktree add` / `remove`; `am`.
+
+  Timings are recorded beside r2's table.
+- **The race (probe B/C), for every worktree-writing operation.** A project process swaps a tracked folder `d` with
+  `ln -s .git d` in a loop while the operation runs. The test asserts that no file of the tree is in `.git`, that
+  there is no `rebase-merge/`, and that HEAD never moves on a partial result. The control is the same operation under a
+  test-only combined profile (P1's rules plus write to the worktree), which lands files in `.git`. Rounds: open point
+  21.
+- **S-c:** an unrelated local change survives an operation. A failed check puts the worktree back as it was. A retry
+  then works.
+- **B2:**
+  - a commit holding `x/HEAD` is refused (the control: plain git commits it);
+  - a folder holding a `HEAD` file, renamed into the workspace and planted with a config: the owner's `status` is
+    refused with the precondition in the temp global config, and runs the fsmonitor without it (the control).
+- **S1:**
+  - `update-ref SHALLOW`, `refs/replace/…`, `MERGE_HEAD` and a root ref are refused;
+  - the controls: `SHALLOW` makes the owner's repo look shallow, and a replace ref changes the owner's `show` and
+    `checkout -f`;
+  - a bundle fetch can't write `refs/replace/`.
+- **The `HEAD` folder:**
+  - an operation that empties `x/HEAD/`, and a `mv` of it, are each refused with nothing moved;
+  - P2's raw behaviour, measured and written down here: what git does when its rmdir is refused (unmeasured so far),
+    and the control without the fence removing the folder.
+- **An `exec` line in a stopped rebase:** aborted by the check after a stop, and the owner's `rebase --continue`
+  afterwards runs nothing. The control: without the check, the canary runs.
+- **The exec guard in a rebase,** with the argument filter turned off: `rebase --exe '<cmd>'` and `rebase -x'<cmd>'`
+  stop without running the command (and the check after a stop then aborts). The control: without the guard the
+  canary runs.
+- **S-a's `init` race:** the target is flipped between absent and a link to a fake home. Nothing lands in the fake
+  home. The control: the owner's `git init` lands there.
+- **The owner's canaries** after every scenario.
+
+**Done when:** all of the above pass on macOS and skip on Linux, and the live check is byte-identical.
+
+### Slice c: the rebuild and its restore
+
+**Built** (`bin/git_rebuild.py`; `brunna git-broker rebuild <project> [--accept <path>…]` and
+`brunna git-broker restore <project> --at <time>`):
+- **It refuses** unless all of these hold:
+  - the registry has the switch on;
+  - no session is open (`hubconf.cwd_users`);
+  - no rebase, merge, cherry-pick or bisect is in progress;
+  - the adapter has `git-dirs-fenced`;
+  - every linked worktree's path is in the registry or the platform's records (`.agent-memory`, the tool worktree
+    folders under the workspace, walked without following links). Any other is listed (open point 9);
+  - every `HEAD` entry outside a `.git`, in every area the project may write, and every tracked `HEAD` path on its
+    branches, is listed and gone, or accepted by path (r2 B2);
+  - doctor's row for the project is ok apart from "not rebuilt". In step 2 that is never true for a real project,
+    since its sessions aren't fenced until step 4 (open point 7).
+- **The order** (S2): stop the project's services and jobs; rebuild each repo the fence names (the workspace's and the
+  runtime folder's; open point 11); record; start them again.
+- **Per repo:**
+  1. The old git dir becomes a bundle of every ref, made under the project's own profile with the exec guard. A
+     planted alternates file stops the rebuild and is reported; it is never followed.
+  2. A fresh dir is made in `<state>/git-broker/<project>/build-<time>/` through `make_repo`'s P1 init. P1 fetches the
+     bundle with `transfer.fsckObjects`.
+  3. The config: the allowlisted keys of the old one (read as a copy, without following links), through the config op.
+  4. The index: the old `ls-files --stage`, with its skip-worktree and intent-to-add bits, read under the project's
+     profile, then written by `update-index --index-info` and the flags under P1.
+  5. Each stash entry through `stash store`.
+  6. `info/exclude` and the platform folder's files copied without following links: regular files only, with a size
+     cap. The platform folder itself is made here.
+  7. **Each recorded linked worktree:**
+     - the broker writes its gitfile through no-follow descriptors;
+     - P1 writes its admin dir (`HEAD`, `commondir` = `../..`, `gitdir`) and its own index, with its skip-worktree
+       bits (mitigation 3's left-out files);
+     - then `worktree repair` runs under P1, only as a check: it can't write the worktree (open point 8).
+  8. The swap, as `renameat` on no-follow descriptors: the old dir to `<state>/git-broker/<project>/before-<time>/`,
+     the new one into place. The same volume is checked first, and a different one refuses cleanly.
+  9. The record (`repos.json`), then `git_fence.py --report --project <p>`.
+- Reflogs aren't carried. A shallow repo is refused, with the reason.
+- **`restore`:**
+  - it puts a kept git dir back by the same descriptor rename, and drops the record;
+  - then it runs the scan;
+  - it refuses while the switch is on: the owner switches the project off first (open point 7).
+
+**Out of scope:**
+- the hooks the platform keeps for the owner's own git (`.git/hooks`, S4): re-rendered by the hook installer once step
+  5 moves it onto the broker. Until then a rebuilt repo has none, which matters only once a real project is rebuilt;
+- the runtime folder's deploy `git pull` (step 5);
+- turning the switch on in the registry (the owner's own edit).
+
+**Tests** (real Seatbelt, throwaway repos):
+- **Survives:** staged changes, an uncommitted file, the stash, the `.agent-memory` worktree, a tool worktree with a
+  skip-worktree control file, the outbox under the platform folder.
+- **Cut:** hard links and symlinks inside the old git dir, the index included. The control shows they are links in
+  the old dir.
+- **S2's probes:**
+  - an `fsmonitor` in the old config doesn't run during the rebuild (the control: the owner's `ls-files --stage` runs
+    it);
+  - a planted alternates file into project B stops the rebuild, and B's file isn't copied (the control: the owner's
+    fetch copies it);
+  - an old admin dir's `gitdir` aimed at a fake home: nothing is written there (the control: the owner's
+    `worktree repair` writes a gitfile there and `worktree list` shows it).
+- **Refused:** a session open; an operation in progress; a worktree outside the records (listed); a `HEAD` entry (and
+  accepted with `--accept`); a different volume.
+- **Restore:** the old dir is back byte for byte, and the scan ran.
+
+**Done when:** all of the above pass on macOS and skip on Linux; the rebuild command refuses for every live project
+(run read-only, as the live check); the live check is byte-identical.
+
+### Slice d: the network path, under the push policy
+
+**Built** (`bin/git_remote.py`):
+- **A broker-owned bare repo per project,** `<state>/git-broker/<project>/remote.git`. The broker makes it with
+  `init --bare --template=` and writes its config. It is outside every project folder (r3 S-a's broker-owned bare
+  repo, used for every network operation; open point 1).
+- **`fetch`, `ls-remote`, `pull`'s fetch and `clone` from a registry remote:**
+  1. The owner's git runs in the owned bare repo, with the owner's credential helper and global config, the URL from
+     the registry, the broker's own refspecs (heads and tags, never `refs/replace/`), `-c core.hooksPath=/dev/null`,
+     `--no-recurse-submodules` and `transfer.fsckObjects`.
+  2. A bundle of what changed is fetched under P1 into the project's `refs/remotes/<remote>/*` and tags, with
+     `FETCH_HEAD` written by P1.
+  3. `pull` then merges or rebases as slice b does.
+- **`push`** (the owner's decision, r3 question 2):
+  - **Sessions only.** On the service socket a push is refused with the reason.
+  - **The project's own non-default branches.** The default branch is what the owned repo's
+    `ls-remote --symref <url> HEAD` says, and the registry's branch when it names one; both are refused.
+  - **Refused:** tags, `--tags`, `--follow-tags`, `--delete`, `:<ref>`, `--mirror`, `--prune`, `--all`, a `+`
+    refspec, `--force`.
+  - **`--force-with-lease`:** on the project's own non-default branches only, with the expected value from the
+    project's remote-tracking ref.
+  - **Nothing under `.github/**`,** unless the registry allows it (open point 16). The diff runs from the
+    destination's current commit (for a new branch, its merge base with the default branch) to the pushed commit.
+  - **The mechanics:**
+    1. P1 makes a bundle of the pushed commits, as the project.
+    2. The bundle is fetched into the owned bare repo with `transfer.fsckObjects`, as `project_git.fetch_bundle` does.
+    3. The owner's git runs `push --no-verify <registry URL> <sha>:refs/heads/<dst>` from the owned repo.
+    4. P1 updates the remote-tracking ref. `push -u` also sets the upstream through the config op.
+  - **`push_on_merge`:** `registry.validate_enforce` refuses `push_on_merge: true` together with
+    `enforce.git: platform`. `push_on_merge` isn't in `PLATFORM_OWNED`, so without this a manifest.update could turn
+    it on.
+- **Fetch or clone from another URL** (https only):
+  1. A fetch profile, P1's rules with outbound network, whose only writable folder is a fresh staging bare repo in the
+     broker's state, fetches the URL (open point 2).
+  2. P1, without network, fetches a bundle of it.
+
+  `ext::`, ssh, and `file://` or a path outside the project's reach are refused.
+- **No signing:** the broker's config sets no signing program, and the options are refused (slice a).
+
+**Out of scope:**
+- `merge-branch`'s push: step 5. With `push_on_merge` refused for a switched-on project, it doesn't push.
+- The runtime folder's deploy;
+- Codex app worktrees (not carved);
+- submodules.
+
+**Tests** (real Seatbelt). Two kinds of test remote, neither a hole in the URL rule:
+- **For the push policy and the refusals:** a bare repo the throwaway platform owns, named in the throwaway registry
+  (a platform-owned path is allowed by `url_ok`, as the memory bare repos are).
+- **For credentials and https:** an https server on 127.0.0.1 in front of `git http-backend`, needing a credential.
+  Its test CA and a test credential helper that records each call are trusted only in the temp global config of the
+  owner's side. For the other-URL fetch, the test harness gives the CA to the fetch profile's git directly, at the
+  broker's level, never through the wrapper. If this server proves too heavy to keep in the suite, the credential
+  path becomes a manual check, listed for the owner with a real remote.
+- **Fetch, pull and clone** through the owned repo. The helper is called only on the owner's step, never from P1 or the
+  fetch profile.
+- **Every refused push form** is refused with its reason, and nothing reaches the remote. The control: plain git
+  pushes the same thing.
+- **`.github/**`:** a push that changes it is refused (the control lands). With the registry's allowance, it lands.
+- **Service socket:** a push on it is refused.
+- **The default branch:** a push to it is refused.
+- **`--force-with-lease`:** lands with the right lease, and is refused with a stale one.
+- **N1:** a project bundle holding a `.git` tree entry is refused by fsck in the owned repo.
+- **No owner git in the project's repo:** every owner-side git call is recorded through the broker's runner, and the
+  test asserts its `GIT_DIR` is the owned repo every time.
+- **Other URLs:** `file://` outside the project's reach and `ext::` are refused; the fetch profile writes only its
+  staging repo.
+- **The registry:** `push_on_merge: true` with `enforce.git: platform` fails validation, and so does a manifest.update
+  that sets it.
+
+**Done when:** all of the above pass on macOS and skip on Linux, and the live check is byte-identical.
+
+### Open points
+
+Line numbers are this file's as of this section. **(owner)** marks the ones that need the owner's decision. Every
+point has a proposed resolution, and the slices above are written to it, the owner's points included. If the owner
+decides otherwise, the slice text that changes:
+- point 1: slice d's fetch, push and test of "no owner git in the project's repo";
+- point 2: slice d's other-URL fetch;
+- point 4: slice b's B2 check (a link-target refusal added there);
+- point 7: slice a's "not rebuilt" answer, and slice c's refusals and `restore`;
+- point 12: slice a's done criterion ("no service is declared");
+- point 16: slice d's `.github/**` allowance and the default branch;
+- point 19: nothing in step 2 (cap-runner would change);
+- point 21: slice b's race tests.
+
+1. **(owner) Owner network operations in the project's repo.** Lines 366–373 run fetch and push as the owner,
+   unsandboxed, with `GIT_DIR` on the project's git dir, and lines 1114–1116 keep that for the workspace's own `.git`.
+   The platform's rule is that git in a project's repo runs as the project (`project_git`; projects-and-repos.md
+   section 4). **Proposed:** every owner network step runs in a broker-owned bare repo (line 1116's mechanism, for all
+   repos), with bundles in and out under P1, as slice d says. It is stricter, and costs a copy of the objects per
+   project plus a bundle per push and fetch.
+2. **(owner) P1 and the network.** Lines 374–376, 954–960, 986–988 and 1135–1136 fetch other URLs under P1 with the
+   project's network. This list keeps P1 off the network. The project's own profile can't stage a fetch instead: the
+   fence refuses a `HEAD` file anywhere, so it can't make any repo. **Proposed:** a fetch profile (P1's rules with
+   outbound network) whose only writable folder is a fresh staging bare repo in the broker's state, never a project's
+   git dir. P1 then fetches its bundle.
+3. **P2's exec guard.** Lines 1070–1071 (and S-f) say P2 runs under the exec guard; line 1633 says P2 is exactly
+   `service_profile` with the fence. **Proposed:** P2's file rules are exactly that, plus the exec guard. The guard
+   isn't load-bearing for P2, which holds no right the project lacks. Under it, P2 does everything with git, including
+   the B1 table's `rm` / `mv` row (line 792: "removed or renamed as the project"): P2 runs `git rm` / `git mv` itself
+   on its temp copy of the index, so a dirty file is moved with its changes, and P1 makes the same change to the next
+   index with `update-index --index-info`. Slice b's check compares the two.
+4. **(owner) The commit-time refusal of absolute or escaping link targets** (line 1072). It was listed among option 2's
+   parts (line 1094, "the broker's refusals") but not in "What went" (lines 1431–1437). It doesn't close B-1: the
+   race needs no tracked link. **Proposed:** dropped with option 2, as the table says. The refusal at carve-out names
+   (lines 1062–1063) is moot, since no carve-out exists.
+5. **`_isolation` can't give P1 as written.** It always allows the temp area (P1 must not write it: lines 759–760),
+   and it emits the fence whenever the policy carries one (P1 must not reuse it: line 1635). **Proposed:** a `temp`
+   keyword, defaulting to today's output, and P1 built from the policy with `git_fence` removed. An appended temp
+   deny wouldn't do: it would also deny a git dir that lies in the temp area, which every test repo does.
+6. **A folder named `HEAD` under P2** (lines 1532–1534 against B1's order, lines 769–776). Git's behaviour when its
+   rmdir is refused is unmeasured. It may exit 0 with an empty folder left, which S8's and S-c's checks wouldn't see.
+   **Proposed:** the old→new tree check refuses such an operation before anything moves (slice b), and P2's raw
+   behaviour is measured and recorded.
+7. **(owner) Switched on, not rebuilt.** The fence renders from the registry alone (lines 1498 and 1627–1629). Lines
+   599–618 and 907–908 assume the rebuild comes with the switch, and nothing ties the two together. **Proposed:**
+   - the owner sets `enforce.git: platform` by hand, then runs `brunna git-broker rebuild <project>`;
+   - between the two, the broker answers "not rebuilt" and git writes fail loudly;
+   - the rebuild refuses while doctor's row for the project shows anything but "not rebuilt";
+   - `restore` refuses while the switch is on: switching off stays the owner's own edit, never the command's (line
+     909 says restore "implies switching the project off").
+8. **The rebuild's repair profile** (line 1128: "may write only that worktree's `.git` and its admin dir")
+   writes both a worktree and a git dir, which S-f forbids (line 1162). **Proposed:** the broker writes the gitfile
+   through no-follow descriptors (line 1117), P1 writes the admin dir, and `worktree repair` runs under P1 only as a
+   check.
+9. **Worktrees the records don't name** (lines 1126–1127 take paths only from the registry and the records, and say
+   nothing about the others). After the rebuild, their gitfiles would point at an admin dir that no longer exists.
+   **Proposed:** the rebuild refuses and lists them; the owner removes them or moves the work first.
+10. **Linked worktrees' own indexes** (line 608 carries only the main index). Mitigation 3 relies on skip-worktree bits
+    in a tool worktree's index (line 1290). **Proposed:** each worktree's index is rebuilt with its flags (slice c).
+11. **The runtime folder's repo.** Line 1502 fences it, and lines 603–616 rebuild only "the git dir". **Proposed:** the
+    rebuild covers every repo the fence names. The deploy's `git pull` there moves onto the broker in step 5.
+12. **(owner) Where the broker service lives, and when.** Line 239 says brunna's registry services "like cap-runner",
+    but cap-runner is in `modules/sandbox.yaml`. **Proposed:** the sandbox module, declared at step 6, the first
+    switch-on of a throwaway project. In step 2 only tests start it. A new service is the owner's call before merge.
+13. **`brunna git` in the sessions' permissions** (line 279). Adding it to `SESSION_SUBCOMMANDS` changes every
+    sandboxed project's Claude settings. **Proposed:** in step 4, or rendered only for switched-on projects then.
+14. **The wrapper's folder** (lines 276–277: "beside the CLI wrapper, under `policy.cli_dirs`"). A new folder there
+    changes `deny_write`, and so every rendering, and puts a `git` beside the owner's own CLI. **Proposed:**
+    `bin/git-wrapper/` under the hub root, which every sandbox already can't write and which no PATH of the owner's
+    holds.
+15. **The allowlist's scope.** Lines 388–392 against line 1163 (S-f: "exactly the composed set"). **Proposed:**
+    - `count-objects`, `fsck` (without `--lost-found`), `range-diff`, `format-patch --stdout`, `version`, `help` and
+      `hash-object` without `-w` run in place: they only read;
+    - `update-index`, `read-tree` without `-u`, and `write-tree` run under P1, with B2's check on their input;
+    - `bisect` isn't in either list, so it is refused whole, not only `bisect run`;
+    - `notes` without `-m`, and `rebase -i`, are refused until the editor callback (step 8).
+16. **(owner) Push policy fields.** `push_on_merge` isn't owner-only (`registry.PLATFORM_OWNED`); slice d refuses it
+    with the switch. The `.github/**` allowance (lines 914–915 and S-d) has no field. **Proposed:** an owner-only key
+    under `enforce` (for example `enforce.git_ci: true`); the owner picks the name. The default branch is the remote's
+    `HEAD` plus the registry's branch. A new branch is compared with its merge base on the default branch (the text
+    above doesn't say).
+17. **The timeout is "a registry setting"** (lines 488–489). Machine-wide limits sit in `brunna.json` (as
+    `cap_runner.*` do). **Proposed:** `git_broker.timeout_s`, `git_broker.long_timeout_s` and
+    `git_broker.concurrency` in `brunna.json` and `contracts/hub.v1.schema.json`.
+18. **Work with no step.** `session_worktree`'s `worktree add` as the project (line 1621) isn't in step 5's list (lines
+    690–691). Services' and jobs' PATH (lines 497–498) isn't in step 4's wording (line 688). **Proposed:**
+    `session_worktree` in step 5; services' and jobs' PATH and socket rule in step 2 (slice a), since only the platform
+    renders them.
+19. **(owner) cap-run and git.** `seatbelt.profile()` denies every Unix socket, so a cap-run job can't reach the broker,
+    and its git writes in a switched-on project fail under the fence. **Proposed:** cap-runner is unchanged, and those
+    failures are loud and expected. Ask if a capability job ever needs to commit.
+20. **Hooks in step 2.** Until the forwarder (step 3), broker commits run no hooks, so no commit gate. Only throwaway
+    projects are served, and doctor stays `bad` for a switched-on project (lines 1556–1562), so nothing real depends
+    on it.
+21. **(owner) The race probes' cost.** r2 ran 40 rounds over 90 s per operation (line 817). About fifteen operations
+    at that cost don't fit the `full` tier's minute. **Proposed:** a few rounds per operation in `full` (the race
+    landed in the first round in r2 and r3), and the 40-round run as an opt-in run, recorded here when it is done.
+22. **P1's denied names, two additions:** `shallow` (S1 showed it changes what the owner's git sees) and `info/grafts`
+    (git reads it as history, and only a hand writes it). Neither is in the list at lines 330–332.

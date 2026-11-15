@@ -98,7 +98,11 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      worktrees, submodules, the owner switches each project on). Step 1 built 11-15: the fence (`policy.git_fence`,
      Seatbelt for services, jobs and cap-run) behind `enforce.git: platform`, and doctor's `safe.bareRepository`
      precondition; no project switched on, and none should be before steps 2–5 (the broker, the hook forwarder, the
-     runtimes' renderings, brunna's own git flows). Still open: B-1's option 4.
+     runtimes' renderings, brunna's own git flows). Step 2's build list (11-15, "Step 2 build list", not built): four
+     slices, each merged on its own (a: the channel, P1/P2, the allowlists, the config op; b: the composed operations;
+     c: the rebuild; d: the network path under the push policy), and open points, some for the owner (owner network
+     steps only in a broker-owned bare repo, P1 off the network, where the service lives, the race probes' cost).
+     Still open: B-1's option 4.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
