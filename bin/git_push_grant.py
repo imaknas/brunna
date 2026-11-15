@@ -425,7 +425,14 @@ def deploy_keys(repo: str) -> list[dict]:
         keys = json.loads(r.stdout or "[]")
     except ValueError:
         raise Failed(_("gh's list of deploy keys wasn't JSON")) from None
-    return [k for k in keys if isinstance(k, dict)]
+    out = []
+    for k in keys:
+        if isinstance(k, dict):
+            # gh 2.103 answers `--json readOnly` with the API's own field, `read_only` (measured 11-16); either is read,
+            # and a key with neither stays unknown, which counts as read-only (fail closed)
+            k["readOnly"] = k.get("readOnly", k.get("read_only"))
+            out.append(k)
+    return out
 
 
 def gh_repo(repo: str) -> str:

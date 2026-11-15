@@ -59,7 +59,9 @@ if os.environ.get("FAKE_GH_FAIL") == a[2]:
     sys.exit(1)
 repo = (opt("--repo") or "").removeprefix("github.com/")   # the grant names the host
 if a[2] == "list":
-    print(json.dumps([{k: v for k, v in d.items() if k != "repo"} for d in keys if d["repo"] == repo]))
+    snake = bool(os.environ.get("FAKE_GH_SNAKE"))   # gh 2.103 prints the API's `read_only` for `--json readOnly`
+    print(json.dumps([{("read_only" if snake and k == "readOnly" else k): v for k, v in d.items() if k != "repo"}
+                      for d in keys if d["repo"] == repo]))
 elif a[2] == "add":
     pub = pathlib.Path(a[3]).read_text().strip()
     new = {"id": 100 + sum('"add"' in line for line in log.read_text().splitlines()), "key": " ".join(pub.split()[:2]), "title": opt("--title"), "repo": repo,
@@ -391,6 +393,19 @@ class Grant(Base):
         self.assertEqual(self.deploy_keys(), [], "the deploy key added is deleted at GitHub")
         self.assertFalse((self.gdir() / "key").exists())
         self.assertFalse((self.gdir() / "grant.json").exists())
+
+    def test_gh_printing_the_apis_read_only_field(self):
+        """gh 2.103 answers `--json readOnly` with `read_only` (11-16, the first real setup was refused for it); the
+        key is still seen as written with write access, and a read-only one in that spelling is still refused."""
+        with mock.patch.dict(os.environ, {"FAKE_GH_SNAKE": "1"}):
+            code, out, err = self.setup_grant()
+            self.assertEqual(code, 0, err)
+            self.assertTrue((self.gdir() / "grant.json").exists())
+        shutil.rmtree(self.gdir())   # the grant gone here: the next setup makes a new key (and replaces the old one)
+        with mock.patch.dict(os.environ, {"FAKE_GH_SNAKE": "1", "FAKE_GH_READONLY": "1"}):
+            with self.assertRaises(gpg.Failed) as cm:
+                self.setup_grant()
+            self.assertIn("read-only", str(cm.exception))
 
     def test_read_only_or_disabled_deploy_keys_get_no_platform_push(self):
         with mock.patch.dict(os.environ, {"FAKE_GH_READONLY": "1"}), self.assertRaises(gpg.Failed) as cm:
