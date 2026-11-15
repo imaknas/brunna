@@ -115,7 +115,9 @@ export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 stamp=$(date +%Y-%m-%d-%H%M)
 report="$OUT/$stamp.md"
 raw="$OUT/.$stamp.json"
-status running "started_at=$(date -Iseconds)" "report=" "session_id=" "error=" "cwd=$CWD"
+# every field a run's end sets is cleared here, so a success never carries the last failure's exit or stderr
+status running "started_at=$(date -Iseconds)" "report=" "session_id=" "error=" "exit=" "stderr=" "finished_at=" \
+  "summary=" "cwd=$CWD"
 
 cd "$CWD" || exit 1
 # judgment point (permission mode etc. declared in contracts/llm-points.yaml): AGENT_JOB_POINT when the caller names
