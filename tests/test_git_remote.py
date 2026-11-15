@@ -101,7 +101,7 @@ class Base(unittest.TestCase):
         stdin = mock.Mock(isatty=lambda: stdin_tty)
         with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), mock.patch("sys.stdin", stdin), \
                 mock.patch("builtins.input", lambda prompt="": answer if answer is not None else ""):
-            code = git_remote.main(["push", "proj", *args])
+            code = git_remote.main(["push", "--owner", "proj", *args])
         return code, out.getvalue(), err.getvalue()
 
     def owned(self) -> pathlib.Path:
@@ -114,7 +114,7 @@ class Base(unittest.TestCase):
         for argv, cwd in self.calls:
             self.assertEqual(argv[:2], ["git", "--git-dir"], argv)
             repo = pathlib.Path(argv[2]).resolve()
-            self.assertTrue(repo == self.owned().resolve() or repo.name == "stage.git", argv)
+            self.assertTrue(repo == self.owned().resolve() or repo.name in ("in.git", "checked.git"), argv)
             for p in (repo, pathlib.Path(cwd).resolve()):
                 self.assertFalse(p == ws or p.is_relative_to(ws), (argv, cwd))
             self.assertNotIn("-C", argv[:4])
@@ -384,7 +384,7 @@ class Refusals(Base):
         out, err = io.StringIO(), io.StringIO()
         with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
                 mock.patch("sys.stdin", mock.Mock(isatty=lambda: True)), mock.patch("builtins.input", answer):
-            code = git_remote.main(["push", "proj", "main"])
+            code = git_remote.main(["push", "--owner", "proj", "main"])
         self.assertTrue(rewound)
         self.assertEqual(code, git_remote.FAILED, err.getvalue())
         self.assertEqual(self.tip(), c1, "the push went through on a remote that moved")
@@ -638,7 +638,7 @@ class EndToEnd(unittest.TestCase):
                               check=True).stdout
 
     def brunna_push(self, *args):
-        r = subprocess.run([sys.executable, str(BIN / "agenthub"), "push", "proj", *args, "--yes"], env=self.env,
+        r = subprocess.run([sys.executable, str(BIN / "agenthub"), "push", "--owner", "proj", *args, "--yes"], env=self.env,
                            capture_output=True, text=True, timeout=300, stdin=subprocess.DEVNULL)
         if "the sandbox refused" in r.stderr:
             self.skipTest(f"this machine can't sandbox the project's job: {r.stderr.strip()[-200:]}")
@@ -723,10 +723,12 @@ class Registry(unittest.TestCase):
         said = registry.platform_owned_changes({**cur, "enforce": {"sandbox": True, "git_ci": True}}, cur)
         self.assertTrue(any("enforce" in s for s in said), said)
 
-    def test_push_is_no_session_command(self):
+    def test_push_is_a_session_command(self):
+        """docs/design/platform-push.md: a session asks the platform to push with `brunna push`; the permission rule only
+        skips the prompt (the command still runs in the session's sandbox, where the owner form refuses)."""
         import policy
-        self.assertFalse([c for c in policy.platform_cli() if c.split()[-1] == "push"])
-        self.assertNotIn("push", policy.SESSION_SUBCOMMANDS)
+        self.assertTrue([c for c in policy.platform_cli() if c.split()[-1] == "push"])
+        self.assertIn("push", policy.SESSION_SUBCOMMANDS)
 
 
 if __name__ == "__main__":

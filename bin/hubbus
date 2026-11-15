@@ -3351,6 +3351,32 @@ def take_outboxes(c) -> None:
                                                  n=len(folders), names=", ".join(folders[:5])))
 
 
+def take_push_requests(c) -> None:
+    """Every sandboxed project's session push requests (<push_dir>/<project>/) → the platform's queue, and the workers the
+    queues need (bin/push_queue.py; docs/design/platform-push.md, "Who runs it"). A push request is no letter: it never
+    enters the message table. A file whose id can't be read is answered by an info letter like outbox_refused's; the
+    outcome of a request a worker never finished, too. Nothing here spawns anything when no request waits."""
+    import push_queue
+
+    def letter(project: str, text: str, key: str) -> None:
+        text = storable(text)[:1500]
+        publish(c, f"{key}-{hashlib.sha1(text.encode()).hexdigest()[:12]}", "message", hubconf.hub_project(), project,
+                None, {"type": "info", "text": text})
+
+    for proj in push_queue.sandboxed_projects():
+        try:
+            push_queue.take_in(proj, letter=letter, log=log_safely,
+                               confirm_session=lambda project, session: own_session(c, project, session))
+        except sqlite3.OperationalError:
+            raise
+        except Exception as e:   # one project's folder stops neither the others nor the mail
+            if c.in_transaction:
+                c.execute("ROLLBACK")
+            log_once(f"push-requests-{proj}", _("{project}: its push requests could not be taken in: {e!r}",
+                                                project=proj, e=e))
+    push_queue.tick(letter=letter, log=log_safely)
+
+
 def log_safely(msg: str) -> None:
     try:
         log(msg)
@@ -3595,6 +3621,7 @@ def dispatch_locked(c, pull=False) -> None:
         except OSError:
             return
         mailbox_step(c, take_outboxes)   # before dispatching: a request from a sandboxed project is handled this run
+        mailbox_step(c, take_push_requests)   # sessions' push requests: never letters, no handler or wake
         # also pull handoffs every minute (0.2 s): questions the assistant asks for the owner (asks) needn't wait for
         # the bridge's 15 minutes
         if pull and hubconf.owner_side() == "assistant":

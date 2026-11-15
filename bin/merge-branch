@@ -28,7 +28,8 @@ Run in the session's own worktree:
      way). In the hub's own repo, then `brunna land` from the merged code (the registry index; a problem is reported,
      the merge stands).
   5. **Push only when the registry has `push_on_merge: true`** (no push by default: some repos are public, and
-     merging ≠ publishing).
+     merging ≠ publishing). A sandboxed project asks the platform to push its default branch instead (`brunna push`'s
+     request, docs/design/platform-push.md); the outcome comes as a letter, and a request still pending is no failure.
   6. Record merge.done and session.report on the bus (branch, commits, files, tests, questions, pushed or not);
      with --question, also send it to the owner (→ the personal assistant).
 
@@ -291,8 +292,16 @@ def main() -> int:
                 print(_("merge-branch: merged, but `brunna land` reported a problem (the index may not match the "
                         "merged code until the next tick):\n{tail}", tail="\n".join(
                             (land.stdout + land.stderr).strip().splitlines()[-15:])), file=sys.stderr)
-        # 5. push (only when the registry says so)
-        if info.get("push_on_merge"):
+        # 5. push (only when the registry says so). A sandboxed project's session can't reach a credential: it asks the
+        # platform to push the default branch (docs/design/platform-push.md, section 5); whether that lands is the owner's
+        # enforce.git_push, and a request still pending ("one in flight") is no failure of the merge
+        if info.get("push_on_merge") and (info.get("enforce") or {}).get("sandbox") is True:
+            import git_remote
+            try:
+                report["push_requested"] = git_remote.submit(proj, base, head)
+            except git_remote.Refused as e:
+                report["push_error"] = str(e)[-500:]
+        elif info.get("push_on_merge"):
             # a commit_gate repo's main moves only through this gate: a diverged origin is reported, never pulled in
             push = ["git", "push", "-q"] if info.get("commit_gate") else [str(hubconf.ROOT / "bin" / "git-safe-push.sh")]
             p = subprocess.run(push, cwd=main_dir, capture_output=True, text=True)
@@ -306,6 +315,8 @@ def main() -> int:
         subprocess.run([*HUBBUS, "send", "--from", proj, "--to", hubconf.owner_address(), "--type", "question",
                         "--text", f"[{proj} · {branch}] {q}"], capture_output=True)
     push = _("pushed") if report["pushed"] else \
+        _("push requested ({id}); its outcome comes as a letter", id=report["push_requested"]) \
+        if report.get("push_requested") else \
         _("not pushed") + (_(" (push_on_merge is false)") if not info.get("push_on_merge") else "")
     print(_("✓ {n} {n:commit|commits} of {branch} merged into {base} (tests: {tests}; {push})",
             n=len(commits), branch=branch, base=base, tests=report["tests"]["ok"], push=push))
