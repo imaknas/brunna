@@ -14,22 +14,23 @@ check fails closed: when it can't run or can't tell, it refuses and says which c
   secrets  (7)  every new blob as text, also as UTF-16 and with NULs stripped (r2 S-d), every new commit object whole,
                 every new tree's entry names: the built-in rules always (RULES, FILENAMES over every (path, blob) pair of
                 the new trees, r2 S-c), gitleaks when installed (hardened: `gitleaks:allow` neutralised, a fresh folder, an
-                empty ignore file, an environment from scratch), and every secret value the platform has seen the project
-                declare (declared(), salted hashes, never dropped: r2 S-e)
+                empty ignore file, an environment from scratch; on stdin it sees no path, so its path rules don't apply),
+                and every secret value the platform has seen the project declare, matched as a substring (Declared;
+                kept owner-only in the secrets folder, never dropped: r2 S-e, review B1)
   names    (8)  on a public remote: no private project name (private_names) but its own, no owner's home path, no owner's
-                user name as a path segment, in blobs, commits or any new tree's paths
+                user name as a path segment, in blobs, commits or any new tree's paths; the project is told that a
+                private name is there, never which (review S3)
 
-What a check reports names the commit, the path or "message", and the rule; never the value.
+What a check reports names the commit, the path or "message", and the rule; never the value. The new trees are walked
+once each, with caps on entries, depth and time (review B2), after the sizes are checked.
 """
 from __future__ import annotations
 
 import datetime
-import hashlib
 import json
 import os
 import pathlib
 import re
-import secrets as _secrets
 import shutil
 import subprocess
 import sys
@@ -50,6 +51,8 @@ MIN_SECRET = 12                # a declared value counts from this length
 GITLEAKS_MIN = (8, 19)         # `gitleaks stdin`
 CHUNK = 4 << 20                # blobs joined for one gitleaks run
 BATCH = 16 << 20               # blobs read at once
+MAX_ENTRIES = 200_000          # tree entries walked in one push (review B2)
+MAX_DEPTH = 256                # folders deep
 NEUTRAL = b"gitleaks-allow-neutralised"
 CI_ENTRIES = (".github", ".gitlab-ci.yml", ".circleci", ".buildkite", ".travis.yml", "Jenkinsfile", "azure-pipelines.yml",
               "bitbucket-pipelines.yml", ".gitea", ".forgejo", ".woodpecker", ".woodpecker.yml")
@@ -80,6 +83,7 @@ class Finding(NamedTuple):
     reason: str           # for the project and the owner: the commit, the path or "message", the rule; never a value
     fix: str = "project"  # project | owner | wait
     cause: str = ""       # the owner to-do's cause when fix is owner
+    detail: str = ""      # for the owner's record only (pushes.jsonl), never told to the project
 
 
 class Failure(Exception):
@@ -166,24 +170,34 @@ class Objects:
             pos = nul + 1 + width
         return out
 
-    def walk(self) -> tuple[list[tuple[str, str, str]], set[str], dict[str, str]]:
-        """Every entry of every new tree, under each new commit's root: ([(mode, full path, oid)], the gitlinks' paths,
-        {oid: the first new commit that brings it}). A tree the remote already has is not walked (its entries' names are
-        there already)."""
+    def walk(self, deadline: float | None = None) -> tuple[list[tuple[str, str, str]], set[str], dict[str, str]]:
+        """Every entry of every new tree, each new tree walked once (by its id, under the first path it is reached at),
+        from each new commit's root: ([(mode, full path, oid)], the gitlinks' paths, {oid: the first new commit that brings
+        it}). A tree the remote already has is not walked (its entries' names are there already). Iterative, with caps
+        on the entries, the depth and the time: a tree that names one subtree twice, k levels deep, would otherwise list
+        2^k paths (review B2); past a cap the push is refused as a size finding, never walked on."""
+        import time
+        self.read(self.trees)   # every new tree in one batch: their size is bounded by the size check that ran first
         new_trees, entries, seen, first = set(self.trees), [], set(), {}
-
-        def go(tree: str, prefix: str, commit: str):
-            if tree not in new_trees or (tree, prefix) in seen:
-                return
-            seen.add((tree, prefix))
+        stack = [(self.commit_header(c, "tree")[0], "", c, 0) for c in reversed(self.commits)]
+        while stack:
+            tree, prefix, commit, depth = stack.pop()
+            if tree not in new_trees or tree in seen:
+                continue
+            seen.add(tree)
+            if depth > MAX_DEPTH:
+                raise Failure("size", _("the new trees nest deeper than {n} folders", n=MAX_DEPTH), fix="project")
+            if deadline is not None and time.monotonic() > deadline:
+                raise Failure("size", _("the new trees took too long to read: push in parts"), fix="project")
             for mode, name, oid in self.tree_entries(tree):
                 path = f"{prefix}{name}"
                 entries.append((mode, path, oid))
+                if len(entries) > MAX_ENTRIES:
+                    raise Failure("size", _("the new trees hold more than {n} entries: push in parts", n=MAX_ENTRIES),
+                                  fix="project")
                 first.setdefault(oid, commit)
                 if mode == "40000":
-                    go(oid, path + "/", commit)
-        for c in self.commits:
-            go(self.commit_header(c, "tree")[0], "", c)
+                    stack.append((oid, path + "/", commit, depth + 1))
         return entries, {p for m, p, _o in entries if m == "160000"}, first
 
     def commit_header(self, oid: str, key: str) -> list[str]:
@@ -343,26 +357,18 @@ def filename_hits(path: str) -> list[str]:
 # ---------- the project's declared secret values (r2 S-e) ----------
 
 def declared_file(project: str) -> pathlib.Path:
-    import policy
-    return policy.git_broker_dir(project) / "declared.json"
+    """<secrets>/push-declared/<project>.json: the values themselves (they are the project's secrets already, in its own
+    folder), kept where every sandbox is denied (policy.secret_dirs), owner-only (0600 in a 0700 folder). Matched as
+    substrings (review B1): a value inside a URL, a query string or a sentence is still the value."""
+    return hubconf.secrets_dir() / "push-declared" / f"{project}.json"
 
 
-def _salt() -> bytes:
-    import policy
-    f = policy.git_broker_dir(".declared-salt")
-    f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+def _load(f: pathlib.Path) -> dict:
     try:
-        return bytes.fromhex(f.read_text().strip())
+        raw = nofollow.read(f.parent, f.name, 4 << 20)
+        return json.loads(raw) if raw else {}
     except (OSError, ValueError):
-        salt = _secrets.token_bytes(16)
-        fd = os.open(f, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
-        with os.fdopen(fd, "w") as fh:
-            fh.write(salt.hex())
-        return salt
-
-
-def _h(salt: bytes, value: str) -> str:
-    return hashlib.sha256(salt + value.encode()).hexdigest()
+        return {}
 
 
 def _values(raw: bytes, env_key: str | None) -> list[str]:
@@ -382,8 +388,8 @@ def _values(raw: bytes, env_key: str | None) -> list[str]:
 
 
 def remember_declared(project: str, doc: dict, log=None) -> None:
-    """Read the project's declared secret values as they are now and add their salted hashes to what the platform has seen
-    (never dropped when a declaration goes: the project can change secrets:, so it can't turn the check off). Only
+    """Read the project's declared secret values as they are now and add them to what the platform has seen (never
+    dropped when a declaration goes: the project can change secrets:, so it can't turn the check off; r2 S-e). Only
     entries without kind whose path is relative, read with nofollow from its own workspace or runtime folder: no link
     followed, regular single-link files only, at most SECRET_CAP. Anything else is skipped, said only to the owner's log
     (S3: a refusal must not tell the project anything about files it can't read)."""
@@ -391,11 +397,7 @@ def remember_declared(project: str, doc: dict, log=None) -> None:
     d = registry.dirs({**doc, "name": project})
     bases = [b for b in (d.get("workspace"), d.get("runtime")) if b]
     f = declared_file(project)
-    try:
-        seen = json.loads(f.read_text())
-    except (OSError, ValueError):
-        seen = {}
-    salt, changed = _salt(), False
+    seen, changed = _load(f), False
     for sec in doc.get("secrets") or []:
         if not isinstance(sec, dict) or sec.get("kind"):
             continue
@@ -414,35 +416,33 @@ def remember_declared(project: str, doc: dict, log=None) -> None:
             if raw is None:
                 continue
             for v in _values(raw, sec.get("env_key")):
-                h = _h(salt, v)
-                if h not in seen:
-                    seen[h] = {"name": name[:80], "len": len(v), "at": datetime.date.today().isoformat()}
+                if v not in seen:
+                    seen[v] = {"name": name[:80], "at": datetime.date.today().isoformat()}
                     changed = True
     if changed:
         f.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        tmp = f.with_name(f".{f.name}.new")
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+        os.chmod(f.parent, 0o700)
+        tmp = f.with_name(f".{f.name}.{os.getpid()}.new")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
         with os.fdopen(fd, "w") as fh:
             json.dump(seen, fh)
         os.replace(tmp, f)
 
 
-def declared_hits(project: str, texts: list[str]) -> list[str]:
-    """The names of declared values that appear in these texts (as a token, or the part of one after = or :)."""
-    try:
-        seen = json.loads(declared_file(project).read_text())
-    except (OSError, ValueError):
-        return []
-    if not seen:
-        return []
-    salt, lengths, out = _salt(), {v["len"] for v in seen.values()}, set()
-    for t in texts:
-        for tok in TOKEN.findall(t):
-            cands = {tok, *re.split(r"[=:]", tok)[1:], tok.split("=", 1)[-1], tok.split(":", 1)[-1]}
-            for c in cands:
-                if len(c) in lengths and (h := _h(salt, c)) in seen:
-                    out.add(seen[h]["name"])
-    return sorted(out)
+class Declared:
+    """Every value the platform has seen the project declare, matched as a substring of a text (one alternation of the
+    escaped values, longest first): → the declared names found, never the values."""
+
+    def __init__(self, project: str):
+        seen = _load(declared_file(project))
+        self.names = {v: (meta or {}).get("name", "?") for v, meta in seen.items() if isinstance(v, str) and v}
+        self.rx = re.compile("|".join(re.escape(v) for v in sorted(self.names, key=len, reverse=True))) \
+            if self.names else None
+
+    def hits(self, texts: list[str]) -> list[str]:
+        if not self.rx:
+            return []
+        return sorted({self.names[m.group(0)] for t in texts for m in self.rx.finditer(t)})
 
 
 # ---------- gitleaks ----------
@@ -555,11 +555,12 @@ def run(git, *, project: str, doc: dict, new: str, tips: list[str], default_tip:
     enf = doc.get("enforce") or {}
     gp = enf.get("git_push") or {}
     objs = Objects(git, new, tips)
-    entries, gitlinks, first = objs.walk()
-    found = objects_check(objs, entries, gitlinks)
+    # sizes first (they are known from batch-check alone): what the walk reads is bounded by them
     size = size_check(objs, {**limits, "max_file_mb": int(gp.get("max_file_mb") or 10)})
     if size:
-        return found + size
+        return size
+    entries, gitlinks, first = objs.walk(deadline)
+    found = objects_check(objs, entries, gitlinks)
     found += ci_check(git, new, default_tip, enf.get("git_ci") is True)
     if not (owner_form and not gp.get("emails")):
         found += identity_check(objs, gp, public)
@@ -571,6 +572,7 @@ def scan(objs: Objects, entries, first, *, project, doc, public, deadline, log=N
     """Checks 7 and 8 over the new commits whole, the new trees' paths and the new blobs."""
     import time
     remember_declared(project, doc, log)
+    declared = Declared(project)
     out: list[Finding] = []
     paths = blob_paths(entries)
     homes, user = owner_paths() if public else ([], "")
@@ -581,18 +583,20 @@ def scan(objs: Objects, entries, first, *, project, doc, public, deadline, log=N
         ps = sorted(paths.get(oid, ()))
         return _("{path} in commit {sha}", path=(ps[0] if ps else short(oid))[:200], sha=short(first.get(oid, "?")))
 
-    def look(label: str, texts: list[str]):
+    def look(label: str, texts: list[str], plain: str | None = None):
+        """plain: the place named without its path, for a names finding (the path may hold the very name)."""
         for rule in rule_hits(texts):
             out.append(Finding("secrets", _("{where}: a secret ({rule}); rewrite the unpushed commits so it never "
                                             "appears", where=label, rule=rule)))
-        for name in declared_hits(project, texts):
+        for name in declared.hits(texts):
             out.append(Finding("secrets", _("{where}: the value of this project's secret {name}; rewrite the unpushed "
                                             "commits so it never appears", where=label, name=name)))
         if public:
             for t in texts:
+                # which name only in the owner's record (review S3): the project is told that one is there
                 for n in sorted({n for n, pat in private if pat.search(t)}):
-                    out.append(Finding("names", _("{where} names a private project ({name}) and the remote is public",
-                                                  where=label, name=n)))
+                    out.append(Finding("names", _("{where} names a private project and the remote is public",
+                                                  where=plain or label), detail=f"{n} ({label})"))
                 if any(h in t for h in homes):
                     out.append(Finding("names", _("{where} holds the owner's home path and the remote is public",
                                                   where=label)))
@@ -617,7 +621,7 @@ def scan(objs: Objects, entries, first, *, project, doc, public, deadline, log=N
             raise Failure("secrets", _("the scanner failed: it ran past its time limit"))
         texts = variants(data)
         label = where_blob(oid)
-        look(label, texts)
+        look(label, texts, _("a file in commit {sha}", sha=short(first.get(oid, "?"))))
         items += [(label, t) for t in texts]
     exe = gitleaks()
     if exe:

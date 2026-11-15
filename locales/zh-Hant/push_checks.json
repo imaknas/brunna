@@ -25,7 +25,11 @@
  "{path} turns on Git LFS (filter=lfs): LFS objects don't travel with the platform's push": "{path} 開了 Git LFS(filter=lfs):LFS 物件不會跟著平台的推送走",
  "{sha} changes {entry} against the remote's default branch: CI would run it with the repo's secrets; only the owner allows that (enforce.git_ci)": "{sha} 改了 {entry}(和遠端預設分支比):CI 會帶著 repo 的機密跑它;只有擁有者能允許(enforce.git_ci)",
  "{where} holds the owner's home path and the remote is public": "{where} 含有擁有者的家目錄路徑,而遠端是公開的",
- "{where} names a private project ({name}) and the remote is public": "{where} 提到私有專案({name}),而遠端是公開的",
  "{where}: a secret ({rule}); rewrite the unpushed commits so it never appears": "{where}:有機密({rule});請改寫還沒推的 commit,讓它從頭到尾都不出現",
- "{where}: the value of this project's secret {name}; rewrite the unpushed commits so it never appears": "{where}:這個專案的機密 {name} 的值;請改寫還沒推的 commit,讓它從頭到尾都不出現"
+ "{where}: the value of this project's secret {name}; rewrite the unpushed commits so it never appears": "{where}:這個專案的機密 {name} 的值;請改寫還沒推的 commit,讓它從頭到尾都不出現",
+ "a file in commit {sha}": "commit {sha} 裡的一個檔案",
+ "the new trees hold more than {n} entries: push in parts": "新 tree 的項目超過 {n} 個:請分批推",
+ "the new trees nest deeper than {n} folders": "新 tree 的資料夾巢狀超過 {n} 層",
+ "the new trees took too long to read: push in parts": "新 tree 讀太久了:請分批推",
+ "{where} names a private project and the remote is public": "{where} 提到私有專案,而遠端是公開的"
 }
