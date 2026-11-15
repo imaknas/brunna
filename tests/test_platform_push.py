@@ -222,12 +222,23 @@ class TakingIn(Push):
         (self.tmp / "l").write_text("through\n")
         self.assertEqual(target.read_text(), "through\n")
 
-    def test_only_request_files_are_touched(self):
+    def test_what_else_is_in_the_folder(self):
+        """Only requests are read; a result and a client's young dot-file stay, an old dot-file and anything else go
+        (the re-review's nit), never followed."""
         push_queue.ensure_folder("proj")
         other = self.push_root / "proj" / "notes.txt"
         other.write_text("x\n")
+        young, old = self.push_root / "proj" / ".m1.tmp", self.push_root / "proj" / ".m2.tmp"
+        young.write_text("{")
+        old.write_text("{")
+        os.utime(old, (time.time() - 7200,) * 2)
+        res = self.push_root / "proj" / "m11160000-cccccccccccc.result.json"
+        res.write_text("{}")
         self.take()
-        self.assertTrue(other.exists())
+        self.assertFalse(other.exists())
+        self.assertTrue(young.exists())
+        self.assertFalse(old.exists())
+        self.assertTrue(res.exists())
 
     def test_a_request_becomes_a_platform_made_file(self):
         rid = self.request(project="someone-else", extra="ignored")
@@ -1068,6 +1079,175 @@ class Review(Push):
         with mock.patch.object(git_push_grant, "anonymous_ls_remote",
                                lambda url: subprocess.CompletedProcess([], 0, "", "")):
             self.assertEqual(git_push_grant.visibility("http://127.0.0.1:9/x.git"), "public")
+
+
+class ReReview(Review):
+    """The re-review of the code review's fixes: B1 (the store), B2 (path bytes), 3 (a bounded match), 4 (leases), 5
+    (the visibility to-do), 6 (no commit named) and the nits."""
+
+    def test_b1_a_store_that_cant_be_read_whole_fails_closed(self):
+        v = self.VALUE
+        self.declare(v)
+        self.assertEqual(self.shape(0, f"x = '{v}'\n")["check"], "secrets", "the control: it is found")
+        f = push_checks.declared_file("proj")
+        before = f.read_bytes()
+        with mock.patch.object(push_checks, "STORE_CAP", 10):
+            res = self.shape(1, "nothing secret\n")
+        self.assertEqual((res["state"], res["check"], res["fix"]), ("refused", "secrets", "owner"), res)
+        self.assertTrue(res.get("todo"))
+        self.assertEqual(f.read_bytes(), before, "the store was rewritten or shrunk")
+        # and an entry rewritten many times never drops the old values
+        for i in range(5):
+            self.declare(f"{v}-{i}")
+            self.shape(10 + i, "ok\n")
+        self.declare("unrelated-value-0000")
+        self.assertEqual(self.shape(20, f"x = '{v}-0'\n")["check"], "secrets")
+
+    def test_b1_the_count_cap_refuses_for_the_owner(self):
+        self.declare(self.VALUE)
+        with mock.patch.object(push_checks, "MAX_VALUES", 0):
+            res = self.shape(0, "ok\n")
+        self.assertEqual((res["state"], res["fix"]), ("refused", "owner"), res)
+
+    def test_b1_a_long_value_is_kept_as_its_hash(self):
+        """A value over MAX_VALUE is stored as its hash, matched against a whole file or a long word in one; the
+        store holds no value that long."""
+        token = "Ab3" * 400
+        (self.ws / "cert.txt").write_text("-----BEGIN THING-----\n" + token + "\n")
+        self.docs["proj"]["secrets"] = [{"name": "cert", "path": "cert.txt"}]
+        self.git(self.ws, "checkout", "-q", "-b", "c0", self.base)
+        self.commit_as("copy/x.txt", f'key = "{token}"\n', "copy")
+        res = self.ask("c0")
+        self.assertEqual(res["check"], "secrets", res)
+        self.assertIn("cert", res["reason"])
+        rec = [json.loads(x) for x in push_checks.declared_file("proj").read_text().splitlines()]
+        self.assertTrue(all("v" not in r or len(r["v"]) <= push_checks.MAX_VALUE for r in rec))
+
+    def test_b1_dotenv_comments_and_nfc(self):
+        (self.ws / ".env").write_text("TOKEN=Zq7xK2mPa9Lr4tWvé   # a comment\n")
+        self.docs["proj"]["secrets"] = [{"name": "tok", "path": ".env", "env_key": "TOKEN"}]
+        import unicodedata
+        decomposed = unicodedata.normalize("NFD", "Zq7xK2mPa9Lr4tWvé")
+        res = self.shape(0, f"x = {decomposed}\n")
+        self.assertEqual(res["check"], "secrets", res)
+        stored = push_checks.declared_file("proj").read_text()
+        self.assertNotIn("comment", stored)
+
+    def test_3_the_match_is_bounded(self):
+        import random
+        import string
+        rnd = random.Random(7)
+        vals = ["".join(rnd.choice(string.ascii_letters + string.digits) for _ in range(rnd.randint(12, 64)))
+                for _ in range(4096)]
+        d = push_checks.Declared.__new__(push_checks.Declared)
+        d.names, d.hashes = {v: "n" for v in vals}, {}
+        d.longest = max(map(len, vals))
+        import re as _re
+        d.rx = _re.compile(push_checks._trie_pattern(sorted(vals)))
+        text = "".join(rnd.choice(string.ascii_letters + " \n") for _ in range(10 << 20)) + vals[7]
+        t0 = time.monotonic()
+        self.assertEqual(d.hits([text], time.monotonic() + 120), ["n"])
+        self.assertLess(time.monotonic() - t0, 60)
+        with self.assertRaises(push_checks.Failure):
+            d.hits([text], time.monotonic() - 1)
+
+    def deep(self, depth: int, namelen: int, width: int) -> str:
+        src = self.tmp / f"blobs-{width}"
+        src.mkdir(exist_ok=True)
+        for i in range(width):
+            (src / str(i)).write_text(f"{i}\n")
+        blobs = subprocess.run(["git", "-C", str(self.ws), "hash-object", "-w", "--stdin-paths"],
+                               input="".join(f"{src / str(i)}\n" for i in range(width)), capture_output=True, text=True,
+                               check=True).stdout.split()
+        t = mktree(self.ws, [("100644", "blob", b, f"{i:0{namelen}d}"[-namelen:]) for i, b in enumerate(blobs)])
+        for i in range(depth):
+            t = mktree(self.ws, [("040000", "tree", t, ("d" * namelen)[:namelen - 3] + f"{i:03d}")])
+        c = self.git(self.ws, "commit-tree", t, "-p", self.base, "-m", "deep").strip()
+        self.git(self.ws, "update-ref", "refs/heads/main", c)
+        return c
+
+    def test_b2_long_paths_are_refused_fast(self):
+        """250 folders of 255-character names over 3000 files: 190 MB of paths if each were built and joined. Refused
+        as a size finding while walking, quickly, without growing the process much; rev-list prints no names. Control: a
+        tree as deep with short names passes."""
+        import resource
+        c = self.deep(250, 255, 3000)
+
+        def g(*a, input=None):
+            r = subprocess.run(["git", "-C", str(self.ws), *a], input=input, capture_output=True, check=True).stdout
+            self.assertLess(len(r), 16 << 20, f"git {a[0]} printed {len(r)} bytes")
+            return r
+        before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        t0 = time.monotonic()
+        objs = push_checks.Objects(g, c, [self.base])
+        with self.assertRaises(push_checks.Failure) as got:
+            objs.walk(time.monotonic() + 60)
+        self.assertEqual(got.exception.check, "size")
+        self.assertLess(time.monotonic() - t0, 30)
+        grew = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss - before
+        self.assertLess(grew, (300 << 20) if sys.platform == "darwin" else 300 << 10, "the walk held too much")
+        self.refused(self.ask(), check="size")
+        self.git(self.ws, "reset", "-q", "--hard", self.base)
+        self.deep(250, 4, 20)
+        self.assertEqual(self.ask()["state"], "pushed", "the control: as deep with short names")
+
+    def test_b2_a_wide_tree_is_refused_unread(self):
+        self.commit_as("w/a.txt", "a\n", "wide")
+        with mock.patch.object(push_checks, "MAX_TREE", 10), \
+                mock.patch.object(push_checks.Objects, "tree_entries", side_effect=AssertionError("parsed")):
+            self.refused(self.ask(), check="size", says="as an object")
+
+    def test_4_a_lease_runs_no_session_command_unasked(self):
+        import runtime_claude
+        pol = policy.policy("proj", self.docs["proj"], {"projects": self.docs})
+        allow = set(runtime_claude.session_settings(pol)[2])
+        deny = set(runtime_claude.lease_settings(pol)["permissions"]["deny"])
+        self.assertTrue(allow)
+        self.assertEqual(sorted(allow - deny), [], "an allow the lease loads that its own settings don't deny")
+
+    def test_5_the_visibility_todo_stays_open(self):
+        self.field(visibility="public", emails=["1+d@users.noreply.github.com"])
+        for i in range(2):
+            self.git(self.ws, "checkout", "-q", "-b", f"v{i}", self.base)
+            self.commit_as(f"v{i}.txt", "x\n", "v", GIT_AUTHOR_EMAIL="1+d@users.noreply.github.com",
+                           GIT_COMMITTER_EMAIL="1+d@users.noreply.github.com")
+            self.assertEqual(self.ask(f"v{i}")["state"], "pushed")
+        kinds = [(t[1], t[3]) for t in self.todos]
+        self.assertEqual([k for k in kinds if "visibility" in k[1]], [("task", "push-proj-visibility-1")],
+                         "the to-do closed or was sent again")
+
+    def test_6_a_private_name_names_no_commit(self):
+        self.names_file = self.tmp / "private-names.txt"
+        self.names_file.write_text("secretproj\n")
+        self.field(public_emails=["dev@example.org"])
+        c = self.commit(self.ws, "a.txt", "a\n", "about secretproj")
+        with mock.patch.object(git_remote, "visibility", lambda origin: "public"):
+            res = self.ask()
+        self.refused(res, check="names")
+        self.assertEqual(res["fix"], "owner")
+        told = json.dumps(res) + json.dumps(self.letters)
+        self.assertNotIn(c[:12], told)
+        self.assertNotIn("secretproj", told)
+        self.assertTrue(any("secretproj" in " ".join(t) and c[:12] in " ".join(t) for t in self.todos), self.todos)
+
+    def test_nits_the_folder_holds_only_requests_and_letters_go_once(self):
+        push_queue.ensure_folder("proj")
+        for i in range(5):
+            (self.push_root / "proj" / f"other-{i}.txt").write_text("x")
+            (self.push_root / "proj" / f"bad {i}.request.json").write_text("{}")
+        self.take()
+        self.assertEqual(os.listdir(self.push_root / "proj"), [])
+        self.assertEqual(len([x for x in self.letters if "not a push request" in x[1]]), 1)
+        self.limits["requests_per_day"] = 1
+        keys = []
+        for _round in range(2):
+            for i in range(4):
+                rid = git_remote.request_id()
+                (self.push_root / "proj" / f"{rid}.request.json").write_text(
+                    json.dumps({"v": 1, "id": rid, "branch": "main", "sha": self.base}))
+            push_queue.take_in("proj", letter=lambda p, t, k: keys.append(k))
+        flood = [k for k in keys if k.startswith("push-flood-")]
+        self.assertEqual(len(set(flood)), 1, "one key a day: the bus sends it once")
 
 
 # ---------- merge-branch's push_on_merge in a sandboxed project (section 5) ----------
