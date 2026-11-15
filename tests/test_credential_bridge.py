@@ -502,6 +502,54 @@ class LlmRun(Scratch):
         self.assertIn("never started", failed[0])
 
 
+class Stopping(Scratch):
+    """How the agent stops its servers: Claude Code sends SIGINT once its run is over (measured on the first real run,
+    11-15: every tool call had succeeded, and the job failed as "crashed"). Between requests that is the run's end; in
+    the middle of one it fails the run."""
+
+    def test_sigint_between_requests_is_the_end_of_the_run(self):
+        import signal
+        run_dir = hubconf.STATE / "agent-jobs" / ".settings" / f"demo.stop.{os.getpid()}"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        self.addCleanup(shutil.rmtree, run_dir, True)
+        run_file = run_dir / "credential-upwork.json"
+        run_file.write_text("{}")   # refused (it names no job): the bridge still runs, answering with errors
+        run_file.chmod(0o600)
+        p = subprocess.Popen([sys.executable, "-I", str(ROOT / "bin" / "credential_bridge.py"), "--run", str(run_file)],
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        p.stdin.write(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}) + "\n")
+        p.stdin.flush()
+        p.stdout.readline()   # its answer: the request is over
+        p.send_signal(signal.SIGINT)
+        p.wait(timeout=20)
+        st = json.loads((run_dir / "credential-upwork.status.json").read_text())
+        self.assertEqual(st["ended"], "terminated")
+        self.assertNotIn("KeyboardInterrupt", p.stderr.read())
+        import llm
+        self.assertNotIn("crashed", llm.bridge_failure(run_dir) or "", "not a crash")
+
+    def test_a_stop_in_the_middle_of_a_request_fails_the_run(self):
+        import signal
+        import llm
+        b, _out = self.bridge()
+        b.current = "tools/call upwork__get_messages"
+        self.assertEqual(credential_bridge.on_stop(b, signal.SIGINT), 1)
+        (self.tmp / "credential-upwork.json").write_text("{}")
+        why = llm.bridge_failure(self.tmp)
+        self.assertIn("stopped before a request finished", why)
+        self.assertIn("SIGINT", why)
+        self.assertIn("upwork__get_messages", why)
+        b.current = None
+        self.assertEqual(credential_bridge.on_stop(b, signal.SIGINT), 0)
+        self.assertEqual(self.status()["ended"], "terminated")
+
+    def test_the_client_is_told_of_tools_only(self):
+        b, out = self.bridge()
+        b.handle(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}))
+        self.assertEqual(self.replies(out)[0]["result"]["capabilities"], {"tools": {}})
+
+
 # llm.py in a temp hub: the real one, run as run-agent-job.sh starts it (its argv, its folder, its environment), with
 # only what reaches outside stood in for: the registry entry (from $FIXTURE), the credential's freshness, the runtime
 # (it records the task instead of starting an agent, and writes the bridge's status as a connected bridge would) and

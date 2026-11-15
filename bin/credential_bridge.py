@@ -27,6 +27,8 @@ What passes, and how:
 - An answer that breaks off, runs over its size or time, or names a session id that isn't one is refused, never
   half-taken; whatever else goes wrong on a request becomes a JSON-RPC error, and a bridge that crashes says so in its
   status (llm.py fails the run).
+- SIGINT or SIGTERM between requests is the agent ending its run (Claude Code sends SIGINT then): `ended: terminated`.
+  In the middle of a request it is `ended: interrupted`, naming the request, and llm.py fails the run.
 
 It writes <run folder>/credential-<id>.status.json (initialized, tools listed, auth failures, whether each recovered,
 the last error) and credential-<id>.log (method, tool, status, duration; no value): llm.py fails the run when the
@@ -290,6 +292,7 @@ class Bridge:
                        "scope_error": None, "ended": None, "last_error": run.refusal}
         self.cred = None
         self.up = None
+        self.current = None   # the request being forwarded (its method), None between requests
         self.hidden: set[str] = set()   # every value the credential held during the run, the refreshed-away ones too
         if run.refusal is None:
             try:
@@ -378,7 +381,11 @@ class Bridge:
             return self.error(mid, -32602, _("the tool {tool} is not one this run may call", tool=_clamp(tool, 80)))
         if method == "initialize":
             msg = {**msg, "params": {**params, "capabilities": {}}}
-        self.forward(msg, tool)
+        self.current = f"{method} {tool}" if tool else method
+        try:
+            self.forward(msg, tool)
+        finally:
+            self.current = None
 
     def forward(self, msg: dict, tool) -> None:
         started, mid, method = time.time(), msg.get("id"), msg.get("method")
@@ -398,6 +405,10 @@ class Bridge:
             if method == "initialize" and isinstance(m.get("result"), dict):
                 self.up.proto = m["result"].get("protocolVersion") or PROTOCOL
                 self.status["initialized"] = True
+                caps = m["result"].get("capabilities") if isinstance(m["result"].get("capabilities"), dict) else {}
+                # tools only: the client isn't told of resources or prompts the bridge would refuse (measured 11-15:
+                # Claude asked for resources/list when the server offered them)
+                m["result"]["capabilities"] = {"tools": caps.get("tools") or {}}
             self.write(m)
         status = None
         for attempt in (1, 2):
@@ -468,6 +479,22 @@ class Bridge:
         return True
 
 
+def on_stop(bridge: "Bridge", signum: int) -> int:
+    """The agent stops its servers with SIGINT or SIGTERM. Between requests that is the end of its run (terminated;
+    measured 11-15: Claude Code sends SIGINT once its run is over); in the middle of one, a request the agent was
+    waiting for didn't finish, and llm.py fails the run on it (interrupted). → the exit code."""
+    import signal
+    if bridge.current is None:
+        bridge.status["ended"] = "terminated"
+        bridge.save()
+        return 0
+    bridge.status["last_error"] = _("stopped by {signal} while {request} was in progress",
+                                    signal=signal.Signals(signum).name, request=bridge.current)
+    bridge.status["ended"] = "interrupted"
+    bridge.save()
+    return 1
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2 or argv[0] != "--run":
         print(_("usage: credential_bridge.py --run <run file>"), file=sys.stderr)
@@ -480,16 +507,18 @@ def main(argv: list[str]) -> int:
         bridge.status["ended"] = how
         bridge.save()
 
-    def term(*_a):
-        ended("terminated")   # the agent closing its servers at the end of a run
-        os._exit(0)
-    signal.signal(signal.SIGTERM, term)
+    def stop(signum, _frame):
+        os._exit(on_stop(bridge, signum))
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
     try:
         for line in sys.stdin:
             if line.strip():
                 bridge.handle(line)
     except BaseException as e:   # llm.py fails the run on a bridge that crashed
-        bridge.status["last_error"] = _("the bridge failed on this request ({why})", why=_clamp(f"{type(e).__name__}: {e}"))
+        where = _("during {request}", request=bridge.current) if bridge.current else _("between requests")
+        bridge.status["last_error"] = _("the bridge stopped with {error} ({where})",
+                                        error=_clamp(f"{type(e).__name__}: {e}"), where=where)
         ended("crashed")
         raise
     ended("clean")

@@ -55,5 +55,6 @@
  "{point} did not start: its folder isn't the one the registry gives {project}/{job}": "{point} 沒有啟動:它的資料夾不是登錄給 {project}/{job} 的那個",
  "the platform's bridge to {server} crashed: {why}": "平台到 {server} 的 bridge 當掉了:{why}",
  "the server {server} refused a call the job needs: {why}": "server {server} 拒絕了 job 需要的呼叫:{why}",
- "llm.points.{key} pins the provider {provider}, but {key} is an agent call, which runs on the runtime {runtime}; not run (pin only a model, or make it a model call)": "llm.points.{key} 指定了 provider {provider},但 {key} 是 agent 呼叫,在執行環境 {runtime} 上跑;不執行(只能指定模型,或改成模型呼叫)"
+ "llm.points.{key} pins the provider {provider}, but {key} is an agent call, which runs on the runtime {runtime}; not run (pin only a model, or make it a model call)": "llm.points.{key} 指定了 provider {provider},但 {key} 是 agent 呼叫,在執行環境 {runtime} 上跑;不執行(只能指定模型,或改成模型呼叫)",
+ "the platform's bridge to {server} was stopped before a request finished: {why}": "平台到 {server} 的 bridge 在請求完成前被停掉:{why}"
 }

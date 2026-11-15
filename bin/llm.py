@@ -691,6 +691,9 @@ def bridge_failure(run_dir) -> str | None:
             return _("the platform's bridge to {server} never started", server=sid)
         if st.get("ended") == "crashed":
             return _("the platform's bridge to {server} crashed: {why}", server=sid, why=st.get("last_error") or "-")
+        if st.get("ended") == "interrupted":
+            return _("the platform's bridge to {server} was stopped before a request finished: {why}", server=sid,
+                     why=st.get("last_error") or "-")
         if st.get("unrecovered"):
             return _("the server {server} refused the platform's credential: {why}", server=sid,
                      why=st.get("last_error") or "-")

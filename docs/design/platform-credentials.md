@@ -717,11 +717,21 @@ change for today's jobs). Taken:
 - **New seam tests.** A credentials run through `llm.run` (ports loaded, the bridge attached between the rule check and
   the run, the bridge's status failing a model-green run). The backup's actual restic `--exclude`.
 
-**Not measured, waiting on the owner's first grant**:
-- a real Upwork authorization (route c, the owner's own developer app, until the shared client is published);
+**The first real run (11-15, 14:31, after the owner's grant).** It went through the bridge against `mcp.upwork.com`.
+Claude's MCP log for the run shows:
+- the bridge connected in 479 ms;
+- 18 tool calls of the job's tools all succeeded, in 0.3–1 s each.
+
+Claude then stopped the bridge with **SIGINT** at the end of the run. The bridge took the KeyboardInterrupt as a
+crash (`ended: crashed`), and `llm.py` failed the job.
+
+Fixed: SIGINT, like SIGTERM, between requests is the run's end (`terminated`). In the middle of a request it is
+`interrupted`, naming the request, and still fails the run. The bridge also tells the client of tools only: Claude had
+asked for `resources/list` because the upstream offered resources.
+
+**Still not measured:**
 - Upwork's token lifetimes and refresh rotation;
-- whether a second grant coexists with the owner's interactive one;
-- the job's six tools through the bridge against `mcp.upwork.com`.
+- whether the platform's grant coexists with the owner's interactive one.
 
 ## Moving the daily job
 
