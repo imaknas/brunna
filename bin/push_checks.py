@@ -167,6 +167,11 @@ class Objects:
 
     def tree_entries(self, oid: str) -> list[tuple[str, str, str]]:
         """(mode, name, oid) of a tree object, parsed from its raw form (names as bytes decoded with replacement)."""
+        return [(m, n, o) for m, n, o, _b in self.tree_entries_raw(oid)]
+
+    def tree_entries_raw(self, oid: str) -> list[tuple[str, str, str, int]]:
+        """(mode, name, oid, the name's length in bytes as stored): a name that isn't UTF-8 is counted as its bytes, not
+        as the replacement characters it is shown with."""
         raw, out, pos = self.read([oid])[oid], [], 0
         width = 20 if len(oid) == 40 else 32
         while pos < len(raw):
@@ -174,7 +179,7 @@ class Objects:
             nul = raw.index(b"\0", sp)
             mode = raw[pos:sp].decode()
             name = raw[sp + 1:nul].decode(errors="replace")
-            out.append((mode, name, raw[nul + 1:nul + 1 + width].hex()))
+            out.append((mode, name, raw[nul + 1:nul + 1 + width].hex(), nul - sp - 1))
             pos = nul + 1 + width
         return out
 
@@ -194,9 +199,9 @@ class Objects:
                           fix="project")
         self.read([*self.trees, *self.commits])   # every new tree and commit in one batch, bounded just above
         new_trees, entries, seen, first, path_bytes = set(self.trees), [], set(), {}, 0
-        stack = [(self.commit_header(c, "tree")[0], "", c, 0) for c in reversed(self.commits)]
+        stack = [(self.commit_header(c, "tree")[0], "", c, 0, 0) for c in reversed(self.commits)]
         while stack:
-            tree, prefix, commit, depth = stack.pop()
+            tree, prefix, commit, depth, prefix_bytes = stack.pop()
             if tree not in new_trees or tree in seen:
                 continue
             seen.add(tree)
@@ -204,11 +209,11 @@ class Objects:
                 raise Failure("size", _("the new trees nest deeper than {n} folders", n=MAX_DEPTH), fix="project")
             if deadline is not None and time.monotonic() > deadline:
                 raise Failure("size", _("the new trees took too long to read: push in parts"), fix="project")
-            for mode, name, oid in self.tree_entries(tree):
+            for mode, name, oid, name_bytes in self.tree_entries_raw(tree):
                 path = f"{prefix}{name}"
-                # the paths are as long as the project makes them, nested: counted in bytes as they are built (a
-                # character can be four; the third re-review's S-4)
-                n = len(path.encode("utf-8", errors="surrogatepass"))
+                # the paths are as long as the project makes them, nested: counted in the bytes the trees hold as they
+                # are built (a character can be four; a name that isn't UTF-8 counts as its bytes; reviews 3 S-4 and 4)
+                n = prefix_bytes + name_bytes
                 if n > MAX_PATH:
                     raise Failure("size", _("a new path is longer than {n} bytes", n=MAX_PATH), fix="project")
                 path_bytes += n
@@ -221,7 +226,7 @@ class Objects:
                                   fix="project")
                 first.setdefault(oid, commit)
                 if mode == "40000":
-                    stack.append((oid, path + "/", commit, depth + 1))
+                    stack.append((oid, path + "/", commit, depth + 1, n + 1))
         return entries, {p for m, p, _o in entries if m == "160000"}, first
 
     def commit_header(self, oid: str, key: str) -> list[str]:
@@ -433,10 +438,17 @@ def _load(project: str) -> list[dict]:
     return out
 
 
-def dotenv_values(text: str) -> dict[str, str]:
-    """KEY=value pairs as dotenv reads them: `export` and whitespace before a key, a single-quoted value literal, a
-    double-quoted one with its escapes (\\" \\\\ \\n) and across lines, an unquoted one up to whitespace before #."""
-    out, i, n = {}, 0, len(text)
+def dotenv_values(text: str) -> dict[str, list[str]]:
+    """KEY=[values] as dotenv reads them: `export` and whitespace before a key, a single-quoted value literal, a
+    double-quoted one with its escapes (\\" \\\\ \\n) and across lines, an unquoted one up to whitespace before #. A quote
+    that never closes makes that one statement bad: it is skipped and the next line read on (as python-dotenv does).
+    Every non-empty value of a repeated key is kept (what the platform has seen is never dropped anyway)."""
+    out: dict[str, list[str]] = {}
+    i, n = 0, len(text)
+
+    def keep(key: str, value: str) -> None:
+        if value and value not in out.setdefault(key, []):
+            out[key].append(value)
     line_rx = re.compile(r"[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_.-]*)[ \t]*=[ \t]*")
     while i < n:
         m = line_rx.match(text, i)
@@ -449,8 +461,11 @@ def dotenv_values(text: str) -> dict[str, str]:
         q = text[j:j + 1]
         if q == "'":
             close = text.find("'", j + 1)
-            close = n if close < 0 else close
-            out[key], i = text[j + 1:close], text.find("\n", close)
+            if close < 0:   # never closed: this statement only is bad
+                i = end + 1
+                continue
+            keep(key, text[j + 1:close])
+            i = text.find("\n", close)
         elif q == '"':
             k, val = j + 1, []
             while k < n and text[k] != '"':
@@ -460,9 +475,14 @@ def dotenv_values(text: str) -> dict[str, str]:
                 else:
                     val.append(text[k])
                     k += 1
-            out[key], i = "".join(val), text.find("\n", k)
+            if k >= n:   # never closed: this statement only is bad
+                i = end + 1
+                continue
+            keep(key, "".join(val))
+            i = text.find("\n", k)
         else:
-            out[key], i = re.split(r"[ \t]+#", text[j:end], maxsplit=1)[0].strip(), end
+            keep(key, re.split(r"[ \t]+#", text[j:end], maxsplit=1)[0].strip())
+            i = end
         i = n if i < 0 else i + 1
     return out
 
@@ -470,8 +490,7 @@ def dotenv_values(text: str) -> dict[str, str]:
 def _values(raw: bytes, env_key: str | None) -> list[str]:
     text = _nfc(raw.decode("utf-8", errors="replace"))
     if env_key:
-        v = dotenv_values(text).get(env_key)
-        return [v] if v and len(v) >= MIN_SECRET else []
+        return [v for v in dotenv_values(text).get(env_key, []) if len(v) >= MIN_SECRET]
     whole = text.strip()
     if whole and "\n" not in whole:
         return [whole] if len(whole) >= MIN_SECRET else []
@@ -489,8 +508,9 @@ def _tail(v: str, n: int) -> str:
 
 def _records(v: str, name: str) -> list[dict]:
     """What the store keeps of one value: itself up to MAX_VALUE bytes; a longer one as its hash (a whole file or a long
-    word) and its first and last MAX_VALUE bytes as plain values, so it is found inside a longer word too (KEY=…, ?k=…;
-    the third re-review's S-2)."""
+    word that is exactly the value) and its first and last MAX_VALUE bytes as plain values, found inside any text
+    (KEY=…, ?k=…; the third re-review's S-2). The limit: a long value is found whole, or by an unchanged first or last
+    MAX_VALUE bytes; a piece of its middle alone is not."""
     if len(v.encode("utf-8")) <= MAX_VALUE:
         return [{"v": v, "name": name}]
     return [{"h": _sha(v), "name": name}, {"v": _head(v, MAX_VALUE), "name": name},
@@ -581,7 +601,7 @@ class Declared:
 
     def __init__(self, project: str):
         recs = _load(project)
-        self.names = {_nfc(r["v"]): r.get("name", "?") for r in recs if r.get("v") and len(r["v"]) >= self.KEY}
+        self.names = {v: r.get("name", "?") for r in recs if r.get("v") and len(v := _nfc(r["v"])) >= self.KEY}
         self.hashes = {r["h"]: r.get("name", "?") for r in recs if r.get("h")}
         self.by_key: dict[str, list[str]] = {}
         for v in self.names:
@@ -606,7 +626,10 @@ class Declared:
             for i in range(0, max(len(t), 1), step):
                 if deadline is not None and time.monotonic() > deadline:
                     raise Failure("secrets", _("the scanner failed: it ran past its time limit"))
-                for m in self.rx.finditer(t, i, min(len(t), i + step + self.KEY - 1)):
+                for count, m in enumerate(self.rx.finditer(t, i, min(len(t), i + step + self.KEY - 1))):
+                    # a text that repeats a key matches at every position: the deadline is checked as it goes
+                    if count % 4096 == 4095 and deadline is not None and time.monotonic() > deadline:
+                        raise Failure("secrets", _("the scanner failed: it ran past its time limit"))
                     pos = m.start()
                     for v in self.by_key[m.group(1)]:
                         if t.startswith(v, pos):
