@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime
+import errno
 import fcntl
 import json
 import os
@@ -107,7 +108,11 @@ def ensure_folder(project: str, log=None) -> bool:
         nofollow.remove(r, project)
         if log:
             log(_("{project}: its push request folder was not a folder (a link or a file); made again", project=project))
-    os.mkdir(r / project, 0o700)
+    rootfd = os.open(r, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)   # the entry made by name from its root, no joined path
+    try:
+        os.mkdir(project, 0o700, dir_fd=rootfd)
+    finally:
+        os.close(rootfd)
     return st is None
 
 
@@ -259,20 +264,32 @@ class Taken:
 
 
 def _clear(r: pathlib.Path, rel: str) -> None:
-    """One entry gone: a folder (empty or not) removed, anything else unlinked; never followed."""
-    st = nofollow.lstat(r, rel)
-    if st is None:
-        return
-    if stat.S_ISDIR(st.st_mode):
-        import shutil
+    """One entry gone: a folder (empty or not) removed, anything else unlinked; never followed. No path is ever joined
+    under the request root (the third re-review's B-1: a joined path follows a link the session swaps in for its
+    folder): the project's folder is opened with O_NOFOLLOW from the root, and everything below goes by that handle
+    (shutil.rmtree with dir_fd, which is safe against links where the system allows it, and is never used otherwise)."""
+    import shutil
+    project, _sep, name = rel.partition("/")
+    if not name or "/" in name or name in (".", ".."):
+        raise OSError(errno.EINVAL, f"not one entry of a project's folder: {rel}")
+    rootfd = os.open(r, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    try:
+        fd = os.open(project, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=rootfd)
+    finally:
+        os.close(rootfd)
+    try:
         try:
-            nofollow.remove_dir(r, rel)
-        except OSError:
-            # not empty: it is in the project's own folder, reached without following a link (the folder itself was
-            # checked a moment ago); removed whole
-            shutil.rmtree(r / rel, ignore_errors=True)
-    else:
-        nofollow.remove(r, rel)
+            st = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if not stat.S_ISDIR(st.st_mode):
+            os.unlink(name, dir_fd=fd)
+        elif shutil.rmtree.avoids_symlink_attacks:
+            shutil.rmtree(name, dir_fd=fd)
+        else:
+            os.rmdir(name, dir_fd=fd)   # only an empty one where the system can't remove a tree safely
+    finally:
+        os.close(fd)
 
 
 def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[str]:
@@ -308,10 +325,12 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
     if len(reqs) > most:
         for _m, n in reqs[most:]:
             _clear(r, f"{project}/{n}")
-        if letter:   # at most one a day: its key is the day's
+        sent = broker(project) / "flood-letter"
+        today = datetime.date.today().isoformat()
+        if letter and _read_json(sent, "") != today:   # at most one a day, recorded here
             letter(project, _("{n} push request files in {project}'s folder were over what one day allows and have been "
-                              "deleted unread", n=len(reqs) - most, project=project),
-                   f"push-flood-{project}-{datetime.date.today():%Y%m%d}")
+                              "deleted unread", n=len(reqs) - most, project=project), letter_key(f"flood-{project}"))
+            _write_json(sent, today)
         reqs = reqs[:most]
     seen = Taken(project)
     done, misnamed = [], []
@@ -346,7 +365,7 @@ def take_in(project: str, letter=None, log=None, confirm_session=None) -> list[s
     if misnamed and letter:   # one letter a tick, however many
         letter(project, _("{n} {n:file|files} in {project}'s push request folder {n:was|were} not a push request and "
                           "{n:has|have} been deleted (e.g. {name})", n=len(misnamed), project=project, name=misnamed[0]),
-               f"push-malformed-{project}-{int(time.time())}")
+               letter_key(f"malformed-{project}"))
     return done
 
 
@@ -473,6 +492,12 @@ def start_worker(project: str) -> tuple[int, str | None]:
 
 # ---------- the end of a request: result, record, letter, to-dos ----------
 
+def letter_key(what: str) -> str:
+    """A letter's id the platform makes (its time and a random part): never one a project's file name could pick."""
+    import secrets
+    return f"push-{what}-{int(time.time())}-{secrets.token_hex(4)}"
+
+
 def letter_text(res: dict) -> str:
     branch = res.get("branch") or "?"
     if res["state"] == "pushed":
@@ -560,7 +585,8 @@ def finish(project: str, req: dict, res: dict, letter=None, log=None) -> None:
     log = log or (lambda m: None)
     res = {**res, "branch": res.get("branch") or req.get("branch")}
     try:
-        (letter or project_letter)(project, letter_text(res), f"push-{res['id']}")
+        # the request id and when it was taken in: a request id used again later still gets its letter
+        (letter or project_letter)(project, letter_text(res), f"push-{res['id']}-{req.get('seq') or int(time.time())}")
     except Exception as e:   # noqa: BLE001 (a letter that can't go out changes nothing else)
         log(_("{project}: the letter about {id} could not be sent: {e!r}", project=project, id=res["id"], e=e))
     try:
