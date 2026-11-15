@@ -354,17 +354,22 @@ class Doctor(unittest.TestCase):
     BARE_NO = ("safe.bareRepository isn't explicit in your git config: a folder shaped like a git dir moved into a "
                "sandboxed project is entered by your git, and no project's git fence holds without it")
     BARE_FIX = "git config --global safe.bareRepository explicit"
-    GIT_ON = ("{project}: no git dir can be written by its services, jobs and cap-run programs (enforce.git: platform); "
-              "its sessions aren't fenced yet, and git's own writes from those programs fail until the platform runs "
-              "git for them")
+    GIT_ON = ("{project}: enforce.git is on, but the platform's git broker isn't built yet: git's own writes from its "
+              "services and jobs, and the platform's git work done as the project, fail; its sessions aren't fenced "
+              "either")
+    GIT_ON_FIX = "switch enforce.git off until the broker is built (docs/design/git-broker.md)"
     GIT_NO_PRE = "{project}: enforce.git is on, but its git dirs aren't fenced without safe.bareRepository=explicit"
-    GIT_NO_OS = ("{project}: its git goes through the platform (enforce.git), which this system's sandbox can't fence: "
-                 "its services and jobs are not run")
+    GIT_NO_OS = ("{project}: its git goes through the platform (enforce.git), but its services and jobs are not run here "
+                 "({reason})")
+    GIT_EXEMPT = ("{project}: enforce.git is on, but it is in service_sandbox_exempt: its services and jobs run with no "
+                  "sandbox, so nothing is fenced")
 
-    def git_rows(self):
+    def git_rows(self, no_sandbox=None):
         texts = {T(self.BARE_OK), T(self.BARE_NO)}
-        tails = tuple(T(x, project="\0").split("\0")[1] for x in (self.GIT_ON, self.GIT_NO_PRE, self.GIT_NO_OS))
-        return [r for r in self.doctor() if r[1] in texts or r[1].endswith(tails)]
+        heads = tuple(T(x, project="\0", reason="\0").split("\0")[1]
+                      for x in (self.GIT_ON, self.GIT_NO_PRE, self.GIT_NO_OS, self.GIT_EXEMPT))
+        return [r for r in self.doctor(no_sandbox) if r[1] in texts
+                or r[1].startswith(tuple("boxed" + h for h in heads))]
 
     def test_no_sandboxed_project_no_git_rows(self):
         self.projects = {"open": {"name": "open"}}
@@ -376,10 +381,26 @@ class Doctor(unittest.TestCase):
         self.git_global = {"safe.bareRepository": "all"}
         self.assertEqual(self.git_rows(), [("warn", T(self.BARE_NO), self.BARE_FIX)])
 
-    def test_a_switched_on_project_is_never_said_fenced_whole(self):
+    def test_a_switched_on_project_is_red_until_the_broker_exists(self):
         self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True, "git": "platform"}}}
         self.guarantees = [*self.guarantees, "git-dirs-fenced"]
-        self.assertEqual(self.git_rows(), [("ok", T(self.BARE_OK), ""), ("warn", T(self.GIT_ON, project="boxed"), "")])
+        self.assertEqual(self.git_rows(), [("ok", T(self.BARE_OK), ""),
+                                           ("bad", T(self.GIT_ON, project="boxed"), T(self.GIT_ON_FIX))])
+
+    def test_an_exempt_switched_on_project_is_said_unfenced(self):
+        self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True, "git": "platform"}}}
+        self.guarantees = [*self.guarantees, "git-dirs-fenced"]
+        self.cfg["service_sandbox_exempt"] = ["boxed"]
+        [_ok, (level, what, fix)] = self.git_rows()
+        self.assertEqual((level, what), ("bad", T(self.GIT_EXEMPT, project="boxed")))
+        self.assertTrue(fix)
+
+    def test_the_isolation_row_names_the_git_fence_only_once_a_project_is_switched_on(self):
+        self.guarantees = [*self.guarantees, "git-dirs-fenced"]
+        self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True}}}
+        self.assertNotIn("git-dirs-fenced", self.isolation_row(self.doctor())[1])
+        self.projects["boxed"]["enforce"]["git"] = "platform"
+        self.assertIn("git-dirs-fenced", self.isolation_row(self.doctor())[1])
 
     def test_without_the_precondition_a_switched_on_project_isnt_fenced(self):
         self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True, "git": "platform"}}}
@@ -391,8 +412,15 @@ class Doctor(unittest.TestCase):
     def test_a_system_that_cant_fence_says_its_services_arent_run(self):
         self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True, "git": "platform"}}}
         [_ok, (level, what, fix)] = self.git_rows()
-        self.assertEqual((level, what), ("bad", T(self.GIT_NO_OS, project="boxed")))
+        reason = "its policy needs git-dirs-fenced, which the seatbelt adapter can't give on this system"   # unmet()
+        self.assertEqual((level, what), ("bad", T(self.GIT_NO_OS, project="boxed", reason=reason)))
         self.assertTrue(fix)
+
+    def test_a_system_that_cant_sandbox_at_all_says_its_own_reason(self):
+        self.projects = {"boxed": {"name": "boxed", "enforce": {"sandbox": True, "git": "platform"}}}
+        self.guarantees = []
+        rows = [r for r in self.git_rows(no_sandbox="no adapter here") if r[0] == "bad"]
+        self.assertEqual(rows[0][1], T(self.GIT_NO_OS, project="boxed", reason="no adapter here"))
 
     LEFT = "platform state still in .state after its move to {shared}: {paths}"
 

@@ -381,6 +381,10 @@ def validate_enforce(doc: dict) -> list[str]:
         return [_("enforce.git can only be platform (or left out)")]
     if enf.get("git") and not enf.get("sandbox"):
         return [_("enforce.git needs enforce.sandbox: true")]
+    # an exempt project's services and jobs get no sandbox at all, so nothing would render the fence
+    if enf.get("git") and doc.get("name") in (hubconf.get("service_sandbox_exempt", []) or []):
+        return [_("enforce.git can't be on for a project in service_sandbox_exempt: its services and jobs run with no "
+                  "sandbox")]
     work = enf.get("work", False)
     if not isinstance(work, bool):
         return [_("enforce.work must be true or false")]

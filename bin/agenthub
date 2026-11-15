@@ -1520,12 +1520,22 @@ def global_git_setting(key: str) -> str | None:
     return (r.stdout.strip() or None) if r.returncode == 0 else None
 
 
+def shown_guarantees() -> list[str]:
+    """This machine's adapter's guarantees as doctor names them: the git fence only once some project is switched on
+    (it guarantees nothing for a project that isn't)."""
+    import isolation
+    import policy
+    on = any(policy.git_platform(d) for d in hubconf.projects().values())
+    return [g for g in isolation.guarantees() if on or g != "git-dirs-fenced"]
+
+
 def doctor_git_platform(add) -> None:
     """Git through the platform (docs/design/git-broker.md): the precondition, safe.bareRepository=explicit in the
     owner's global git config (r2 B2: a folder shaped like a git dir moved into a project is otherwise entered by the
     owner's git, fence or not), and per project switched on (enforce.git: platform) what is fenced so far: its services,
     jobs and cap-run programs (the Seatbelt rendering, step 1). Its sessions aren't (each runtime's rendering is step 4),
-    and nothing writes its git for it yet (the broker, step 2), so it is never said to be fenced whole."""
+    and nothing writes its git for it yet (the broker, step 2), so a switched-on project is red until then, and never
+    said to be fenced whole."""
     import isolation
     import policy
     on = [n for n, d in sorted(hubconf.projects().items()) if policy.git_platform(d)]
@@ -1539,18 +1549,25 @@ def doctor_git_platform(add) -> None:
             _("safe.bareRepository isn't explicit in your git config: a folder shaped like a git dir moved into a "
               "sandboxed project is entered by your git, and no project's git fence holds without it"), fix)
     fenced = "git-dirs-fenced" in isolation.guarantees()
+    exempt = hubconf.get("service_sandbox_exempt", []) or []
     for project in on:
-        if not fenced:
-            add("bad", _("{project}: its git goes through the platform (enforce.git), which this system's sandbox can't "
-                         "fence: its services and jobs are not run", project=project),
+        if project in exempt:   # no sandbox at all for its services and jobs (registry refuses the pair too)
+            add("bad", _("{project}: enforce.git is on, but it is in service_sandbox_exempt: its services and jobs run "
+                         "with no sandbox, so nothing is fenced", project=project),
+                _("take it out of service_sandbox_exempt, or switch enforce.git off"))
+        elif not fenced:
+            add("bad", _("{project}: its git goes through the platform (enforce.git), but its services and jobs are not "
+                         "run here ({reason})", project=project,
+                         reason=isolation.can_sandbox() or isolation.unmet({"git_fence": True})),
                 _("docs/design/git-broker.md, \"Linux\""))
         elif not held:
             add("bad", _("{project}: enforce.git is on, but its git dirs aren't fenced without safe.bareRepository=explicit",
                          project=project), fix)
-        else:
-            add("warn", _("{project}: no git dir can be written by its services, jobs and cap-run programs "
-                          "(enforce.git: platform); its sessions aren't fenced yet, and git's own writes from those "
-                          "programs fail until the platform runs git for them", project=project))
+        else:   # until the broker (step 2) exists, switching on only breaks the project's git writes
+            add("bad", _("{project}: enforce.git is on, but the platform's git broker isn't built yet: git's own writes "
+                         "from its services and jobs, and the platform's git work done as the project, fail; its "
+                         "sessions aren't fenced either", project=project),
+                _("switch enforce.git off until the broker is built (docs/design/git-broker.md)"))
 
 
 def doctor_checkout_race(add, why_no_sandbox, installed) -> None:
@@ -1783,7 +1800,7 @@ def cmd_doctor(argv: list[str]) -> int:
     why = isolation.can_sandbox()
     held = [n for n, d in hubconf.projects().items() if isolation.sandboxed(d)]
     if not why:
-        add("ok", _("sandboxed projects' own services and jobs: run isolated ({adapter})", adapter=f"{isolation.adapter()[0]}: {', '.join(isolation.guarantees())}"))
+        add("ok", _("sandboxed projects' own services and jobs: run isolated ({adapter})", adapter=f"{isolation.adapter()[0]}: {', '.join(shown_guarantees())}"))
     else:
         add("bad" if held else "warn",
             _("sandboxed projects' own services and jobs: off, they are not run ({reason})", reason=why)

@@ -18,6 +18,7 @@
  "enforce can only be {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform}}": "enforce 只能是 {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform}}",
  "enforce.git can only be platform (or left out)": "enforce.git 只能是 platform(或不寫)",
  "enforce.git needs enforce.sandbox: true": "enforce.git 要搭配 enforce.sandbox: true",
+ "enforce.git can't be on for a project in service_sandbox_exempt: its services and jobs run with no sandbox": "service_sandbox_exempt 裡的專案不能開 enforce.git:它的服務和工作完全沒有沙盒",
  "capability": "能力",
  "enforce.work must be true or false": "enforce.work 要是 true 或 false",
  "enforce.work needs enforce.sandbox: true": "enforce.work 要搭配 enforce.sandbox: true",

@@ -319,8 +319,11 @@
  "kept llm.providers {providers}: a pin in llm.points names them, and they now serve only those points": "保留 llm.providers {providers}:llm.points 裡有指定用到它們,現在只接那些點",
  "safe.bareRepository=explicit is set in your git config (a precondition of the git fence: a folder shaped like a git dir moved into a project isn't entered by your git)": "你的 git 設定有 safe.bareRepository=explicit(git 圍欄的前提:搬進專案、長得像 git dir 的資料夾,你的 git 不會進去)",
  "safe.bareRepository isn't explicit in your git config: a folder shaped like a git dir moved into a sandboxed project is entered by your git, and no project's git fence holds without it": "你的 git 設定裡 safe.bareRepository 不是 explicit:搬進沙盒化專案、長得像 git dir 的資料夾,你的 git 會進去;少了它,哪個專案的 git 圍欄都不成立",
- "{project}: its git goes through the platform (enforce.git), which this system's sandbox can't fence: its services and jobs are not run": "{project}:它的 git 走平台(enforce.git),這個系統的沙盒圍不起來:它的服務和工作不會執行",
  "docs/design/git-broker.md, \"Linux\"": "docs/design/git-broker.md 的「Linux」",
  "{project}: enforce.git is on, but its git dirs aren't fenced without safe.bareRepository=explicit": "{project}:enforce.git 開著,但少了 safe.bareRepository=explicit,它的 git dir 沒有圍起來",
- "{project}: no git dir can be written by its services, jobs and cap-run programs (enforce.git: platform); its sessions aren't fenced yet, and git's own writes from those programs fail until the platform runs git for them": "{project}:它的服務、工作和 cap-run 程式寫不了任何 git dir(enforce.git: platform);它的 session 還沒圍起來,而且在平台替它們跑 git 之前,這些程式自己用 git 寫入都會失敗"
+ "{project}: enforce.git is on, but it is in service_sandbox_exempt: its services and jobs run with no sandbox, so nothing is fenced": "{project}:enforce.git 開著,但它在 service_sandbox_exempt 裡:它的服務和工作完全沒有沙盒,什麼都沒圍起來",
+ "take it out of service_sandbox_exempt, or switch enforce.git off": "把它從 service_sandbox_exempt 拿掉,或關掉 enforce.git",
+ "{project}: its git goes through the platform (enforce.git), but its services and jobs are not run here ({reason})": "{project}:它的 git 走平台(enforce.git),但它的服務和工作在這裡不會執行({reason})",
+ "{project}: enforce.git is on, but the platform's git broker isn't built yet: git's own writes from its services and jobs, and the platform's git work done as the project, fail; its sessions aren't fenced either": "{project}:enforce.git 開著,但平台的 git broker 還沒做好:它的服務和工作自己用 git 寫入,以及平台以專案身分做的 git 工作,都會失敗;它的 session 也還沒圍起來",
+ "switch enforce.git off until the broker is built (docs/design/git-broker.md)": "broker 做好之前先關掉 enforce.git(docs/design/git-broker.md)"
 }

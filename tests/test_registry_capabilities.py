@@ -75,6 +75,14 @@ class Capabilities(unittest.TestCase):
         for bad in ("direct", True, None, ""):
             self.assertTrue(self.errs(doc(enforce={"sandbox": True, "git": bad})), bad)
 
+    def test_git_through_the_platform_is_refused_for_an_exempt_project(self):
+        """its services and jobs get no sandbox at all, so nothing would render the fence (step 1's second review)"""
+        on = doc(enforce={"sandbox": True, "git": "platform"})
+        with mock.patch.object(registry.hubconf, "get",
+                               lambda k, d=None: [on["name"]] if k == "service_sandbox_exempt" else d):
+            self.assertTrue(self.errs(on))
+            self.assertEqual(self.errs(doc(enforce={"sandbox": True})), [])
+
     def test_catalog_needs_profile_file(self):
         mock.patch.stopall()
         with mock.patch.object(registry.hubconf, "get", return_value={"_comment": "x", "gpu": {}, "nofile": {}}):
