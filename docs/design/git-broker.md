@@ -1490,7 +1490,8 @@ says. **No project is switched on.**
 
 **The switch.** `enforce.git: platform` in the registry (`registry.validate_enforce`): the only value is `platform`, and
 it needs `enforce.sandbox: true`. It sits under `enforce`, which is in `PLATFORM_OWNED`, so a manifest.update that
-changes it is returned (tested). It is in both project schemas (a field added, the version kept).
+changes it is returned (tested). It is in both project schemas (a field added, the version kept). It is refused for
+a project in `service_sandbox_exempt`, whose services and jobs get no sandbox at all.
 
 **The port** (`policy.py`, neutral):
 - `git_platform(doc)` is the switch.
@@ -1508,11 +1509,11 @@ applies: services, command jobs, the test runner's wrap, the platform's git work
 - no `.git` entry, nor anything below one, anywhere, except under each repo dir. The repo dir is kept out of the deny
   with `require-not (subpath …)`, never allowed back: a later allow would also reopen the control-file denies
   (`protect_denies`, `root_denies`) below it;
-- no `HEAD` that isn't a folder, anywhere;
-- below each repo dir, no `.git` except uv's marker, matched exactly;
-- the repo dir itself, and each folder on the way to the marker's bucket, can't be removed or renamed
-  (`file-write-unlink`; the folders only as folders), nor made as a link. Moving the bucket out would carry the
-  marker with it.
+- no `HEAD` that isn't a folder, anywhere, and no folder named `HEAD` removed or renamed (the swap, below);
+- below each repo dir, no `.git` except uv's marker, matched exactly and only as a regular file;
+- the repo dir itself is never made from inside, nor removed or renamed; the platform makes it (the rebuild, step 2);
+- each folder on the way to the marker's bucket can't be removed or renamed (`file-write-unlink`, as a folder), nor
+  made as a link. Moving the bucket out would carry the marker with it.
 
 With the switch off, it adds nothing at all, not even a comment.
 
@@ -1523,8 +1524,22 @@ exception (the cold review of the build, 11-15; the test fails against that vers
 `.git` is resolved, and the rest is written as the policy names it. Such a link changes no rule, and a write through it
 is matched in the git dir where it lands, and refused (tested, with the link made outside the fence before the run).
 
-**What a missing repo dir does.** The sandbox may make it as a folder (as today's outbox does), not as a link. A link
-made there by anything else gains nothing (above).
+**The swap (the second cold review of the build, 11-15).** `renamex_np(RENAME_SWAP)` is checked with each end's
+existing type. So a fenced writer made a folder `HEAD/`, swapped it with a regular file, and had a `HEAD` file anywhere.
+Chained with the marker's exception (which had no type then), it built a git-dir shape and moved it onto
+`.git/brunna/cache/uv/sdists-v1/.git`. The owner's git, `safe.bareRepository=explicit` included, entered it from a
+folder below and ran its fsmonitor. Fixed by two rules, each of which breaks the chain alone:
+- no folder named `HEAD` is removed or renamed from inside (`file-write-unlink` with `vnode-type DIRECTORY`; a swap
+  is checked as that at both ends). **The cost:** a fenced writer can make a folder named `HEAD`, but can't remove or
+  rename it;
+- the marker's exception holds only for a regular file, so a folder or a link moved onto its name is refused.
+
+The chain is a test: it lands without the fence, git run outside enters it with the precondition set, and under the
+fence it is refused and leaves nothing.
+
+**A missing repo dir** can't be made from inside, as a folder or as a link, under either spelling (before, a fenced
+writer could make the unused spelling and then not remove it). A link made there by anything else gains nothing
+(above).
 
 **Linux.** Landlock doesn't declare the new guarantee. `isolation.NEEDS` / `unmet()` refuses a policy that carries the
 fence on an adapter without it: `sandboxed-run` exits 78 before anything runs, and `exec_service` raises. So a
@@ -1538,38 +1553,45 @@ made in the workspace.
 - the precondition, read with `git config --global --get safe.bareRepository` and never written:
   - `ok` when it is `explicit`;
   - otherwise `warn`, or `bad` once a project is switched on, with the one command that sets it;
-- per switched-on project:
-  - `bad` where the OS can't fence it (its services and jobs aren't run);
-  - `bad` without the precondition ("not fenced");
-  - otherwise a `warn`: its services, jobs and cap-run programs can't write a git dir, but its sessions aren't fenced
-    yet, and git's own writes from those programs fail until the platform runs git for them.
+- per switched-on project, always `bad` until the broker exists:
+  - in `service_sandbox_exempt`: no sandbox, nothing fenced;
+  - its services and jobs aren't run here, with the reason (the adapter can't fence, or this machine can't sandbox at
+    all);
+  - without the precondition: not fenced;
+  - otherwise: the broker isn't built, so git's own writes from its services and jobs, and the platform's git work
+    done as the project, fail; its sessions aren't fenced either. The fix is to switch it off.
 
-  A project is never said to be fenced whole.
+  A project is never said to be fenced whole. The "run isolated" row names `git-dirs-fenced` only once a project is
+  switched on.
 
-**Measured** (`tests/test_git_dir_fence.py`, under the real service profile with real git). Every refused probe also
-runs without the fence as its positive control, and lands there.
+**Measured** (`tests/test_git_dir_fence.py`, under the real service profile and the real cap-run profile, with real
+git). Every refused probe also runs without the fence as its positive control, and lands there. The platform folder's
+probes run under both spellings.
 
 Refused under the fence:
 - writing `.git/config`, `git config`, a hook, `info/attributes`;
 - a nested `.git` (also `.GIT`, `.Git`), a gitfile;
 - `git init` in the workspace and in the temp area; `git init --bare` in temp (by the `HEAD` rule);
 - a folder holding `.git` built in temp and moved in (refused where it is built);
-- `HEAD` as a file, folded (`head`), in temp, as a symlink, a hard link, a rename's destination, a copy;
+- `HEAD` as a file, folded (`head`), in temp, as a symlink, a hard link, a rename's destination, a copy, a swap with a
+  folder named `HEAD` (in the workspace and in temp);
 - `mv .git`;
 - hard links to `.git/config` from the workspace and from the platform folder;
 - a symlink in the platform folder, written through;
 - the platform folder renamed or removed; a `.git` below it;
 - a linked worktree's gitfile rewritten;
 - `git commit`;
-- uv's bucket or its cache moved out; a `.git` elsewhere in the cache; the marker hard-linked as a `.git`;
-- the platform folder's other spelling, or its `cache/`, made as a link.
+- uv's bucket, its `uv/` folder or its cache moved out; a `.git` elsewhere in the cache; the marker hard-linked as a
+  `.git`; the marker as a folder or a link; a folder moved onto the marker's name;
+- the platform folder (either spelling) made from inside, as a folder or a link; its `cache/`, `uv/` or bucket made as
+  a link.
 
 A run of all of them together left no `.git`, gitfile or `HEAD` file behind.
 
 Still working under the fence:
 - `git status` (no `index.lock` left), `log`, `diff`, and status and log in the linked worktree;
-- the outbox in the platform folder, and `mkdir -p` of it;
-- uv's marker;
+- the outbox in the platform folder, and `mkdir -p` of both spellings when they exist;
+- uv's marker, under both spellings;
 - a folder named `HEAD` with a file in it;
 - `.gitignore`, `.gitattributes`, `.github/`;
 - the test runner's export, with the index and the object folder in temp.
@@ -1583,8 +1605,8 @@ keeps a fenced writer from building one; it can't stop one that exists from bein
   `.git` that another project or the owner stages in the shared temp area can be moved in. That is the same exposure
   as that writer's own nested repos.
 
-**Covered by the rule text only:** the runtime folder's repo dir and the cap-run profile (the same rules, asserted in
-the profile's text). Real Seatbelt runs cover the workspace, under the service profile.
+**Covered by the rule text only:** the runtime folder's repo dir. Real Seatbelt runs cover the workspace, under both
+profiles.
 
 **Live check (11-15, this machine).** Each live project's renderings were compared before and after the change: Claude
 settings and env, and the Seatbelt service and cap-run profiles. All were byte-identical, and so was
@@ -1602,8 +1624,9 @@ unrelated drift.
   - `with-lock.sh`'s lock folder, and `merge-branch`'s lock, in the git dir;
   - the test runner's object writes into the repo.
 
-  Steps 2, 3 and 5 move these; until then nobody should switch a project on. The registry doesn't refuse the switch.
-  Refusing it while a session is open, and the rebuild, are step 2's.
+  Steps 2, 3 and 5 move these; until then nobody should switch a project on, and doctor shows a switched-on project
+  red. The registry doesn't refuse the switch (except for an exempt project). Refusing it while a session is open,
+  and the rebuild (which also makes the platform folder), are step 2's.
 - **For the broker (step 2):**
   - `policy.git_platform` is the test for "switched on";
   - `git_fence(doc, roots)["repo_dirs"]` names the folders that stay the project's;
