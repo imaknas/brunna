@@ -72,9 +72,17 @@ enforce:
     emails: [1234+me@users.noreply.github.com]   # what a pushed commit's author and committer may be
 ```
 
-`brunna push setup garden-app` sets it up: it makes the platform's push key for that repo (a write deploy key, added
-with your `gh`; GitHub only), asks what may be pushed and with which email, writes the field, and sets the repo's
-commit identity to that email. On a public remote every branch it may push is published as soon as it lands, and
+`brunna push setup garden-app` sets it up: it asks what may be pushed, makes the platform's push key for that repo (a
+write deploy key, added with your `gh`; GitHub only), asks with which email, writes the field, and sets the repo's
+commit identity to that email. Before your `gh` login is used it says so: which gh account, on which repo, that the
+key has write access to that repo only, that the platform keeps the private key in its secrets folder (not in the
+cloud backup) and uses it only to push the branches the project's sessions ask for, after the checks below, and how to
+undo it (`brunna push setup garden-app --revoke`, which deletes it at GitHub and here). Then it asks `[y/N]`, and only
+`y` or `yes` goes on. Giving the branches yourself (`--branches others|all`) is your yes: the same text is printed and
+nothing is asked. `--yes` alone, or a run with nobody at the terminal, never makes a key: it leaves the push at `none`
+and gives you a to-do to run setup yourself. Onboarding works the same way: without `--push` a sandboxed project starts
+at `none` with that to-do, whatever its remote's visibility; `brunna connect` asks, and an `others` or `all` typed
+there is followed by the same text and `[y/N]`. On a public remote every branch it may push is published as soon as it lands, and
 `others` keeps only the default branch's CI and deploys yours. Before anything leaves, the platform checks every new
 commit and file, not only what a diff shows: fast-forward only (no force, tags or deletes), the commit asked for and
 nothing newer, no submodules, Git LFS or signed commits, size limits, no change to any forge's CI files unless

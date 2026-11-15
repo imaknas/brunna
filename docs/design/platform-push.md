@@ -319,11 +319,9 @@ Answers go into the registry as owner-only fields (section 5):
 
 **Non-interactive defaults** (flags absent, or `--yes`):
 - sandbox: **off**, as today. A script can't judge the criterion, and nothing changes for anyone who doesn't ask;
-- push for a sandboxed project, by the remote's visibility as check 8's anonymous probe sees it (S7; never by
-  `--public`, which says only how a repo was created):
-  - private: **`all`**;
-  - public, or can't tell: **`none`**, plus a one-time owner to-do, "decide what the platform may push for <project>:
-    `brunna push setup <project>`" (B3; open question 2). Deciding once at onboarding isn't a push;
+- push for a sandboxed project: **`none`**, plus a one-time owner to-do, "decide what the platform may push for
+  <project>: `brunna push setup <project>`", for every visibility (11-16, below: anything else would add a deploy key
+  with the owner's `gh` unasked). Until 11-16 a private remote, as check 8's anonymous probe saw it, got `all`;
 - no remote: `none` (the registry refuses anything else);
 - emails: check 6.
 
@@ -984,6 +982,7 @@ The owner took all three recommendations:
    once for each existing project with a remote, before any project gets `branches: all`. No fallback to the owner's
    own credential.
 2. **Onboarding with nobody answering, public or unknown remote:** `none` plus a one-time `brunna push setup` to-do.
+   (11-16: for a private remote too; see "11-16: the owner is asked before their GitHub login is used".)
 3. **Who may request:** only the project's sessions, through the session request folder.
 
 ### Built: the grant and onboarding's questions (11-16)
@@ -1022,9 +1021,40 @@ The owner took all three recommendations:
   idea loses its nested and inline comments.
 - **Onboarding:** `onboard-project.sh` and `connect.py` take `--sandbox`/`--no-sandbox`, `--push`, `--push-email`, and
   connect asks both questions. `connect_project` may ask for `sandbox` and always passes `--push none`.
-  `upgrade-idea.py --push`; the lease-runner passes `none`. With nobody answering, the anonymous probe decides
-  (private: `all`; public or unknown: `none` plus the one-time to-do). The to-do is also raised when `none` came from
-  an agent (connect_project, the lease). A grant that fails at onboarding leaves `none`, and the to-do says why.
+  `upgrade-idea.py --push`; the lease-runner passes `none`. With nobody answering, the anonymous probe decided
+  (private: `all`; public or unknown: `none` plus the one-time to-do; replaced on 11-16, the next section). The to-do
+  is also raised when `none` came from an agent (connect_project, the lease). A grant that fails at onboarding leaves
+  `none`, and the to-do says why.
 - **Not built here:** the design's sshd end-to-end test; the anonymous probe also sits in `git_push_grant.visibility`,
   so check 8 should share it rather than make a second one. `rename-project.sh` doesn't move a grant's folder: after a
   rename, the next probe raises the setup to-do.
+
+### 11-16: the owner is asked before their GitHub login is used
+
+**The owner's decision (11-16):** brunna never uses the owner's GitHub authority without saying so and getting an
+explicit yes. As built on 11-16, `brunna push setup` and every onboarding path (`onboard-project.sh`, `brunna connect`,
+`git_push_grant.py onboard`, `upgrade-idea.py`) added a write deploy key with the owner's `gh` login without saying so
+first, and a non-interactive onboarding of a private remote defaulted to `branches: all` and added the key silently.
+
+What changed (`bin/git_push_grant.py` `consent()`):
+- **Before `gh repo deploy-key add`, and before a key is replaced or an old repo's key deleted,** the platform prints
+  what it will do: it will use your gh login (the account named, from `gh api user --hostname github.com --jq .login`)
+  on `github.com/<owner>/<repo>` to add a deploy key with WRITE access that can write only that repo; the platform
+  keeps the private key in its secrets folder, not in the cloud backup; it is used only to push the branches of this
+  project that its sessions ask for, after the automatic checks; undo with `brunna push setup <project> --revoke`
+  (deletes it at GitHub and here). Then `[y/N]`; only `y` or `yes` goes on, and an empty answer or no input is a no.
+  Nothing is written and no other gh call is made before the yes. If gh isn't signed in, setup stops there.
+- **Explicit consent only.** The key is made after an interactive yes, or when the caller gave the branches itself
+  (`--branches others|all`; onboarding `--push others|all`): giving them is the yes, and the text is still printed.
+  `--yes` alone never makes a key, and neither does a run nobody answers (no terminal); `--grant-only` needs the
+  interactive yes. Keeping a grant that still works uses no gh and needs no yes.
+- **Nobody answering is `none` plus the one-time setup to-do, for every visibility.** This replaces the 11-15 default
+  "private remote, nobody answering: `all`". The registry is left as it is (a rerun keeps a policy chosen before, but
+  a missing grant isn't made without a yes). The to-do's text carries the disclosure in short (the repo, write access
+  to that repo only, your gh login, asked first, where the key stays, what it is used for, the `--revoke` command); it
+  makes no gh call, since `check-secrets` raises it too.
+- **A typed answer still asks.** `brunna connect`'s push question says that `others`/`all` go on to ask for a write
+  deploy key with your gh login; an answer typed there reaches onboarding as `--push <x> --push-confirm` (→
+  `git_push_grant.py onboard --confirm`), so the disclosure is followed by `[y/N]`. A no leaves `none` and the to-do.
+- **`--revoke`** is itself the yes: it prints which gh account it uses and on which repos before it deletes.
+- Agent-driven onboarding (`connect_project`, the lease-runner's upgrade) stays `none`.

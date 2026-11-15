@@ -69,11 +69,19 @@ for them:
    that builds from branches (gh-pages, a hosting 'production branch', preview deploys) runs it. `others` keeps the
    default branch's CI and deploys yours, not the content private."
 
-   Pass the answer as `--push none|others|all`. If the user leaves it open, pass nothing: the remote's visibility
-   decides (private: `all`; public or can't tell: `none`, and they get a to-do to decide later with
-   `brunna push setup <name>`). Anything but `none` adds a write deploy key to the GitHub repo, held by the platform
-   (other forges get no platform push). `--push-email <address>` (repeatable) names the commit emails those pushes may
-   carry; without it the platform proposes them (on a public remote GitHub's noreply address only).
+   `others` and `all` use the user's own GitHub login: before passing either, tell them in the conversation that it
+   will use their `gh` login on github.com/<owner>/<repo> to add a deploy key with WRITE access that can write only
+   that repo; the platform keeps the private key in its secrets folder (not in the cloud backup) and uses it only to
+   push the branches this project's sessions ask for, after the automatic checks; undo with
+   `brunna push setup <name> --revoke` (deletes it at GitHub and here). Pass `--push others|all` only after they say
+   yes to that: the flag is taken as their yes (the same text is printed again, and nothing more is asked). Other
+   forges get no platform push.
+
+   `none`, or a question the user leaves open: pass `--push none`, or nothing. Nothing gives `none` too, for every
+   visibility (11-16: no longer `all` for a private remote), plus a to-do to decide later with
+   `brunna push setup <name>`, which says what it does and asks before using their gh login. `--push-email
+   <address>` (repeatable) names the commit emails those pushes may carry; without it the platform proposes them (on
+   a public remote GitHub's noreply address only).
 
 ## Run
 

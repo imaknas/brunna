@@ -35,6 +35,7 @@ that day; they are listed at the end.
 | 11-13 | Every platform run of Claude uses the headless token; the subscription login is only for registry jobs with `connectors: true`, and the hourly login check looks at it only while one exists | `known-issues.md` "Three credentials", `bin/check-claude-login.py` header |
 | 11-15 | A letter doesn't wait on a session busy with other work: an idle session is picked first, and a busy one that hasn't acked holds it 10 minutes, then the next is asked | `mailbox-session-first.md` "11-15: a busy session" |
 | 11-15 | A project's model call can be served by a local model the owner pins it to (`llm.points.<project>/<point>`); the project names only a tier, and a provider configured without `llm.use` moves no other point | `llm-providers.md` "Projects' calls on a provider" |
+| 11-16 | brunna never uses the owner's GitHub authority without saying so and an explicit yes; nobody answering is `none` plus a to-do | `platform-push.md` "11-16: the owner is asked before their GitHub login is used" |
 
 **Order of the coding-agent adapters** (decided across 10-29, 11-01 and 11-08; no other doc has it whole):
 
@@ -142,8 +143,13 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      `onboard`, `upgrade-idea` and `connect_project` ask or pass `--sandbox` and `--push`. **Built (11-16), the push
      core:** `enforce.git_push` and its validation, the session request folder rendered only into session settings,
      `brunna push` in its forms, take-in and the detached worker, every check, results, letters and to-dos,
-     `merge-branch`'s request, doctor rows, docs (r2 in `platform-push.md`, "As built"). Left: the status-page rows,
-     and switching the five projects to `all` once their keys are set up.
+     `merge-branch`'s request, doctor rows, docs (r2 in `platform-push.md`, "As built"). **Changed (11-16, the
+     owner's decision): the owner is asked before their GitHub login is used.** Setup and every onboarding path print
+     what the deploy key does (the gh account, the repo, write access to it only, where the key stays, how to undo)
+     and add it only after an interactive yes or branches given explicitly (`--branches`/`--push others|all`);
+     `--yes` alone or nobody answering gives `none` plus the setup to-do for every visibility, replacing the 11-15
+     "private: `all`" (`platform-push.md`, "11-16: the owner is asked …"). Left: the status-page rows, and switching
+     the five projects to `all` once their keys are set up.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 
