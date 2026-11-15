@@ -8,6 +8,8 @@ file next to it and renames it into place, replacing a link instead of writing t
 workspace) is opened normally: its parent is not the project's to change. Standard library only.
 
   read(base, rel, cap) → bytes | None        None: the file or a folder on the way is missing
+                                             single: refused when the file has another hard link
+  lstat(base, rel) → stat_result | None      the entry itself, not followed
   replace(base, rel, data)                   creates missing folders
   append(base, rel, data)                    adds to the end; creates the file and only the folder it is in
   entries(base, rel) → [name] | None         the names in a folder (None: missing); what each is isn't looked at
@@ -56,7 +58,7 @@ def _folder(base, parts, create: bool) -> int:
     return fd
 
 
-def read(base, rel, cap: int = 1 << 20) -> bytes | None:
+def read(base, rel, cap: int = 1 << 20, single: bool = False) -> bytes | None:
     parts = _parts(rel)
     try:
         d = _folder(base, parts[:-1], create=False)
@@ -68,8 +70,11 @@ def read(base, rel, cap: int = 1 << 20) -> bytes | None:
         except FileNotFoundError:
             return None
         try:
-            if not stat.S_ISREG(os.fstat(f).st_mode):
+            st = os.fstat(f)
+            if not stat.S_ISREG(st.st_mode):
                 raise OSError(errno.EINVAL, f"{rel} is not a regular file")
+            if single and st.st_nlink != 1:
+                raise OSError(errno.EMLINK, f"{rel} has {st.st_nlink} hard links")
             chunks, n = [], 0
             while chunk := os.read(f, 1 << 16):
                 n += len(chunk)
@@ -143,6 +148,21 @@ def entries(base, rel) -> list[str] | None:
         return None
     try:
         return os.listdir(d)
+    finally:
+        os.close(d)
+
+
+def lstat(base, rel) -> os.stat_result | None:
+    """The entry itself (a link is not followed); None: it or a folder on the way is missing."""
+    parts = _parts(rel)
+    try:
+        d = _folder(base, parts[:-1], create=False)
+    except FileNotFoundError:
+        return None
+    try:
+        return os.stat(parts[-1], dir_fd=d, follow_symlinks=False)
+    except FileNotFoundError:
+        return None
     finally:
         os.close(d)
 
