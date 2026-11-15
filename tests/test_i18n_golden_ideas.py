@@ -204,6 +204,7 @@ class Golden(unittest.TestCase):
         tool(hub / "bin" / "rename-project.sh", UP_RENAME)
         tool(hub / "bin" / "gen-index-roster.sh", "#!/bin/bash\n")
         tool(hub / "bin" / "commit-hub-files.sh", "#!/bin/bash\n")
+        (hub / "bin" / "hubbus").write_text("import sys\nprint('hubbus', *sys.argv[1:6])\n")   # the letter to the project (run as python hubbus)
         fakebin = t / "fakebin"
         fakebin.mkdir()
         tool(fakebin / "gh", UP_GH)
