@@ -2453,3 +2453,27 @@ decides otherwise, the slice text that changes:
     (r1 S12).
 22. **P1's denied names, two additions:** `shallow` (S1 showed it changes what the owner's git sees) and `info/grafts`
     (git reads it as history, and only a hand writes it). Neither is in the list at lines 330–332.
+
+### The owner's decisions on the open points (11-15)
+
+The owner took every recommendation (the slices are already written to them):
+- **Point 1:** network git with the owner's credentials runs in a broker-owned bare repo, bundles in and out; never as the
+  owner in the project's `.git`.
+- **Point 2:** P1 has no network. Fetches from other https URLs run in the separate fetch profile, which writes only a
+  staging repo; P1 fetches its bundle.
+- **Point 4:** the commit-time refusal of absolute or escaping link targets is dropped with mitigation 2.
+- **Point 6:** an operation that would empty or rename a tracked folder named `HEAD` is refused before anything moves;
+  the broker's own removal of an emptied one stays ready to offer if such a folder turns up.
+- **Point 7:** two steps: the owner sets `enforce.git: platform`, then runs `brunna git-broker rebuild`; the broker
+  answers "not rebuilt" in between; `restore` refuses while the switch is on.
+- **Point 9:** the rebuild refuses while the project has worktrees the platform doesn't know, and lists them;
+  `--accept-detached <path>` leaves one detached for the owner to re-attach.
+- **Point 12:** the broker service goes in the sandbox module beside cap-runner, declared at step 6; in step 2 only
+  tests start it.
+- **Point 16:** the owner-only key for allowing `.github/**` is `enforce.git_ci: true`; the `.github/` check compares the
+  pushed commit with the default branch's current tip; "own non-default branches" is any branch on `paths.origin` but
+  the default.
+- **Point 19:** cap-run jobs don't commit in a switched-on project; cap-runner is unchanged and git writes there fail
+  loudly.
+- **Point 21:** the `full` tier runs a few race rounds per operation; the 40-round run is opt-in, and one recorded
+  40-round run per worktree-writing operation is part of slice b's done criterion.
