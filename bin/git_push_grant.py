@@ -327,7 +327,7 @@ def status(project: str) -> dict:
 
 def ls_remote(url: str, env: dict[str, str]) -> subprocess.CompletedProcess:
     """git ls-remote through the grant (tests replace it, or put a stand-in ssh on PATH)."""
-    base = {k: os.environ[k] for k in ("HOME", "PATH", "USER", "LOGNAME", "TMPDIR", "LANG") if k in os.environ}
+    base = {k: os.environ[k] for k in ("HOME", "PATH", "USER", "LOGNAME", "LANG") if k in os.environ}
     with tempfile.TemporaryDirectory(prefix="push-grant-", dir=hubconf.private_tmp()) as cwd:
         try:
             return subprocess.run(["git", "ls-remote", "--heads", "--", url], cwd=cwd, env={**base, **env, "LC_ALL": "C"},
@@ -412,8 +412,8 @@ def private_dirs(project: str) -> pathlib.Path:
 
 def make_key(project: str) -> pathlib.Path:
     """A new ed25519 key in a fresh folder of its own (key, key.pub at 600); the grant folder isn't touched yet."""
-    d = private_dirs(project)
-    new = pathlib.Path(tempfile.mkdtemp(prefix=".new-", dir=d))
+    private_dirs(project)
+    new = pathlib.Path(tempfile.mkdtemp(prefix="push-key-", dir=hubconf.private_tmp()))   # beside it, on one disk
     try:
         r = subprocess.run(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", title(project), "-f", str(new / "key")],
                            capture_output=True, text=True, timeout=TIMEOUT_S, stdin=subprocess.DEVNULL)
