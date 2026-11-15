@@ -7,7 +7,7 @@ brunna:在你自己的電腦上，由 AI agent 經營的很多個專案。
   brunna init              在這台機器上裝好 brunna(或交給你的 agent:README「Set up through your agent」)
   brunna glance            有什麼要你處理、平台是否正常
   brunna owner list        等你決定的事和你的待辦(有助理時會送到助理那裡)
-  brunna push <專案>       把沙盒專案的成果推到它的遠端;先列出 commit 再問你
+  brunna push --owner <專案>   自己發布專案的成果(它的 session 是請平台推)
   brunna doctor            覺得哪裡壞了的時候
   brunna upgrade           升到最新版
 

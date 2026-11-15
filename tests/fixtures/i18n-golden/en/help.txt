@@ -7,7 +7,7 @@ Most of the time you only talk to your agents; they run the rest of brunna for y
   brunna init              set brunna up on this machine (or let your agent do it: README, "Set up through your agent")
   brunna glance            what needs you, and whether the platform is healthy
   brunna owner list        the decisions and to-dos waiting for you (with an assistant, they reach you there)
-  brunna push <project>    publish a sandboxed project's work to its remote; shows the commits and asks first
+  brunna push --owner <project>   publish a project's work yourself (its sessions ask the platform to push)
   brunna doctor            when something seems broken
   brunna upgrade           move to the newest release
 
