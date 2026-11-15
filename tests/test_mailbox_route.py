@@ -232,7 +232,8 @@ class Harness(tmt.Base):
 
 class BusyHolder(Harness):
     """A letter and a session busy with other work (11-15: a request sat 45 minutes with a session whose post-tool hook told it
-    while it ran long background agents, until the owner noticed)."""
+    while it ran long background agents, until the owner noticed). A busy holder with no ack keeps it BUSY_HOLD_MIN, then the
+    next candidate is asked; an idle candidate comes before a busy one."""
 
     def age_all(self, mid, minutes):
         """The letter, its tellings and its routes, all this long ago."""
@@ -246,25 +247,152 @@ class BusyHolder(Harness):
         self.assertIn("[m1]", self.hook("post-tool", "S1"))
         self.assertEqual(self.by("m1"), [("S1", "hook")])
 
-    def test_today_a_busy_holder_told_by_its_hook_keeps_it_for_the_window(self):
+    # --- the hold ---
+    def test_a_busy_holder_told_by_its_hook_keeps_it_only_for_the_bound(self):
         self.told_while_busy()
-        self.age_all("m1", self.m.TAKE_TIMEOUT_MIN - 1)
+        self.age_all("m1", self.m.BUSY_HOLD_MIN - 1)
         self.dispatch()
-        self.assertEqual((self.ended_why("m1"), self.woken()), ([], []), "the idle session is never asked")
+        self.assertEqual((self.ended_why("m1"), self.woken()), ([], []), "inside the bound")
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 1)
+        said = []
+        with mock.patch.object(self.m, "log", said.append):
+            self.dispatch()
+        self.assertEqual(self.ended_why("m1"), ["busy"])
+        self.assertEqual(self.by("m1")[-1], ("S2", "only"), "the next candidate, in the same tick")
+        self.assertEqual(self.woken(), ["S2"])
+        self.assertIn(self.m._("{project}: {id}: the session that held it was busy with other work for {minutes} "
+                               "{minutes:minute|minutes} with no ack; going on", project="proj", id="m1",
+                               minutes=self.m.BUSY_HOLD_MIN), said)
+        self.assertEqual(self.hook("prompt", "S1"), "", "told once: the busy session doesn't take it back by a hook")
+
+    def test_still_busy_and_no_one_left_goes_on_down_the_order(self):
+        self.open("S1")
+        self.rt.statuses["S1"] = "busy"
+        self.send("m1", "proj", "request")
+        self.dispatch()
+        self.assertEqual((self.by("m1"), self.woken()), ([("S1", "only")], []), "routed, not woken: it is working")
+        self.age_all("m1", self.m.BUSY_HOLD_MIN - 1)
+        self.dispatch()
+        self.assertEqual(self.handled, [])
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 1)
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), ["busy"])
+        self.assertEqual(self.handled, [("proj", ["m1"])], "a runtime with a wake port gets no fork: triage")
+        self.assertEqual(self.woken(), [])
+
+    def test_busy_then_idle_inside_the_bound_is_woken_and_has_its_window(self):
+        self.open("S1")
+        self.rt.statuses["S1"] = "busy"
+        self.send("m1", "proj", "request")
+        self.dispatch()
+        self.age_all("m1", self.m.BUSY_HOLD_MIN - 2)
+        self.rt.statuses["S1"] = "idle"
+        self.dispatch()
+        self.assertEqual(self.woken(), ["S1"])
+        self.hook("prompt", "S1")
+        self.rt.statuses["S1"] = "busy"   # its turn is the letter's
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 5)
+        self.c.execute("UPDATE events SET ts=? WHERE type='message.delivered' AND ref='m1'", (tms.ago(self.m.BUSY_HOLD_MIN + 3),))
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), [], "a woken session isn't held to the bound")
+        self.assertEqual(self.state("m1").holder, "S1")
+
+    def test_the_bound_runs_from_a_later_telling(self):
+        self.open("S1", "S2")
+        self.rt.statuses["S1"] = "busy"
+        self.seen("S1", minutes_ago=1)
+        self.rt.statuses["S2"] = "busy"
+        self.send("m1", "proj", "request")
+        self.dispatch()
+        self.assertEqual(self.by("m1"), [("S1", "recent")], "both busy: the most recent of them")
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 1)
+        self.hook("post-tool", "S1")   # told only now
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), [])
+        self.c.execute("UPDATE events SET ts=? WHERE type='message.delivered' AND ref='m1'", (tms.ago(self.m.BUSY_HOLD_MIN + 1),))
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), ["busy"])
+        self.assertEqual(self.by("m1")[-1], ("S2", "only"))
+
+    def test_an_ack_keeps_it_however_busy(self):
+        self.told_while_busy()
+        self.ack("m1", "S1")
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 30)
+        self.dispatch()
+        self.assertEqual((self.ended_why("m1"), self.woken()), (["taken"], []), "taken, never ended for being busy")
+        self.assertEqual(self.state("m1").taken, "now")
+
+    def test_only_busy_ends_it(self):
+        self.told_while_busy()
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 1)
+        for status in ("idle", "unknown", "unlisted", "waiting"):
+            with self.subTest(status=status):
+                self.rt.statuses["S1"] = status
+                self.assertTrue(self.m.busy_hold_over(self.c, self.m.get_message(self.c, "m1"), self.state("m1").route))
+                self.dispatch()
+                self.assertEqual(self.ended_why("m1"), [])
+
+    def test_with_wake_off_the_window_is_as_it_was(self):
+        self.told_while_busy()
+        self.docs["proj"]["mailbox"] = {"wake": False}
+        self.age_all("m1", self.m.BUSY_HOLD_MIN + 1)
+        self.dispatch()
+        self.assertEqual(self.ended_why("m1"), [])
         self.age_all("m1", self.m.TAKE_TIMEOUT_MIN + 1)
         self.dispatch()
         self.assertEqual(self.ended_why("m1"), ["window"])
-        self.assertEqual(self.by("m1")[-1], ("S2", "only"))
-        self.assertEqual(self.woken(), ["S2"])
 
-    def test_today_the_most_recent_is_picked_busy_or_not(self):
+    def test_a_session_on_no_record_isnt_asked_after(self):
+        """An MCP client's telling has no session: no runtime to ask, only the window."""
+        self.open("S1")
+        self.send("m1", "proj", "request")
+        self.m.mark_delivered(self.c, [self.m.get_message(self.c, "m1")], None, "inbox")
+        self.assertFalse(self.m.busy_hold_over(self.c, self.m.get_message(self.c, "m1"), self.m.Route(None, tms.ago(90), None)))
+
+    # --- the pick ---
+    def test_an_idle_session_comes_before_a_busier_more_recent_one(self):
         self.open("S1", "S2")
         self.seen("S1", minutes_ago=1)
         self.rt.statuses["S1"] = "busy"
         self.send("m1", "proj", "request")
         self.dispatch()
-        self.assertEqual(self.by("m1"), [("S1", "recent")])
+        self.assertEqual(self.by("m1"), [("S2", "idle")])
+        self.assertEqual(self.woken(), ["S2"])
+
+    def test_among_the_idle_ones_the_usual_rules(self):
+        self.open("S1", "S2", "S3")
+        self.seen("S1", minutes_ago=1)
+        self.seen("S3", minutes_ago=5)
+        self.rt.statuses["S1"] = "busy"
+        self.send("m1", "proj", "request")
+        self.dispatch()
+        self.assertEqual(self.by("m1"), [("S3", "recent")])
+
+    def test_the_thread_rule_looks_at_the_idle_ones_first(self):
+        self.open("S1", "S2", "S3")
+        self.seen("S3", minutes_ago=1)
+        self.rt.statuses["S1"] = "busy"
+        self.m.publish(self.c, "q", "message", "proj", "other", None, {"type": "question", "text": "x", "from_session": "S1"})
+        self.send("m1", "proj", "question", reply_to="q")
+        self.dispatch()
+        self.assertEqual(self.by("m1"), [("S3", "recent")], "the thread's session is busy: an idle one gets it")
+
+    def test_a_letter_to_a_session_goes_to_it_busy_or_not(self):
+        self.open("S1", "S2")
+        self.rt.statuses["S1"] = "busy"
+        self.send("m1", "proj", "question", to_session="S1")
+        self.dispatch()
+        self.assertEqual(self.by("m1"), [("S1", "thread")], "addressed, not guessed: the bound moves it on if it stays busy")
         self.assertEqual(self.woken(), [])
+
+    def test_the_model_is_asked_about_the_idle_ones_only(self):
+        self.open("S1", "S2", "S3")
+        self.rt.statuses["S1"] = "busy"
+        asked = []
+        with mock.patch.object(self.m, "model_pick", lambda c, t, r, cands, ws=None, proj=None: asked.append(sorted(cands))):
+            self.send("m1", "proj", "request")
+            self.dispatch()
+        self.assertEqual(asked, [["S2", "S3"]])
 
 
 class Tick(Harness):
@@ -318,9 +446,9 @@ class Tick(Harness):
         self.rt.statuses["S1"] = "busy"
         self.send("m1", "proj", "request")
         self.dispatch()
-        self.age_state("m1", self.m.TAKE_TIMEOUT_MIN + 1)
+        self.age_state("m1", self.m.BUSY_HOLD_MIN + 1)
         self.dispatch()
-        self.assertEqual(self.ended_why("m1"), ["window"])
+        self.assertEqual(self.ended_why("m1"), ["busy"])
         self.assertEqual(self.handled, [("proj", ["m1"])], "on down the order")
 
     # --- windows ---

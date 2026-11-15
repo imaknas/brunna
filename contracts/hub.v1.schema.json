@@ -270,6 +270,7 @@
       "type": "object",
       "properties": {
         "wake": {"type": "boolean", "description": "false: a letter never wakes or is routed to a session, notices included (docs/design/mailbox-session-first.md); a project's registry entry can say so for itself. Default on"},
+        "busy_hold_min": {"type": "integer", "minimum": 1, "description": "minutes a session busy with other work holds a request/question from the later of its route and its telling, unless it acks; then the next session is tried, and on down to a fork or triage (docs/design/mailbox-session-first.md, 11-15). A session a wake reached has the usual window. Default 10"},
         "daily_wakes_per_project": {"type": "integer", "minimum": 0, "description": "wakes per project per day; one wake covers all of a session's letters of one tick. Past it, a project's letters aren't routed: hooks and triage go on. Default 12"},
         "handler": {"enum": ["agent", "propose"], "description": "how a request nobody picks up is dispatched: agent = the runtime's agent handles it directly (needs the tool's permissions; only Claude Code for now); propose = any agent runs in a throwaway worktree, the platform adopts only the memory notes and sends the letters for it (bin/propose_apply.py). Default agent"},
         "mcp_presence_min": {"type": "integer", "minimum": 1, "description": "minutes a session using the mailbox only through the platform's MCP server counts as using its project after its last agenthub tool call (docs/design/mailbox-runtimes.md A3). Default 30"},

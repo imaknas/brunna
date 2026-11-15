@@ -90,13 +90,15 @@ For hooks / the schedule / other scripts:
                                       outboxes in, last it writes their mailbox views:
                                       a letter a session has taken is left; one a route holds waits; a route ending
                                       (a woken session not told in WAKE_PICKUP_MIN, TAKE_TIMEOUT_MIN from the telling, a pass,
-                                      its session gone) is recorded once, and the next tick goes on. A request/question that
+                                      its session gone, its session busy with other work BUSY_HOLD_MIN with no ack) is
+                                      recorded once, and the next tick goes on. A request/question that
                                       is free (design docs/design/mailbox-session-first.md, "Each tick"): held while an MCP
                                       session uses the project, up to MCP_HOLD_MAX_MIN; waits while under CONVERSATION_WAIT
                                       minutes old for a session with a hook that isn't a candidate; routed to a candidate (one a
-                                      wake can reach, whose process record names this project: the only one, the thread's, else
-                                      the mailbox-route model's pick, asked in the background and read on a later tick, else
-                                      the most recently active; bin/mailbox_route.py) and woken if idle, under
+                                      wake can reach, whose process record names this project: the only one, the to_session,
+                                      then among the idle ones if any (else the busy ones) the thread's, else the mailbox-route
+                                      model's pick, asked in the background and read on a later tick, else the most recently
+                                      active; bin/mailbox_route.py) and woken if idle, under
                                       {settings} mailbox.wake and DAILY_WAKES; a session with a dialog open waits up to
                                       TAKE_TIMEOUT_MIN; a reply to a closed session is resumed in a background fork, and a
                                       session of a runtime with no wake port gets that fork (each with its context small, not to a
@@ -219,6 +221,11 @@ RECORDS = bool(_MB.get("records", False))
 # delivery into a session only counts as "seen"; no ack/reply/done for this long → treated as untaken, dispatched as
 # usual
 TAKE_TIMEOUT_MIN = int(_MB.get("take_timeout_min", 60))
+# a session busy with other work holds a request/question only this long from the later of its route and its telling,
+# unless it acks: dispatch then ends the route and goes on to the next candidate, then down the order. A session a wake
+# reached isn't held to it (its turn is the letter's). 11-15: a request sat 45 minutes with a session that its post-tool
+# hook told while it ran long background agents (mailbox-session-first.md, "11-15: a busy session")
+BUSY_HOLD_MIN = int(_MB.get("busy_hold_min", 10))
 # a session told only at its start (its runtime's hooks show nothing later: runtime_ports.tells_later) holds a letter only
 # this long from the telling: it saw a notice, not the letter, and no later hook brings it back, so a session that can be
 # woken gets it soon after. An ack (brunna ack) takes it as anyone's does (docs/design/runtime-codex.md, Step 2)
@@ -1302,9 +1309,10 @@ def footer() -> str:
     return _("Done with one: `brunna done <id>` (--note optional); to reply or ask: "
              "`brunna send --to <sender> --reply-to <id> --type <question|info|done> --text \"…\"`. "
              "`brunna ack <id>` as soon as you take one (a request/question with no ack, reply or done is given to "
-             "someone else by the platform after {minutes} minutes); `brunna pass <id>` if one held for this session "
-             "(`brunna inbox` says so) isn't yours; someone else's ack ends the matter. Leave what has nothing to do with "
-             "the current work.", minutes=TAKE_TIMEOUT_MIN)
+             "someone else by the platform after {minutes} minutes, after {busy} minutes while this session is busy with "
+             "other work); `brunna pass <id>` if one held for this session (`brunna inbox` says so) isn't yours; someone else's "
+             "ack ends the matter. Leave what has nothing to do with the current work.", minutes=TAKE_TIMEOUT_MIN,
+             busy=BUSY_HOLD_MIN)
 
 
 # ---------- hook ----------
@@ -2702,7 +2710,7 @@ STATUS_TICK_S = 10   # what a tick spends at most asking what sessions are doing
 class Tick:
     """What one dispatch knows, looked up at most once: the sessions on record, what each is doing, which projects may wake, and
     the wakes this tick owes, sent after the views are written (a sandboxed session's `brunna inbox` reads its view).
-    What sessions are doing is asked only once a letter may wake one: of a runtime that answers for many in one look
+    What sessions are doing is asked only once a letter may wake one, or a holder's BUSY_HOLD_MIN has passed: of a runtime that answers for many in one look
     (session_statuses), all its wakeable sessions at once; of another, one at a time. Either way a tick spends at most
     STATUS_TICK_S on it (dispatch runs every minute, holding its lock): a slow tick would also let a woken session's pickup
     pass before its outbox is taken in."""
@@ -2843,14 +2851,22 @@ def most_recent(c, cands: list[str]) -> str:
 
 
 def pick(c, t, r, cands: list[str], ws=None, proj=None) -> tuple[str, str] | None:
-    """Which one, and how it was picked (message.routed's by), design "Picking one": the only one; the to_session or the last to
-    act in the thread; the mailbox-route model's pick, read on a later tick; the most recently active. None: the model is
-    being asked, and the letter waits for its answer this tick. proj: the project's name now (one_project's), whatever name
-    the letter was sent to: the privacy labels, the tick's one call and the day's count are keyed by it."""
+    """Which one, and how it was picked (message.routed's by), design "Picking one": the only one; the to_session (a letter
+    addressed to it, not a guess); then among the sessions not busy with other work, if any (the only one of them: idle),
+    else among the busy ones: the last to act in the thread; the mailbox-route model's pick, read on a later tick; the most
+    recently active. None: the model is being asked, and the letter waits for its answer this tick. proj: the project's name
+    now (one_project's), whatever name the letter was sent to: the privacy labels, the tick's one call and the day's count
+    are keyed by it. Only "busy" counts as busy: unknown and unlisted say nothing about it (11-15)."""
     if len(cands) == 1:
         return cands[0], "only"
     to_s = payload(r).get("to_session")
-    thread = to_s if to_s in cands else last_in_thread(c, r, cands)
+    if to_s in cands:
+        return to_s, "thread"
+    free = [s for s in cands if t.status(s) != "busy"]
+    if len(free) == 1:
+        return free[0], "idle"
+    cands = free or cands
+    thread = last_in_thread(c, r, cands)
     if thread:
         return thread, "thread"
     got = model_pick(c, t, r, cands, ws, proj or now_named(r["to_project"]))
@@ -2904,8 +2920,8 @@ def _model_pick(c, t, r, cands, ws, proj):
             log_once(f"route-{proj}", "")
             return sid
         if state == "answer":   # an id from the call's own list whose session has left these since: not a broken router
-            log(_("{project}: the session mailbox-route picked for a letter has closed or opened a dialog since; the most "
-                  "recently active session was picked", project=proj))
+            log(_("{project}: the session mailbox-route picked for a letter has closed, opened a dialog or got busy since; "
+                  "the most recently active session was picked", project=proj))
             return None
         log_once(f"route-{proj}", _("{project}: mailbox-route gave no usable answer for a letter; the most recently active "
                                     "session was picked", project=proj))
@@ -3022,6 +3038,22 @@ def close_failed_questions(c) -> None:
                     {"type": "done", "question": q["id"], "text": _("Letter {id} has been handled.", id=q["ref"])})
 
 
+def busy_hold_over(c, r, route) -> bool:
+    """This route has had BUSY_HOLD_MIN from the later of the route and its session's telling, and no wake reached that
+    session for it: a woken session's turn is the letter's, so it has its window. Whether the session is busy is the
+    caller's to ask (dispatch, from the runtime): it isn't on the bus, so hooks' route_ended can't judge it."""
+    if not route.session:
+        return False
+    woken = woken_at(c, r["id"], route.session)
+    if woken and woken >= route.ts:
+        return False
+    told = told_at(c, r["id"], route.session)
+    start = datetime.datetime.fromisoformat(route.ts)
+    if told:
+        start = max(start, datetime.datetime.fromisoformat(told))
+    return now() >= start + datetime.timedelta(minutes=BUSY_HOLD_MIN)
+
+
 def end_route(c, r, st, proj) -> bool:
     """Record that a route ended (a row with no session), so it never revives; said once per letter when it ended
     untaken. False when a hook moved the letter meanwhile: nothing written, the caller reads it again next tick."""
@@ -3038,6 +3070,9 @@ def end_route(c, r, st, proj) -> bool:
     elif same and first and st.ended == "closed":
         log(_("{project}: {id}: the session that held it has closed with no ack, reply or done; treating it as not "
               "taken", project=proj, id=r["id"]))
+    elif same and st.ended == "busy":
+        log(_("{project}: {id}: the session that held it was busy with other work for {minutes} {minutes:minute|minutes} "
+              "with no ack; going on", project=proj, id=r["id"], minutes=BUSY_HOLD_MIN))
     elif same and st.ended == "pickup":
         log(_("{project}: {id}: the session woken for it wasn't told within {minutes} {minutes:minute|minutes}; going on",
               project=proj, id=r["id"], minutes=WAKE_PICKUP_MIN))
@@ -3119,6 +3154,11 @@ def dispatch(c, rt=None, wakes: list | None = None) -> int:
                     continue
                 alive = Live(rt, live, c=c)
                 st = letter_state(c, r, alive)
+            # a session busy with other work and no ack: past BUSY_HOLD_MIN it holds it no more (asked only then, and only
+            # with routing on: off keeps the window as it was)
+            if st.held and st.holder and busy_hold_over(c, r, st.route) and t.wake_on(proj) \
+                    and t.status(st.holder) == "busy":
+                st = st._replace(held=False, holder=None, ended="busy")
             # taken for good needs no end recorded: it can't come back. Taken for now can (an ack's session closing, a
             # fork's time running out), and the route it ended mustn't revive then
             if st.route and st.ended and st.taken != "good" and not end_route(c, r, st, proj):

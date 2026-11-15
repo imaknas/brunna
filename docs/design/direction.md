@@ -33,6 +33,7 @@ that day; they are listed at the end.
 | 11-08 | The platform runs its own checked copy of each coding agent; the tool's own auto-update stays on | `runtime-versions.md` DV1–DV5 |
 | 11-09 | A project's code asks the platform for model calls and confined agent calls; it never calls a provider itself | `project-agent-calls.md` |
 | 11-13 | Every platform run of Claude uses the headless token; the subscription login is only for registry jobs with `connectors: true`, and the hourly login check looks at it only while one exists | `known-issues.md` "Three credentials", `bin/check-claude-login.py` header |
+| 11-15 | A letter doesn't wait on a session busy with other work: an idle session is picked first, and a busy one that hasn't acked holds it 10 minutes, then the next is asked | `mailbox-session-first.md` "11-15: a busy session" |
 | 11-15 | A project's model call can be served by a local model the owner pins it to (`llm.points.<project>/<point>`); the project names only a tier, and a provider configured without `llm.use` moves no other point | `llm-providers.md` "Projects' calls on a provider" |
 
 **Order of the coding-agent adapters** (decided across 10-29, 11-01 and 11-08; no other doc has it whole):
@@ -273,6 +274,8 @@ Built: steps 0–2 and step 4, the waiting report. Left:
 - capabilities' 11-08 A1 check in a session the owner opens.
 - `mailbox-session-first.md` step 4's systemd `KillMode` change, which was read, not run.
 - Whether a mailbox fork shows in the desktop app's session list.
+- `mailbox-session-first.md` "11-15: a busy session": a letter routed `by: idle`, and a busy holder ended after 10 minutes,
+  on real sessions.
 - `brunna skills sync` on a real project, and whether Claude Code or Codex in a worktree session finds the main
   checkout's installed skills (`skills-sync.md`).
 

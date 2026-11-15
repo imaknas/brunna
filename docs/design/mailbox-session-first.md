@@ -1,6 +1,6 @@
 # Mail goes to a session first
 
-Status: design r7, steps 1 to 5 built (records at the end). The cold reviews' blocking findings are closed; should-fix items go to each step's own review. Each revision fixes the previous one's cold review, on top of the owner's decision. The main
+Status: design r7, steps 1 to 5 built (records at the end); 11-15, a busy session holds a letter only briefly (last section). The cold reviews' blocking findings are closed; should-fix items go to each step's own review. Each revision fixes the previous one's cold review, on top of the owner's decision. The main
 change since r2: delivery is per session, and a route, an ack and a fork all have an end. Replaces the delegation part of the routing in
 `docs/design/mailbox-routing.md`; builds on the wake in `docs/design/mailbox-runtimes.md` (B1).
 
@@ -81,7 +81,9 @@ judged ended never revives, even if the session is told later.
 later of the telling and the route (`TAKE_TIMEOUT_MIN`), including a `by: hook` route, which starts told. A session working for 20 minutes isn't pre-empted, and
 one that never got it isn't waited on. **A busy routed session** isn't woken and its window hasn't started: on each tick, once it
 is idle and still untold, dispatch wakes it (a hook skipped by `POST_TOOL_EVERY_S`, or a tool running for minutes, can't lose
-the letter). A busy session's route is bounded by 60 minutes from the route.
+the letter). A busy session's route is bounded by 60 minutes from the route. **Changed 11-15** (section "11-15: a busy session"
+below): a session busy with other work holds a letter, told or not, `mailbox.busy_hold_min` (10) minutes with no ack, then the next
+candidate is asked.
 
 **A hook shows a letter** to a session when it is open and not taken, that session hasn't been told, and no route points at
 another session. Session-start keeps listing every open letter it isn't showing in full, in one line, as today: that list is what survives
@@ -153,6 +155,9 @@ doesn't reach them; doctor says so.
 2. The `to_session`, or the session that last acted in this thread.
 3. Otherwise `mailbox-route`.
 4. No answer from it: the most recently active.
+
+**Changed 11-15:** after the `to_session`, the rest look at the candidates not busy with other work first, and at the busy ones
+only when every candidate is busy (section "11-15: a busy session").
 
 **`mailbox-route` never runs inside the dispatch loop**, which is serial and carries every project's mail. Dispatch starts it
 in the background (like `run_handler`'s propose path, in its own process group), at most one per project per tick and a daily cap
@@ -824,3 +829,53 @@ a project with two armed sessions on record, a request with no thread, and `hubb
 - **`max_tokens: 200` binds only where a provider takes it** (anthropic, openai, ollama). On the Claude Code runtime the
   call wrote 677 output tokens, its structured output's own overhead counted: `claude -p` has no output limit to pass. The
   bound that holds everywhere is `timeout_s` and the call's own `CALL_TIMEOUT_S`.
+
+## 11-15: a busy session
+
+**The complaint.** The owner (11-15): a letter sent to a busy session has to wait. The case: a request to onboard a project
+(m11152001-9a5b) was sent at 20:01. Thirteen seconds later the post-tool hook of a brunna session running long background
+agents told it, so that session held it (`by: hook`), with the 60-minute window from the telling. It never acked. Another,
+idle brunna session was open the whole time and was never asked; the owner noticed at 20:46 and had it handled by hand.
+
+So the busy case in "The window" wasn't the one that bit: a busy session's hooks reach a letter before the one-minute tick
+does, and a session told mid-turn holds it like one that read it at a prompt. Changing only the picker wouldn't have
+helped this letter.
+
+**What changes.**
+
+- **A busy holder's bound.** A route whose session is `busy` (the runtime's own word, read by dispatch once a tick) and that
+  hasn't acked ends after `mailbox.busy_hold_min` (default 10) minutes from the later of the route and its telling, told or
+  not. Dispatch records the end (`ended: busy`) and asks the next candidate in the same tick; with none left the letter goes
+  on down the order as after any end: a fork where steps 5 or 6 apply, else triage. Claude's sessions have the wake port, so
+  for them that's triage, which at least asks the owner instead of nothing.
+- **What it doesn't touch.** A session a wake reached for this route keeps the window: it was idle when woken, and the turn
+  the wake started is the letter's. `unknown`, `unlisted` and `waiting` don't end anything: only `busy` says the session is
+  doing something else. A route with no session (an MCP client's `inbox`) has no runtime to ask. With `mailbox.wake: false`
+  nothing is asked and the window is as before. Hooks can't judge it (busy isn't on the bus), which is why dispatch records
+  the end: once recorded, every hook sees the letter as free.
+- **Idle before busy.** `pick` looks at the candidates not `busy` first: the only one of them (`by: idle`), the thread's
+  among them, the model's pick among them (the model is asked about those only), the most recent of them. Busy ones only
+  when all are busy. A `to_session` still comes first, busy or not: it names the session the letter is addressed to, while
+  the thread rule is a guess. If that session stays busy, the bound moves the letter on.
+- **The text.** The footer of every listing says a request goes to someone else after 60 minutes, and after 10 while this
+  session is busy with other work, so a session that is taking one knows to ack.
+
+**The price, and why it's taken.** "A session working for 20 minutes isn't pre-empted" no longer holds for a session that
+works on a letter without acking: if it's busy past the bound, the next session is asked too, and both may answer. The rules
+and the footer have always said to ack as soon as you take one, and an ack holds as long as the session lives; a session
+working on something else shouldn't sit on someone's request for an hour. The owner can veto (the merge's question), and
+`busy_hold_min` can be raised.
+
+**Not done.** An idle holder with no fresh waiter that was routed while busy and never told still waits the hour: it isn't
+busy, and it can't be woken. Rare (routes go only to sessions with a fresh waiter) and left as it was.
+
+**Tests** (`tests/test_mailbox_route.py`, `BusyHolder`, with the characterization of the old behaviour committed first):
+told by its hook while busy, then the next candidate after the bound in the same tick; a lone busy candidate going to
+triage after the bound; busy then idle inside the bound, woken, then busy on the letter and not ended; the bound counted from
+a later telling; an ack; only `busy` ends it; the off switch; idle before a more recent busy one; the usual rules within the
+idle ones; the thread rule looking at idle ones first; a `to_session` busy or not; the model asked about idle ones only; a
+model's pick that got busy since.
+
+**Live check after merge:** two armed sessions of one project, one busy with a long turn; a request with no thread goes
+`by: idle` to the other and wakes it. And a session told mid-turn that doesn't ack is ended `busy` after 10 minutes in
+`hubbus.log`.
