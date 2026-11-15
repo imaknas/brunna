@@ -203,6 +203,44 @@ The re-review of those fixes found B1 and B2 not fully closed, and four more poi
   - anything in the request folder but requests, results and a young dot-file is removed (at most 1000 a tick), never
     read.
 
+A third review of those found two blocking points:
+- **B-1, a joined path under the request root.** Clearing a folder by a request's name fell back to `rmtree` on a joined
+  path, which follows a link the session swaps in for its own folder: a real swap loop deleted a folder outside in under
+  a second. No path is joined under the root any more:
+  - the project's folder is opened with `O_NOFOLLOW` from the root;
+  - entries are removed through that handle (`rmtree` with `dir_fd`, which resists links), with no fallback;
+  - the folder itself is made by name from the root's handle.
+- **B-2, a record a name could split.** The store was written with non-ASCII kept and read with `splitlines()`, so a
+  secret's name holding U+2028, U+2029 or U+0085 cut its record in two and the value was forgotten. Records are now
+  ASCII-only, and the store is split on `\n` alone. A record is written after a newline when the file doesn't end with
+  one, so a crash mid-append costs only that line.
+
+And four should-fix:
+- **S-1:** a regex of the values nests as deep as they share prefixes; about 470 levels overflowed `sre`, and the
+  append-only store made that permanent. The matcher now can't fail on what the values are:
+  - each value is keyed by its first 12 characters;
+  - one regex of the keys (a trie at most 12 deep, in an overlapping lookahead) finds where any key starts;
+  - each place is checked against that key's values.
+
+  4096 values over 10 MB take about 2.5 s; a text that repeats one key keeps it busy until the deadline refuses.
+- **S-2:** a value over 512 bytes was missed inside a longer word (`TOKEN=…`, `?k=…`). Its first and last 512 bytes
+  are now stored as plain values beside its hash.
+- **S-3:** the object checks read every commit and small blob in one batch (one `git` process, not one per object), and
+  stop at the deadline.
+- **S-4:** paths are counted in bytes, not characters (a character can be four).
+- **Leases ask instead of deny.** The lease's own `--settings` now *ask* for every session command the folder's local
+  settings allow. Claude Code's order is deny, then ask, then allow, so they reach the owner through the permission
+  relay, as lease-work asks for every command. The push request folder stays denied.
+  - That order is from Claude Code's documentation and was not measured here; the conformance check `lease-ask` names
+    the measurement (it needs a lease session).
+  - The commands the leases now ask about were allowed outright before the platform push existed.
+- **Nits:**
+  - dotenv values are read as dotenv does: escaped quotes, double-quoted values over several lines, `export` followed
+    by a tab;
+  - a request's letter id carries its id and the time it was taken in;
+  - the tick's and the day's letter ids are the platform's own, with a random part, and the day's letter is recorded so
+    it goes once.
+
 ## 1. Two axes, and when to sandbox
 
 A project has two settings, and neither depends on the other:
