@@ -496,8 +496,10 @@ def policy(name: str, doc: dict, index: dict) -> dict:
     d = registry.dirs(doc)
     outbox = mail_outbox(doc)
     others = [p for n, ps in project_paths(index).items() if n != name for p in ps]
-    # other projects' push request folders, as their other folders (docs/design/platform-push.md, "Who may request")
-    others += [push_request_dir(n) for n in sorted(index["projects"]) if n != name and n != hubconf.hub_project()]
+    # other sandboxed projects' push request folders, as their other folders (docs/design/platform-push.md, "Who may
+    # request"); only a sandboxed project has one
+    others += [push_request_dir(n) for n, d in sorted(index["projects"].items())
+               if n != name and n != hubconf.hub_project() and mail_outbox(d)]
     copies = hubconf.p("memory_copies", "~/.memory-copies")
     cred_dirs, cred_files = credentials()
     import runtime_ports
