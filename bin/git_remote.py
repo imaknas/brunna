@@ -531,47 +531,16 @@ def locked(d: pathlib.Path, wait_s: float = 0):
 
 # ---------- the remote's visibility (check 8; r1 nit, r2 S-l) ----------
 
-def https_form(origin: str) -> str | None:
-    """The origin's anonymous https form: the URL itself, or the mechanical one for host:path and ssh://; None for a
-    local path (private) or a scheme with no such form."""
-    if local_origin(origin):
-        return None
-    if re.match(r"^https?://", origin, re.I):
-        return origin
-    m = re.match(r"^ssh://(?:[^@/]+@)?([^/:]+)(?::\d+)?/(.+)$", origin)
-    if m:
-        return f"https://{m.group(1)}/{m.group(2)}"
-    m = re.match(r"^(?:[^@/]+@)?([^/:]+):(.+)$", origin)
-    if m and "://" not in origin:
-        return f"https://{m.group(1)}/{m.group(2).lstrip('/')}"
-    return None
-
-
 def visibility(origin: str) -> str:
-    """public | private | unknown, by an anonymous ls-remote of the https form: no system or global config, no
-    credential helper, no prompt, a throwaway HOME. Unknown is treated as public by every caller."""
-    url = https_form(origin)
-    if url is None:
-        return "private" if local_origin(origin) else "unknown"
-    home = pathlib.Path(tempfile.mkdtemp(prefix="hub-probe-", dir=hubconf.private_tmp()))
+    """public | private | unknown: the push grant's anonymous probe (git_push_grant.visibility, the one probe), a local
+    path private. Unknown is treated as public by every caller; without the grant module, every remote is unknown."""
+    if local_origin(origin):
+        return "private"
     try:
-        env = {"PATH": os.environ.get("PATH", "/usr/bin:/bin"), "HOME": str(home), "GIT_CONFIG_NOSYSTEM": "1",
-               "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "/bin/echo",
-               "SSH_ASKPASS": "/bin/echo", "LC_ALL": "C"}
-        try:
-            r = subprocess.run(["git", "-c", "credential.helper=", "-c", "core.askPass=", "ls-remote", "--", url,
-                                "HEAD"], cwd=home, env=env, capture_output=True, text=True, timeout=30,
-                               stdin=subprocess.DEVNULL)
-        except (OSError, subprocess.TimeoutExpired):
-            return "unknown"
-        if r.returncode == 0:
-            return "public"
-        if re.search(r"Authentication failed|could not read Username|terminal prompts disabled|\b40[13]\b|"
-                     r"not found|Repository not found|Invalid username", r.stderr, re.I):
-            return "private"
+        import git_push_grant
+    except ImportError:
         return "unknown"
-    finally:
-        shutil.rmtree(home, ignore_errors=True)
+    return git_push_grant.visibility(origin)
 
 
 # ---------- the credential (one function; the owner's decision 1, 11-15) ----------
@@ -1046,113 +1015,6 @@ def await_result(project: str, rid: str, wait: float) -> int:
     return {"pushed": OK, "nothing": OK, "refused": REFUSED, "failed": FAILED}.get(res.get("state"), PENDING)
 
 
-# ---------- setup (section 6) ----------
-
-def setup(args: list[str]) -> int:
-    """`brunna push setup <project> [--branches none|others|all] [--email E…] [--public-email E…] [--yes]`: the owner's
-    setup of enforce.git_push, written into the registry with commit-hub-files.sh."""
-    import registry
-    pos, emails, public, branches, yes, i = [], [], [], None, False, 0
-    while i < len(args):
-        a = args[i]
-        if a in ("--email", "--public-email", "--branches") and i + 1 < len(args):
-            if a == "--branches":
-                branches = args[i + 1]
-            else:
-                (emails if a == "--email" else public).append(args[i + 1])
-            i += 2
-            continue
-        if a in ("--yes", "-y"):
-            yes = True
-        elif a.startswith("-"):
-            raise Refused(_("unknown option {flag}", flag=a))
-        else:
-            pos.append(a)
-        i += 1
-    if len(pos) != 1:
-        raise Refused(_("usage: brunna push setup <project> [--branches none|others|all] [--email <address>…] "
-                        "[--public-email <address>…]"))
-    project = pos[0]
-    doc = registered(project)
-    origin = check_origin((doc.get("paths") or {}).get("origin"))
-    vis = visibility(origin)
-    print(_("{project}'s remote {url} looks {vis} to an anonymous visitor", project=project, url=visible(origin), vis=vis))
-    if vis != "private":
-        print(_("!! every branch the platform may push is published as soon as it is pushed, and a site or deploy that "
-                "builds from branches (gh-pages, a hosting production branch, preview deploys) runs it; others keeps the "
-                "default branch's CI and deploys yours, not the content private"))
-    cur = field(doc)
-    proposed = emails or list(cur.get("emails") or []) or proposed_emails(project, origin, vis)
-    print(_("emails: {emails}", emails=", ".join(proposed) or _("none")))
-    branches = branches or cur.get("branches") or ("all" if vis == "private" else "none")
-    if branches not in registry.GIT_PUSH_BRANCHES:
-        raise Refused(_("--branches is none, others or all"))
-    new = {**cur, "branches": branches, "emails": proposed, "visibility": "private" if vis == "private" else "public"}
-    if public:
-        new["public_emails"] = public
-    print(_("enforce.git_push for {project}: {value}", project=project, value=json.dumps(new, ensure_ascii=False)))
-    try:
-        import git_push_grant
-        fn = getattr(git_push_grant, "setup", None)
-        if callable(fn) and branches != "none" and not local_origin(origin):
-            fn(project)
-    except ImportError:
-        if branches != "none" and not local_origin(origin):
-            print(_("!! the platform's push key isn't built on this install yet: pushes of {project} are refused until "
-                    "it is", project=project))
-    confirm(yes)
-    write_field(project, new)
-    import push_queue
-    for cause in ("emails", "visibility", "setup"):
-        _close_cause(project, cause, push_queue)
-    print(_("written: {project}'s enforce.git_push", project=project))
-    return OK
-
-
-def _close_cause(project: str, cause: str, push_queue) -> None:
-    f = broker_dir(project) / "todos.json"
-    todos = push_queue._read_json(f, {})
-    t = todos.get(cause) or {}
-    if t.get("sent") and not t.get("closed"):
-        try:
-            push_queue.owner_notify("--type", "done", "--task", t["key"], "--text", _("set up"), "--context", "push")
-            t["closed"] = True
-            push_queue._write_json(f, todos)
-        except OSError:
-            pass
-
-
-def proposed_emails(project: str, origin: str, vis: str) -> list[str]:
-    """check 6's defaults: on a private remote the owner's global user.email and, on GitHub, the noreply address
-    `gh api user` names; on a public one the noreply address only."""
-    out = []
-    if vis == "private":
-        r = subprocess.run(["git", "config", "--global", "user.email"], capture_output=True, text=True)
-        if r.returncode == 0 and r.stdout.strip():
-            out.append(r.stdout.strip())
-    if "github.com" in origin and shutil.which("gh"):
-        r = subprocess.run(["gh", "api", "user", "--jq", '"\\(.id)+\\(.login)@users.noreply.github.com"'],
-                           capture_output=True, text=True, timeout=30)
-        if r.returncode == 0 and "@" in r.stdout:
-            out.append(r.stdout.strip())
-    return list(dict.fromkeys(out))
-
-
-def write_field(project: str, value: dict) -> None:
-    """enforce.git_push in the project's registry file, committed with commit-hub-files.sh as every script-written registry
-    change."""
-    import yaml
-    f = hubconf.registry_dir() / f"{project}.yaml"
-    doc = yaml.safe_load(f.read_text())
-    doc.setdefault("enforce", {})["git_push"] = value
-    import registry
-    errs = registry.validate_enforce({**doc, "name": project})
-    if errs:
-        raise Refused("; ".join(errs))
-    f.write_text(yaml.safe_dump(doc, default_flow_style=False, sort_keys=False, allow_unicode=True))
-    subprocess.run([str(BIN / "commit-hub-files.sh"), f"push setup {project}", str(f)], capture_output=True)
-
-
 # ---------- doctor ----------
 
 def doctor_lines() -> list[tuple[str, str, str]]:
@@ -1200,8 +1062,11 @@ def doctor_lines() -> list[tuple[str, str, str]]:
                                  "this install: its pushes are refused", project=name, branches=gp["branches"]), ""))
             continue
         if callable(status):
-            ok, what = status(name)
-            out.append(("ok" if ok else "bad", f"{name}: {what}", "" if ok else setup_cmd))
+            st = status(name) or {}
+            if st.get("state") in ("not_set_up", "unsupported"):
+                out.append(("bad", _("{project}: the platform's push key: {why}", project=name,
+                                     why=st.get("detail") or st.get("state")), setup_cmd))
+                continue
         out.append(credential_probe(name, origin, setup_cmd))
     return out
 
@@ -1242,8 +1107,8 @@ def main(argv: list[str], cwd: pathlib.Path | None = None) -> int:
         return REFUSED
     args = argv[1:]
     try:
-        if args[:1] == ["setup"]:
-            return setup(args[1:])
+        if args[:1] == ["setup"]:   # the owner's setup is the push grant's (bin/git_push_grant.py): never a project
+            return subprocess.run([*hubconf.launch(BIN / "git_push_grant.py"), "setup", *args[1:]]).returncode
         if "--owner" in args:
             rest = [a for a in args if a != "--owner"]
             pos = [a for a in rest if not a.startswith("-")]

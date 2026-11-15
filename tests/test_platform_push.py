@@ -684,58 +684,16 @@ class Checks(Push):
         self.docs["proj"]["enforce"]["git_ci"] = True
         self.assertEqual(self.ask()["state"], "pushed")
 
-    def test_visibility_probe(self):
+    def test_visibility_is_the_grants_probe(self):
+        """One probe (git_push_grant.visibility, tested with the grant); a local path is private here, and without the
+        grant module every remote counts as unknown (public)."""
         self.assertEqual(git_remote.visibility(str(self.remote)), "private")
-        self.assertEqual(git_remote.https_form("git@example.org:a/b.git"), "https://example.org/a/b.git")
-        self.assertEqual(git_remote.https_form("ssh://git@example.org:22/a/b.git"), "https://example.org/a/b.git")
-        self.assertEqual(git_remote.visibility("https://127.0.0.1:9/x.git"), "unknown")
-
-
-@unittest.skipUnless(shutil.which("git"), "needs git")
-class Probe(unittest.TestCase):
-    """check 8's anonymous probe against a real http transport: open → public, 401 → private."""
-
-    def test_open_and_closed(self):
-        import base64
-        import http.server
-        tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        subprocess.run(["git", "init", "-q", "--bare", "-b", "main", str(tmp / "r.git")], check=True,
-                       env={**os.environ, "GIT_CONFIG_GLOBAL": "/dev/null"})
-        need = {"auth": True}
-
-        class H(http.server.BaseHTTPRequestHandler):
-            def log_message(self, *a):
-                pass
-
-            def do_GET(self):
-                if need["auth"] and self.headers.get("Authorization") != "Basic " + base64.b64encode(b"a:b").decode():
-                    self.send_response(401)
-                    self.send_header("WWW-Authenticate", 'Basic realm="t"')
-                    self.send_header("Content-Length", "0")
-                    self.end_headers()
-                    return
-                path, _q, query = self.path.partition("?")
-                r = subprocess.run(["git", "http-backend"], capture_output=True, env={
-                    "PATH": os.environ["PATH"], "GIT_PROJECT_ROOT": str(tmp), "GIT_HTTP_EXPORT_ALL": "1",
-                    "REQUEST_METHOD": "GET", "PATH_INFO": path, "QUERY_STRING": query, "GIT_CONFIG_GLOBAL": "/dev/null"})
-                head, _s, body = r.stdout.partition(b"\r\n\r\n")
-                self.send_response(200)
-                for line in head.decode().splitlines():
-                    k, _c, v = line.partition(":")
-                    if k.lower() != "status":
-                        self.send_header(k, v.strip())
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
-        srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        self.addCleanup(srv.server_close)
-        self.addCleanup(srv.shutdown)
-        url = f"http://127.0.0.1:{srv.server_port}/r.git"
-        self.assertEqual(git_remote.visibility(url), "private")
-        need["auth"] = False
-        self.assertEqual(git_remote.visibility(url), "public")
+        self.assertEqual(git_remote.visibility(f"file://{self.remote}"), "private")
+        with mock.patch.dict(sys.modules, {"git_push_grant": None}):
+            self.assertEqual(git_remote.visibility("git@example.org:a/b.git"), "unknown")
+        import git_push_grant
+        with mock.patch.object(git_push_grant, "visibility", lambda origin: f"probed {origin}"):
+            self.assertEqual(git_remote.visibility("git@example.org:a/b.git"), "probed git@example.org:a/b.git")
 
 
 # ---------- the owner form (r1 S1, S5) ----------
@@ -758,11 +716,13 @@ class OwnerForm(Push):
 
     def test_setup_is_never_a_project(self):
         self.docs["setup"] = dict(self.docs["proj"])
-        out, err = io.StringIO(), io.StringIO()
-        with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err):
-            code = git_remote.main(["push", "setup"])
-        self.assertEqual(code, git_remote.REFUSED)
-        self.assertIn("usage", err.getvalue())
+        ran = []
+        with mock.patch.object(git_remote.subprocess, "run",
+                               lambda argv, **kw: (ran.append(argv), subprocess.CompletedProcess(argv, 2))[1]):
+            code = git_remote.main(["push", "setup", "proj"])
+        self.assertEqual(code, 2)
+        self.assertEqual(ran[0][-3:], [str(BIN / "git_push_grant.py"), "setup", "proj"], "setup is the grant's")
+        self.assertEqual(self.calls, [], "it was read as a project")
 
     def test_refused_where_the_platforms_folder_cant_be_written(self):
         self.commit(self.ws, "a.txt", "a\n", "add a")

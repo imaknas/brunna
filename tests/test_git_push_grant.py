@@ -133,6 +133,10 @@ class Base(unittest.TestCase):
                    SSH_AUTH_SOCK=str(self.tmp / "owner-agent.sock"))   # the owner's agent: never used
         self.docs = {"proj": {"name": "proj", "paths": {"workspace": str(self.ws), "origin": "git@github.com:o/proj.git"},
                               "enforce": {"sandbox": True}}}
+        # the entry setup writes enforce.git_push into, now that the registry knows the field (the push core)
+        (self.tmp / "reg" / "proj.yaml").write_text(
+            f"v: 1\nname: proj\npaths:\n  workspace: {self.ws}\n  origin: git@github.com:o/proj.git\n"
+            "enforce:\n  sandbox: true\n")
         self.todos: list[tuple] = []
         self.commits: list[tuple] = []
         for p in (mock.patch.dict(os.environ, env, clear=True),
