@@ -207,10 +207,19 @@ class Server(unittest.TestCase):
              mock.patch.object(m.subprocess, "run", return_value=done) as run, \
              mock.patch.dict(os.environ, {"HUBBUS_LEASE": "", "HUB_LLM_POINT": ""}):
             ok, text = m.outside("connect_project", {"path": str(code / "notes")}, m.Client())
-        self.assertTrue(ok, text)
-        argv, env = run.call_args.args[0], run.call_args.kwargs["env"]
-        self.assertEqual(argv[1:], [str(BIN / "connect.py"), str((code / "notes").resolve()), "--yes"])
-        self.assertEqual(env["BRUNNA_CONNECT_ROOTS"], str(code.resolve()))
+            self.assertTrue(ok, text)
+            argv, env = run.call_args.args[0], run.call_args.kwargs["env"]
+            # what the platform may push is never an agent's to decide: always none (platform-push.md section 2)
+            self.assertEqual(argv[1:], [str(BIN / "connect.py"), str((code / "notes").resolve()), "--yes", "--push",
+                                        "none"])
+            self.assertEqual(env["BRUNNA_CONNECT_ROOTS"], str(code.resolve()))
+            # sandboxing only narrows: an agent may ask for it, and the push stays none
+            ok, text = m.outside("connect_project", {"path": str(code / "notes"), "sandbox": True}, m.Client())
+            self.assertTrue(ok, text)
+            self.assertEqual(run.call_args.args[0][3:], ["--yes", "--sandbox", "--push", "none"])
+            # anything but a real true asks for nothing
+            m.outside("connect_project", {"path": str(code / "notes"), "sandbox": "yes"}, m.Client())
+            self.assertNotIn("--sandbox", run.call_args.args[0])
 
     def test_onboard_rechecks_the_roots_on_its_real_path(self):
         code = self.tmp / "code"

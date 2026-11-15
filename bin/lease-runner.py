@@ -1200,7 +1200,10 @@ class H(http.server.BaseHTTPRequestHandler):
         if why:
             return self.err(409, "busy", _("{why}; upgrade once it stops", why=why))
         old_ws = str(hubconf.workspace(name) or "")
-        cmd = [PY, str(HUB / "bin" / "upgrade-idea.py"), name, "--apply", "--json"] + (["--rename", rename] if rename else [])
+        # what the platform may push for it is the owner's: none here, and the owner's to-do to decide
+        # (docs/design/platform-push.md section 2)
+        cmd = [PY, str(HUB / "bin" / "upgrade-idea.py"), name, "--apply", "--json", "--push", "none"] + \
+            (["--rename", rename] if rename else [])
         env = {**os.environ, "PATH": f"{hubconf.LAUNCHD_PATH}:/usr/sbin:/sbin"}
         try:
             r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, env=env)

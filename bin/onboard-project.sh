@@ -11,12 +11,23 @@
 # **there's commit history, but the working tree is dirty**: that means the user has real work not ready to commit,
 # and the script won't guess and clear it away.
 #
-# Usage: onboard-project.sh [--public] [--no-remote] <local project path>
+# Usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all]
+#                           [--push-email <address>]... <local project path>
 #   run on the hub machine, new projects go in ~/workspace/<name> (since 2026-10-15 every project is on the hub
 #   machine)
 #   --public     make the GitHub repo public when creating it (default private)
 #   --no-remote  don't create a GitHub remote automatically, stay purely local (native): only use this when you're
 #                really sure the project doesn't need a backup on GitHub
+#   --sandbox    sandbox the project (enforce.sandbox, owner-only): when its agent would touch other people's data, or
+#                run or read untrusted code or content (docs/design/platform-push.md section 1). Default: not
+#                sandboxed (--no-sandbox), as before
+#   --push       for a sandboxed project with a remote, which branches the platform may push for its sessions: none (you
+#                push yourself), others (every branch but the default), all. Without it the remote's visibility
+#                decides (an anonymous probe): private: all; public or can't tell: none, plus a one-time owner to-do
+#                to run `brunna push setup <name>` (also when the run came from an agent session). Anything but none
+#                makes the platform's push grant first (a write deploy key, bin/git_push_grant.py); if that fails it
+#                stays none, with the to-do saying why
+#   --push-email the commit emails the platform's pushes may carry (repeatable; default: check 6's proposal)
 #
 # What it does (in order):
 #   1. Precondition checks and automatic fill-in:
@@ -59,16 +70,37 @@ fail() { echo "onboard-project: $1" >&2; exit 1; }
 
 VISIBILITY="--private"
 NO_REMOTE=false
+SANDBOX=false
+PUSH=""
+PUSH_ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --public) VISIBILITY="--public"; shift ;;
     --no-remote) NO_REMOTE=true; shift ;;
+    --sandbox) SANDBOX=true; shift ;;
+    --no-sandbox) SANDBOX=false; shift ;;
+    --push)
+      case "${2:-}" in none|others|all) PUSH="$2"; shift 2 ;; *) fail "$(hub_msg "--push takes none, others or all")" ;; esac ;;
+    --push-email)
+      [ -n "${2:-}" ] || fail "$(hub_msg "--push-email takes an address")"
+      PUSH_ARGS+=(--push-email "$2"); shift 2 ;;
     --) shift; break ;;
     -*) fail "$(hub_msg "unknown argument: {arg}" arg="$1")" ;;
     *) break ;;
   esac
 done
-[ $# -eq 1 ] || fail "$(hub_msg "usage: onboard-project.sh [--public] [--no-remote] <local project path>")"
+[ $# -eq 1 ] || fail "$(hub_msg "usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]... <local project path>")"
+# the platform pushes only for a sandboxed project (an unsandboxed one's agents push with your own git)
+if [ "$SANDBOX" != true ] && { [ "$PUSH" = others ] || [ "$PUSH" = all ]; }; then
+  fail "$(hub_msg "--push {push} is for a sandboxed project: add --sandbox" push="$PUSH")"
+fi
+if [ "$SANDBOX" = true ]; then
+  # enforce.sandbox merged into what the caller registers (create-idea-sandbox.py's fields kept)
+  ONBOARD_REGISTRY_EXTRA="$("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/git_push_grant.py" extra "${ONBOARD_REGISTRY_EXTRA:-}" --sandbox)" \
+    || fail "$(hub_msg "ONBOARD_REGISTRY_EXTRA is not valid JSON")"
+  export ONBOARD_REGISTRY_EXTRA
+fi
+[ -n "$PUSH" ] && PUSH_ARGS+=(--push "$PUSH")
 
 # --- 0. Check the connection to the hub machine, first of all: before any local/GitHub side effect.
 # Later this script must create a bare repo on the hub machine; if it can't connect, the safe thing is that nothing
@@ -81,6 +113,7 @@ fi
 # exist and, on its real path, be strictly inside a root the owner named; checked again here, where it is used, so a
 # folder swapped for a symlink after the caller's check is still refused
 if [ -n "${AGENTHUB_CONNECT_ROOTS:-${BRUNNA_CONNECT_ROOTS:-}}" ]; then
+  PUSH_ARGS+=(--agent)   # not a person's choice: a push left at none raises the owner's setup to-do
   [ -d "$1" ] || fail "$(hub_msg "{path} is not an existing folder" path="$1")"
   _real="$(cd "$1" && pwd -P)"; _inside=false
   IFS=: read -r -a _roots <<<"${AGENTHUB_CONNECT_ROOTS:-${BRUNNA_CONNECT_ROOTS:-}}"
@@ -294,6 +327,12 @@ if "$AGENT_HUB/bin/commit-hub-files.sh" "register $PROJ_NAME (onboard-project.sh
 else
   hub_say "Warning: committing/pushing brunna's registry files failed; do it by hand (the registration itself is written)" >&2
   hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml); committing/pushing brunna failed (see the warning)" name="$PROJ_NAME"
+fi
+# A sandboxed project with a remote: which branches the platform may push for it (docs/design/platform-push.md section
+# 2), and its push grant when that isn't none; the decision and any failure are said by git_push_grant.py itself
+if [ -n "$origin_url" ]; then
+  "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/git_push_grant.py" onboard "$PROJ_NAME" ${PUSH_ARGS[@]+"${PUSH_ARGS[@]}"} \
+    || hub_say "Warning: the platform's push for {name} was not set up; run brunna push setup {name}" name="$PROJ_NAME" >&2
 fi
 # The registration changed the config: apply it now and record that, or the status page keeps saying the config changed
 # but was not applied until someone runs brunna config apply (found on a clean macOS, 11-03). Quiet either way: where it

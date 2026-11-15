@@ -133,6 +133,10 @@ class Endpoint(unittest.TestCase):
         done = self.lease(SID2, state="detached", mode="discuss")
         code, body = self.post("/v1/sandboxes/idea-1/upgrade", {"v": 2, "rename": "room3d"})
         self.assertEqual((code, body["name"]), (200, "room3d"))
+        # what the platform may push is the owner's to decide, never the assistant's: none, and the owner's to-do
+        # (docs/design/platform-push.md section 2)
+        cmd = self.upgraded[-1]
+        self.assertEqual(cmd[cmd.index("--push") + 1], "none")
         for l in (live, done):
             self.assertEqual((l.project, l.cwd), ("room3d", str(self.ws["room3d"])))
         self.assertEqual(sorted(s for s, _, _ in self.moves), [SID, SID2])

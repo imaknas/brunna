@@ -2,8 +2,12 @@
 """Upgrade an idea sandbox (registry type: idea) into a real project: history, files and memory are all kept
 (docs/design/idea-sandboxes.md).
 
-Usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--apply] [--json]
-  Without --apply it only prints what it would do. --json: the last line prints the result (used by lease-runner's
+Usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--push none|others|all] [--apply] [--json]
+  Without --apply it only prints what it would do. --push: which branches the platform may push for the project's
+  sessions once it has its repo (docs/design/platform-push.md section 2); without it the new repo's visibility decides
+  (private: all; public: none, plus a one-time owner to-do to run `brunna push setup <name>`). Anything but none makes
+  the platform's push grant (a write deploy key) first. With --json (lease-runner's call, the assistant's: never a
+  person's choice) none raises the to-do too. --json: the last line prints the result (used by lease-runner's
   POST /v1/sandboxes/<name>/upgrade):
     {"result": "upgraded"|"already", "name", "origin"}                                  exit 0
     {"result": "not_found"|"not_idea"|"dirty"|"name_taken"|"failed", "detail"}        exit 1
@@ -27,6 +31,8 @@ What it does (in order):
      (sandboxes created earlier without an explicit enforce.work get work: true on upgrade: idea sandboxes could
      always make changes in a discuss lease)
   5. Add origin to mirror-list.txt; regenerate the index.md roster; commit-hub-files commits only these files
+  6. The platform's push (bin/git_push_grant.py onboard): as --push says, or by the visibility; a grant that can't be
+     made leaves none, with the owner's to-do saying why. Done again on a rerun (a working grant is kept)
 Each step that changes something outside (rename, repo) is recorded as the stage in .state/idea-upgrades.json once
 done; on a failure partway, call it again and it carries on from where the record says (under the new name if it was
 renamed). It doesn't delete the GitHub repo to "roll back": deleting a repo can't be undone, carrying on is safer.
@@ -178,7 +184,7 @@ def upgraded_doc(doc: dict, final: str, url: str) -> dict:
 
 def main(argv: list[str]) -> int:
     global JSON
-    args, apply, public, new = [], False, False, None
+    args, apply, public, new, push = [], False, False, None, None
     it = iter(argv)
     for a in it:
         if a == "--json":
@@ -187,12 +193,17 @@ def main(argv: list[str]) -> int:
             apply = True
         elif a == "--public":
             public = True
+        elif a == "--push":
+            push = next(it, None)
+            if push not in ("none", "others", "all"):
+                fail(_("--push takes none, others or all"))
         elif a == "--rename":
             new = next(it, None) or fail(_("--rename needs a new name"))
         else:
             args.append(a)
     if len(args) != 1:
-        fail(_("usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--apply]"))
+        fail(_("usage: upgrade-idea.py <sandbox name> [--rename <new name>] [--public] [--push none|others|all] "
+               "[--apply]"))
     name = args[0]
     if (why := unfinished_rename(name)):
         fail(why)
@@ -245,7 +256,9 @@ def main(argv: list[str]) -> int:
              f"gh repo create {owner}/{final} --{'public' if public else 'private'} + push") + _(", origin = {url}", url=url),
             _("registry projects/{name}.yaml: type: project, paths.origin: {url} (purpose/enforce/privacy kept)",
               name=final, url=url),
-            _("add origin to mirror-list.txt, regenerate index.md, commit brunna")]
+            _("add origin to mirror-list.txt, regenerate index.md, commit brunna"),
+            _("the platform's push: {push}", push=push or _("by the new repo's visibility (private: all; public: none "
+                                                             "and a to-do)"))]
     if not JSON:
         print("\n".join(f"  {i}. {p}" for i, p in enumerate(plan, 1)))
     if not apply:
@@ -294,10 +307,23 @@ def main(argv: list[str]) -> int:
     subprocess.run([str(HUB / "bin" / "commit-hub-files.sh"), f"upgrade idea {name} → project {final} (upgrade-idea.py)",
                     f"projects/{final}.yaml", "mirror-list.txt", "index.md"], check=False)
     tell_project(final, url)
+    platform_push(final, push)
     record(name, name=final, origin=url, stage="done")
     if not JSON:
         print(_("Done: {name} is now the project {new} ({url})", name=name, new=final, url=url))
     done("upgraded", 0, name=final, origin=url)
+
+
+def platform_push(name: str, push: str | None) -> None:
+    """Step 6: which branches the platform may push for it, and its grant (git_push_grant.onboard). Never undoes the
+    upgrade: whatever goes wrong is said, and leaves the push at none with the owner's to-do."""
+    try:
+        registry.refresh()   # the registry entry just written: its origin is what the grant is for
+        import git_push_grant
+        git_push_grant.onboard(name, push, None, agent=JSON)
+    except Exception as e:   # the upgrade itself is done
+        print(_("the platform's push for {project} was not set up ({why}); run brunna push setup {project}",
+                project=name, why=e), file=sys.stderr)
 
 
 def tell_project(name: str, url: str) -> None:

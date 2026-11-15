@@ -156,6 +156,23 @@ class Upgrade(unittest.TestCase):
         self.assertEqual([args[args.index(k) + 1] for k in ("--to", "--type", "--id")], ["idea-7", "info", "idea-upgraded-idea-7"])
         self.assertIn(str(self.remote()), args[args.index("--text") + 1])
 
+    def test_push_is_a_choice_of_three_and_a_local_remote_gets_no_platform_push(self):
+        """docs/design/platform-push.md section 2: --push none|others|all; the grant is GitHub's deploy key, so a remote
+        that is a local path (this harness's "GitHub") gets no platform push, said, and the upgrade still completes."""
+        res, code = self.upgrade("--push", "everything")
+        self.assertEqual((code, res["result"]), (1, "failed"))
+        self.assertEqual(self.reg()["paths"]["origin"], "(native)", "refused before anything")
+        r = subprocess.run([PY, str(ROOT / "bin" / "upgrade-idea.py"), "idea-7", "--push", "all"], capture_output=True,
+                           text=True, env={**self.env, "AGENT_HUB_LANG_UI": "en"}, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("the platform's push: all", r.stdout, "the dry run lists it")
+        r = subprocess.run([PY, str(ROOT / "bin" / "upgrade-idea.py"), "idea-7", "--apply", "--push", "all"],
+                           capture_output=True, text=True, env={**self.env, "AGENT_HUB_LANG_UI": "en"}, timeout=60)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("No platform push for idea-7", r.stdout)
+        self.assertEqual(self.record()["idea-7"]["stage"], "done")
+        self.assertNotIn("git_push", (self.reg()["enforce"]))
+
     def test_the_sandboxs_hooks_and_config_never_run_with_the_users_authority(self):
         """Round 6: the upgrade ran `git status` and `git push` (with the user's GitHub credentials) in the sandbox's
         own repo: its pre-push hook and fsmonitor ran as the user."""

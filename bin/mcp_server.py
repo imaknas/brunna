@@ -424,7 +424,9 @@ TOOLS_OUTSIDE = [
                                                "and mailbox), when the user asks for it. Only a folder inside one the "
                                                "owner named for projects; no GitHub repo is created.",
      "inputSchema": {"type": "object", "required": ["path"], "properties": {
-         "path": _str("the folder's absolute path")}}},
+         "path": _str("the folder's absolute path"),
+         "sandbox": {"type": "boolean", "description": "sandbox the project: when its agent will touch other people's "
+                                                       "data, or run or read untrusted code or content"}}}},
 ]
 
 
@@ -484,8 +486,11 @@ def outside(name: str, args: dict, client: "Client") -> tuple[bool, str]:
         return False, _("the user declined; nothing was done")
     env = dict(os.environ)
     names.env_set(env, "CONNECT_ROOTS", ":".join(map(str, roots)))
-    r = subprocess.run([sys.executable, str(BIN / "connect.py"), str(real), "--yes"], capture_output=True, text=True,
-                       timeout=600, env=env)
+    # sandboxing only narrows, so an agent may ask for it; what the platform may push is the owner's to decide (with
+    # brunna push setup: a to-do asks for it), never an agent's (docs/design/platform-push.md section 2)
+    sandbox = ["--sandbox"] if args.get("sandbox") is True else []
+    r = subprocess.run([sys.executable, str(BIN / "connect.py"), str(real), "--yes", *sandbox, "--push", "none"],
+                       capture_output=True, text=True, timeout=600, env=env)
     out = (r.stdout + ("\n" + r.stderr if r.stderr.strip() else "")).strip()
     tail = "" if answer else "\n" + _("Tell the user what was connected: this client can't ask them directly.")
     return r.returncode == 0, out + tail
