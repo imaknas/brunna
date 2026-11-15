@@ -30,7 +30,7 @@ schema v1 (contracts/project.v1.md has the full description):
   publishes: [{kind, path, contract, v}]
   provides:  [{contract, v, schema}]           schema relative to workspace
   services:  [{name, run, label?, keepalive?, throttle_s?, env?, cwd?, expose?}]
-  enforce: {sandbox: false, capabilities: [], work: false, git: platform?}
+  enforce: {sandbox: false, capabilities: [], work: false, git: platform?, git_ci: false}
                                   phase two: sandbox true = render-project-settings.py writes the sandbox +
                                   permission rules; capabilities = platform capabilities ({settings} capabilities,
                                   e.g. gpu), needs sandbox: true; inside the sandbox, hub-run --cap <capability> runs
@@ -41,6 +41,9 @@ schema v1 (contracts/project.v1.md has the full description):
                                   sandbox of it writes a git dir (policy git_fence: no .git, no HEAD file anywhere it
                                   writes), needs sandbox: true. Rendered so far into its services', jobs' and cap-run's
                                   Seatbelt profile only; refused on an OS whose sandbox can't fence (Linux).
+                                  git_ci: true = brunna push (bin/git_remote.py) may push a commit whose .github/
+                                  differs from the remote default branch's (CI runs with the repo's secrets); needs
+                                  sandbox: true.
                                   The record of the owner's explicit authorization (10-25): written when an idea
                                   sandbox is created, carried over on upgrade; other projects add it only with the
                                   owner's consent
@@ -371,10 +374,10 @@ def validate_enforce(doc: dict) -> list[str]:
     enf = doc.get("enforce")
     if enf is None:
         return []
-    if not isinstance(enf, dict) or set(enf) - {"sandbox", "capabilities", "work", "git"} \
+    if not isinstance(enf, dict) or set(enf) - {"sandbox", "capabilities", "work", "git", "git_ci"} \
             or not isinstance(enf.get("sandbox", False), bool):
-        return [_("enforce can only be {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform}}",
-                  cap=_("capability"))]
+        return [_("enforce can only be {{sandbox: true|false, capabilities: [{cap}], work: true|false, git: platform, "
+                  "git_ci: true|false}}", cap=_("capability"))]
     # git through the platform (docs/design/git-broker.md, "Rollout per project"): no sandbox of it writes a git dir.
     # Owner-only like the rest of enforce; a sandbox is what the fence is rendered into
     if "git" in enf and enf["git"] != "platform":
@@ -385,6 +388,11 @@ def validate_enforce(doc: dict) -> list[str]:
     if enf.get("git") and doc.get("name") in (hubconf.get("service_sandbox_exempt", []) or []):
         return [_("enforce.git can't be on for a project in service_sandbox_exempt: its services and jobs run with no "
                   "sandbox")]
+    # brunna push of a commit that changes .github/ (bin/git_remote.py): the owner's allowance, owner-only like the rest
+    if not isinstance(enf.get("git_ci", False), bool):
+        return [_("enforce.git_ci must be true or false")]
+    if enf.get("git_ci") and not enf.get("sandbox"):
+        return [_("enforce.git_ci needs enforce.sandbox: true")]
     work = enf.get("work", False)
     if not isinstance(work, bool):
         return [_("enforce.work must be true or false")]

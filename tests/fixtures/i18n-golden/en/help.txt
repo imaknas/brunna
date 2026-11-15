@@ -86,6 +86,10 @@ owner (you; not commands for project sessions):
                         into the folders its agents load skills from after you type yes, or with the approval code
                         its review printed (bin/skills_sync.py, docs/design/skills-sync.md); the platform reminds you
                         when changes wait for review
+  brunna push <project> [<branch>] [--yes]
+                        push a sandboxed project's branch to its registry remote with your git, from a bare repo the
+                        platform owns, never in the project's repo (bin/git_remote.py): fast-forward only, no tags; it
+                        shows the commits and asks first
 for project sessions (these are what the rules files name; the permission rules allow only these, not the admin commands above):
   brunna send | inbox | show | ack | pass | done | thread | open-questions …   = the project mailbox (bin/hubbus subcommands of the
                         same name)

@@ -1,0 +1,177 @@
+=== nothing to push: brunna push proj main --yes
+[exit 0]
+--- stdout
+沒東西要推:main 沒有遠端缺少的 commit
+--- stderr
+
+=== .github refused: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:<SHA> 的 .github/ 跟遠端的 main 不一樣:CI 會拿 repo 的 secrets 跑它;Alex 在登錄寫 enforce.git_ci: true 才允許
+
+=== no terminal: brunna push proj main
+[exit 2]
+--- stdout
+!! .github/ 跟遠端的 main 不一樣:CI 會照它跑,而且拿得到 repo 的 secrets(enforce.git_ci 允許)
+推送 proj main → <TMP>/remote.git
+  範圍:<SHA>..<SHA>,2 個 commit
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! 遠端最近的歷史裡沒出現過的作者 email:someone@else.example
+  改到的路徑:
+  !!A .github/workflows/ci.yml
+    A b.txt
+--- stderr
+拒絕:沒有終端機可以確認:在終端機裡跑,或加 --yes
+
+=== declined: brunna push proj main
+[exit 2]
+--- stdout
+!! .github/ 跟遠端的 main 不一樣:CI 會照它跑,而且拿得到 repo 的 secrets(enforce.git_ci 允許)
+推送 proj main → <TMP>/remote.git
+  範圍:<SHA>..<SHA>,2 個 commit
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! 遠端最近的歷史裡沒出現過的作者 email:someone@else.example
+  改到的路徑:
+  !!A .github/workflows/ci.yml
+    A b.txt
+--- stderr
+拒絕:沒有推
+
+=== pushed: brunna push proj main --yes
+[exit 0]
+--- stdout
+!! .github/ 跟遠端的 main 不一樣:CI 會照它跑,而且拿得到 repo 的 secrets(enforce.git_ci 允許)
+推送 proj main → <TMP>/remote.git
+  範圍:<SHA>..<SHA>,2 個 commit
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! 遠端最近的歷史裡沒出現過的作者 email:someone@else.example
+  改到的路徑:
+  !!A .github/workflows/ci.yml
+    A b.txt
+To <TMP>/remote.git
+   <SHA>..<SHA>  <SHA> -> main
+推好了 main:<SHA>..<SHA>。專案自己的 repo 沒動:它的 origin/main 等它下次 fetch 才會跟上
+--- stderr
+
+=== refused: brunna push proj --force main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:--force:brunna push 只對一個分支做 fast-forward(不強制推送、不推 tag、不刪分支、不做 mirror)
+
+=== refused: brunna push proj --tags --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:--tags:brunna push 只對一個分支做 fast-forward(不強制推送、不推 tag、不刪分支、不做 mirror)
+
+=== refused: brunna push proj refs/tags/v1 --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:refs/tags/v1:brunna push 不推 tag
+
+=== refused: brunna push proj :feature --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕::feature:寫一個分支名,不是 refspec(不刪分支,也不推到別的目的地)
+
+=== refused: brunna push proj main:other --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:main:other:寫一個分支名,不是 refspec(不刪分支,也不推到別的目的地)
+
+=== refused: brunna push proj +main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:+main:+ 開頭的 refspec 是強制推送;brunna push 只做 fast-forward
+
+=== refused: brunna push proj main feature --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:一次只推一個分支(給了 2 個)
+
+=== refused: brunna push proj refs/heads/main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:refs/heads/main:寫分支名(refs/heads/<分支> 的那段),不是 ref
+
+=== refused: brunna push proj --bogus --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:不認得的選項 --bogus
+
+=== refused: brunna push proj bad..name --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:bad..name 不是分支名稱
+
+=== not a fast-forward: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:main 不是遠端 <SHA> 的 fast-forward:先在專案裡 merge 或 rebase 到它上面(brunna push 從不強制推送)
+
+=== no such branch: brunna push proj nope --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 沒有 nope 這個分支
+
+=== origin None: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:登錄裡沒有它的 paths.origin:brunna push 只推到登錄寫的那個遠端
+
+=== origin (native): brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:登錄裡沒有它的 paths.origin:brunna push 只推到登錄寫的那個遠端
+
+=== origin ext::sh: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:paths.origin ext::sh 不是 brunna push 會連的遠端
+
+=== origin <TMP>/ws/proj/.git: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:paths.origin <TMP>/ws/proj/.git 在沙盒專案寫得到的資料夾裡
+
+=== empty remote: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:看不出遠端的預設分支(ls-remote --symref 沒有 HEAD;是空的遠端?):第一次推送不歸 brunna push 做
+
+=== not sandboxed: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 沒有沙盒:照平常用 git 推就好(brunna push 是給沙盒專案用的,Alex 的 git 不能在它們的 repo 裡跑)
+
+=== not registered: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 不在登錄裡
+
+=== usage: brunna push
+[exit 2]
+--- stderr
+用法:brunna push <專案> [<分支>] [--yes]

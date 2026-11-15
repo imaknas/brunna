@@ -1,0 +1,177 @@
+=== nothing to push: brunna push proj main --yes
+[exit 0]
+--- stdout
+nothing to push: main has no commits the remote lacks
+--- stderr
+
+=== .github refused: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: <SHA> changes .github/ against the remote's main: CI would run it with the repo's secrets; the owner allows that with enforce.git_ci: true in the registry
+
+=== no terminal: brunna push proj main
+[exit 2]
+--- stdout
+!! .github/ differs from main on the remote: CI runs what it says, with the repo's secrets (allowed by enforce.git_ci)
+push proj main → <TMP>/remote.git
+  range: <SHA>..<SHA>, 2 commits
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! author emails not in the remote's recent history: someone@else.example
+  changed paths:
+  !!A .github/workflows/ci.yml
+    A b.txt
+--- stderr
+refused: no terminal to confirm on: run it in a terminal, or add --yes
+
+=== declined: brunna push proj main
+[exit 2]
+--- stdout
+!! .github/ differs from main on the remote: CI runs what it says, with the repo's secrets (allowed by enforce.git_ci)
+push proj main → <TMP>/remote.git
+  range: <SHA>..<SHA>, 2 commits
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! author emails not in the remote's recent history: someone@else.example
+  changed paths:
+  !!A .github/workflows/ci.yml
+    A b.txt
+--- stderr
+refused: not pushed
+
+=== pushed: brunna push proj main --yes
+[exit 0]
+--- stdout
+!! .github/ differs from main on the remote: CI runs what it says, with the repo's secrets (allowed by enforce.git_ci)
+push proj main → <TMP>/remote.git
+  range: <SHA>..<SHA>, 2 commits
+  !!<SHA>  Dev <someone@else.example>  from elsewhere
+    <SHA>  Dev <dev@example.org>  add a workflow
+  !! author emails not in the remote's recent history: someone@else.example
+  changed paths:
+  !!A .github/workflows/ci.yml
+    A b.txt
+To <TMP>/remote.git
+   <SHA>..<SHA>  <SHA> -> main
+pushed main: <SHA>..<SHA>. The project's own repo is untouched: its origin/main moves with its next fetch
+--- stderr
+
+=== refused: brunna push proj --force main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: --force: brunna push makes only a fast-forward of one branch (no force, tags, deletes or mirrors)
+
+=== refused: brunna push proj --tags --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: --tags: brunna push makes only a fast-forward of one branch (no force, tags, deletes or mirrors)
+
+=== refused: brunna push proj refs/tags/v1 --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: refs/tags/v1: brunna push pushes no tags
+
+=== refused: brunna push proj :feature --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: :feature: name one branch, not a refspec (no deletes, no other destination)
+
+=== refused: brunna push proj main:other --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: main:other: name one branch, not a refspec (no deletes, no other destination)
+
+=== refused: brunna push proj +main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: +main: a + refspec forces; brunna push makes fast-forwards only
+
+=== refused: brunna push proj main feature --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: one branch per call (got 2)
+
+=== refused: brunna push proj refs/heads/main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: refs/heads/main: name a branch (as in refs/heads/<branch>), not a ref
+
+=== refused: brunna push proj --bogus --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: unknown option --bogus
+
+=== refused: brunna push proj bad..name --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: bad..name is not a branch name
+
+=== not a fast-forward: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: main is not a fast-forward of the remote's <SHA>: merge or rebase onto it in the project first (brunna push never forces)
+
+=== no such branch: brunna push proj nope --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: proj has no branch nope
+
+=== origin None: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: the registry has no paths.origin for it: brunna push sends only to the remote the registry names
+
+=== origin (native): brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: the registry has no paths.origin for it: brunna push sends only to the remote the registry names
+
+=== origin ext::sh: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: paths.origin ext::sh is not a remote brunna push contacts
+
+=== origin <TMP>/ws/proj/.git: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: paths.origin <TMP>/ws/proj/.git is in a folder a sandboxed project writes
+
+=== empty remote: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: the remote's default branch can't be told (ls-remote --symref shows no HEAD; an empty remote?): its first push is not brunna push's
+
+=== not sandboxed: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: proj is not sandboxed: push it with git as usual (brunna push is for sandboxed projects, whose repo the owner's git must not run in)
+
+=== not registered: brunna push proj main --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: proj is not in the registry
+
+=== usage: brunna push
+[exit 2]
+--- stderr
+usage: brunna push <project> [<branch>] [--yes]

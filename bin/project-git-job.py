@@ -58,6 +58,10 @@ readable. Nothing here decides anything for the platform; the caller treats the 
                                           link); prints its path relative to ws
   head <ws>                               JSON {branch, dirty}
   bundle-head <ws>                        stdout: a bundle of the checked-out branch
+  bundle-branch <ws> <branch> [<sha>…]    stdout: a bundle of refs/heads/<branch> without what the given commits reach
+                                          (the remote's tips, for brunna push: bin/git_remote.py); a sha this repo
+                                          lacks is left out of that. Exit 3: nothing the given commits don't reach,
+                                          4: no such branch
   set-origin <ws> <url> <branch>          origin = url, the branch tracking it
   tracked <repo> <name>…                  JSON [the tracked paths at or under one of the names, at any depth] (at
                                           most 200): what a sandboxed project tracks among the control names
@@ -578,6 +582,29 @@ def op_bundle_head(ws: str) -> int:
     return git(ws, "bundle", "create", "-q", "-", f"refs/heads/{b}", text=False, stdout=sys.stdout.buffer).returncode
 
 
+NO_BRANCH = 4
+
+
+def op_bundle_branch(ws: str, branch: str, *have: str) -> int:
+    """stdout: a bundle of refs/heads/<branch>, less what the commits in <have> reach (only the ones this repo has: a
+    bundle's prerequisites must exist here). The caller fetches it into a bare repo that holds those commits."""
+    if git(ws, "check-ref-format", "--branch", branch).returncode != 0 or branch.startswith("-"):
+        sys.stderr.write(f"not a branch name: {branch}\n")
+        return 2
+    ref = f"refs/heads/{branch}"
+    if git(ws, "rev-parse", "--verify", "-q", f"{ref}^{{commit}}").returncode != 0:
+        sys.stderr.write(f"no branch {branch} in this repo\n")
+        return NO_BRANCH
+    known = [h for h in have if len(h) in (40, 64) and all(c in "0123456789abcdef" for c in h)
+             and git(ws, "cat-file", "-e", f"{h}^{{commit}}").returncode == 0]
+    r = git(ws, "bundle", "create", "-q", "-", ref, *(f"^{h}" for h in known), text=False, stdout=sys.stdout.buffer,
+            stderr=subprocess.PIPE)
+    if r.returncode and b"empty bundle" in (r.stderr or b""):
+        return NOTHING
+    sys.stderr.write((r.stderr or b"").decode(errors="replace"))
+    return r.returncode
+
+
 def op_set_origin(ws: str, url: str, branch: str) -> int:
     """origin = url, and the branch tracks origin's branch of the same name (the platform pushed it)."""
     has = git(ws, "remote", "get-url", "origin").returncode == 0
@@ -622,7 +649,7 @@ OPS = {"test-runs": op_test_runs, "worktrees": op_worktrees, "ignored": op_ignor
        "checkout-sigs": op_checkout_sigs, "changed": op_changed, "copy-back": op_copy_back, "hooks": op_hooks,
        "hook-write": op_hook_write, "hook-remove": op_hook_remove, "bundle-unpushed": op_bundle_unpushed, "diff-head": op_diff_head,
        "memory-sync": op_memory_sync, "exclude": op_exclude, "save": op_save, "head": op_head, "first-look": op_first_look,
-       "bundle-head": op_bundle_head, "set-origin": op_set_origin, "tracked": op_tracked}
+       "bundle-head": op_bundle_head, "bundle-branch": op_bundle_branch, "set-origin": op_set_origin, "tracked": op_tracked}
 
 
 if __name__ == "__main__":
