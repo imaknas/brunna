@@ -10,6 +10,7 @@ with a control: plain git (or the same thing without the trap) does what the pla
 
     bin/run-tests <a folder holding this module>
 """
+import contextlib
 import io
 import json
 import os
@@ -1050,14 +1051,16 @@ class Review(Push):
 
     def test_s2_a_lease_never_pushes(self):
         """A lease loads the workspace's local settings (the session rendering, with the push rule and folder): its own
-        --settings deny both, and deny wins. Control: the session rendering allows them."""
+        --settings ask for the command (ask beats allow: the owner's relay) and deny the folder. Control: the session
+        rendering allows them."""
         import importlib.util
         import runtime_claude
         pol = policy.policy("proj", self.docs["proj"], {"projects": self.docs})
         folder = str(self.push_root / "proj")
-        lease = runtime_claude.lease_settings(pol)["permissions"]["deny"]
-        self.assertIn("Bash(brunna push *)", lease)
-        self.assertTrue(any(r.startswith("Edit(") and folder in r for r in lease))
+        lease = runtime_claude.lease_settings(pol)["permissions"]
+        self.assertIn("Bash(brunna push *)", lease["ask"])
+        self.assertNotIn("Bash(brunna push *)", lease["deny"])
+        self.assertTrue(any(r.startswith("Edit(") and folder in r for r in lease["deny"]))
         session = runtime_claude.session_settings(pol)
         self.assertIn("Bash(brunna push *)", session[2])
         self.assertNotIn("Bash(brunna push *)", session[1])
@@ -1068,7 +1071,7 @@ class Review(Push):
         with mock.patch.object(lr, "DIR", self.tmp / "leases"), \
                 mock.patch.object(policy, "for_project", lambda name: pol):
             f = lr.deny_settings("proj")
-        self.assertIn("Bash(brunna push *)", json.loads(f.read_text())["permissions"]["deny"])
+        self.assertIn("Bash(brunna push *)", json.loads(f.read_text())["permissions"]["ask"])
 
     def test_grant_probe_shapes(self):
         import git_push_grant
@@ -1140,10 +1143,11 @@ class ReReview(Review):
         vals = ["".join(rnd.choice(string.ascii_letters + string.digits) for _ in range(rnd.randint(12, 64)))
                 for _ in range(4096)]
         d = push_checks.Declared.__new__(push_checks.Declared)
-        d.names, d.hashes = {v: "n" for v in vals}, {}
-        d.longest = max(map(len, vals))
+        d.names, d.hashes, d.by_key = {v: "n" for v in vals}, {}, {}
+        for v in vals:
+            d.by_key.setdefault(v[:d.KEY], []).append(v)
         import re as _re
-        d.rx = _re.compile(push_checks._trie_pattern(sorted(vals)))
+        d.rx = _re.compile("(?=(" + push_checks._trie_pattern(sorted(d.by_key)) + "))")
         text = "".join(rnd.choice(string.ascii_letters + " \n") for _ in range(10 << 20)) + vals[7]
         t0 = time.monotonic()
         self.assertEqual(d.hits([text], time.monotonic() + 120), ["n"])
@@ -1201,9 +1205,9 @@ class ReReview(Review):
         import runtime_claude
         pol = policy.policy("proj", self.docs["proj"], {"projects": self.docs})
         allow = set(runtime_claude.session_settings(pol)[2])
-        deny = set(runtime_claude.lease_settings(pol)["permissions"]["deny"])
+        ask = set(runtime_claude.lease_settings(pol)["permissions"]["ask"])
         self.assertTrue(allow)
-        self.assertEqual(sorted(allow - deny), [], "an allow the lease loads that its own settings don't deny")
+        self.assertEqual(sorted(allow - ask), [], "an allow the lease loads that its own settings don't ask for")
 
     def test_5_the_visibility_todo_stays_open(self):
         self.field(visibility="public", emails=["1+d@users.noreply.github.com"])
@@ -1247,7 +1251,139 @@ class ReReview(Review):
                     json.dumps({"v": 1, "id": rid, "branch": "main", "sha": self.base}))
             push_queue.take_in("proj", letter=lambda p, t, k: keys.append(k))
         flood = [k for k in keys if k.startswith("push-flood-")]
-        self.assertEqual(len(set(flood)), 1, "one key a day: the bus sends it once")
+        self.assertEqual(len(flood), 1, "one flood letter a day")
+
+
+class ThirdReview(Review):
+    """The third re-review: B-1 (no joined path under the request root), B-2 (a record a name can't split), S-1 (a
+    matcher that can't fail), S-2 (a long value inside a longer word), S-3 (one batch for the object checks), S-4 (path
+    bytes) and the nits."""
+
+    def test_b1_a_swapped_folder_never_leads_outside(self):
+        """A session swaps its folder for a link to another folder and back, as fast as it can, while take-in clears
+        entries: nothing outside is removed. Control: the old fallback (a joined path) removes it."""
+        outside = self.tmp / "outside"
+        (outside / "Documents").mkdir(parents=True)
+        (outside / "Documents" / "precious").write_text("mine\n")
+        push_queue.ensure_folder("proj")
+        folder = self.push_root / "proj"
+        stop = threading.Event()
+
+        def swapper():
+            real = self.push_root / "proj-real"
+            while not stop.is_set():
+                try:
+                    if folder.is_symlink():
+                        folder.unlink()
+                        real.rename(folder)
+                    else:
+                        (folder / "Documents").mkdir(exist_ok=True)
+                        folder.rename(real)
+                        folder.symlink_to(outside)
+                except OSError:
+                    pass
+        t = threading.Thread(target=swapper)
+        t.start()
+        try:
+            deadline = time.monotonic() + 3
+            while time.monotonic() < deadline:
+                with contextlib.suppress(OSError, ValueError):
+                    push_queue.take_in("proj")
+        finally:
+            stop.set()
+            t.join()
+        self.assertEqual((outside / "Documents" / "precious").read_text(), "mine\n")
+        # control: removing by a joined path follows the link
+        if folder.is_symlink():
+            folder.unlink()
+        elif folder.exists():
+            shutil.rmtree(folder)
+        folder.symlink_to(outside)
+        shutil.rmtree(folder / "Documents")
+        self.assertFalse((outside / "Documents").exists())
+
+    def test_b2_a_name_with_line_separators(self):
+        v = self.VALUE
+        (self.ws / ".env").write_text(f"DB_PASSWORD={v}\n")
+        self.docs["proj"]["secrets"] = [{"name": "db x y\u0085z\r", "path": ".env", "env_key": "DB_PASSWORD"}]
+        self.shape(0, "ok\n")
+        self.docs["proj"]["secrets"] = []
+        self.assertEqual(self.shape(1, f"x = {v}\n")["check"], "secrets", "the value was forgotten")
+        raw = push_checks.declared_file("proj").read_bytes()
+        self.assertTrue(raw.isascii())
+
+    def test_b2_a_cut_line_costs_only_itself(self):
+        self.declare(self.VALUE)
+        self.shape(0, "ok\n")
+        f = push_checks.declared_file("proj")
+        with open(f, "ab") as fh:
+            fh.write(b'{"v": "cut-off-in-the-midd')   # a crash mid-append
+        self.declare("Another-Value-2024x")
+        self.shape(1, "ok\n")
+        self.assertEqual(self.shape(2, "a Another-Value-2024x b\n")["check"], "secrets")
+        self.assertEqual(self.shape(3, f"x {self.VALUE}\n")["check"], "secrets")
+
+    def test_s1_values_sharing_long_prefixes(self):
+        """Values nested 500 deep by their prefixes: a regex of the values would overflow sre's recursion; the match
+        can't fail on them."""
+        (self.ws / "keys.txt").write_text("\n".join("K" + "x" * i + "1" for i in range(20, 500, 4)) + "\n")
+        self.docs["proj"]["secrets"] = [{"name": "keys", "path": "keys.txt"}]
+        res = self.shape(0, "plain text\n")
+        self.assertEqual(res["state"], "pushed", res)
+        self.assertEqual(self.shape(1, "K" + "x" * 300 + "1\n")["check"], "secrets")
+
+    def test_s2_a_long_value_inside_a_longer_word(self):
+        v = "Zz9" * 200   # 600 bytes
+        (self.ws / ".env").write_text(f"BIG={v}\n")
+        self.docs["proj"]["secrets"] = [{"name": "big", "path": ".env", "env_key": "BIG"}]
+        for i, text in enumerate([f"TOKEN={v}\n", f"https://x.example/?k={v}&a=1\n"]):
+            with self.subTest(text=text[:20]):
+                res = self.shape(i, text)
+                self.assertEqual(res["check"], "secrets", res)
+        recs = [json.loads(x) for x in push_checks.declared_file("proj").read_bytes().split(b"\n") if x.strip()]
+        self.assertTrue(all(len(r["v"].encode()) <= push_checks.MAX_VALUE for r in recs if "v" in r))
+
+    def test_s3_one_batch_for_the_object_checks(self):
+        src = self.tmp / "many"
+        src.mkdir()
+        for i in range(300):
+            (self.ws / "many" / f"f{i}").parent.mkdir(exist_ok=True)
+            (self.ws / "many" / f"f{i}").write_text(f"{i}\n")
+        self.git(self.ws, "add", "many")
+        self.git(self.ws, "commit", "-q", "-m", "many")
+        c = self.git(self.ws, "rev-parse", "HEAD").strip()
+        calls = []
+
+        def g(*a, input=None):
+            calls.append(a[0])
+            return subprocess.run(["git", "-C", str(self.ws), *a], input=input, capture_output=True, check=True).stdout
+        objs = push_checks.Objects(g, c, [self.base])
+        entries, gl, _f = objs.walk(time.monotonic() + 60)
+        calls.clear()
+        push_checks.objects_check(objs, entries, gl, time.monotonic() + 60)
+        self.assertLessEqual(len(calls), 1, calls[:5])
+        with self.assertRaises(push_checks.Failure):
+            objs.raw.clear()
+            push_checks.objects_check(objs, entries, gl, time.monotonic() - 1)
+
+    def test_s4_paths_are_counted_in_bytes(self):
+        name = "\U0001F600" * 50   # 50 characters, 200 bytes
+        with mock.patch.object(push_checks, "MAX_PATH", 150):
+            self.commit_as(f"{name}/a.txt", "a\n", "astral")
+            self.refused(self.ask(), check="size", says="bytes")
+
+    def test_n1_dotenv(self):
+        got = push_checks.dotenv_values('export\tA="x\\"y-0123456789"\nB="multi\nline-0123456789"\nC=plain0123456789 # c\n'
+                                        "D='q # x 0123456789'\n")
+        self.assertEqual(got, {"A": 'x"y-0123456789', "B": "multi\nline-0123456789", "C": "plain0123456789",
+                               "D": "q # x 0123456789"})
+
+    def test_n3_a_letter_key_carries_the_take_in(self):
+        rid = self.request()
+        self.take()
+        self.serve()
+        [(_p, _t, key)] = self.letters
+        self.assertTrue(key.startswith(f"push-{rid}-") and key != f"push-{rid}", key)
 
 
 # ---------- merge-branch's push_on_merge in a sandboxed project (section 5) ----------
