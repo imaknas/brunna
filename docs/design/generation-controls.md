@@ -1,7 +1,9 @@
 # Generation controls for a project's model calls
 
-> **Status**: design, first draft (11-15). Not built. Not cold-reviewed yet. Asked for by the owner on 11-15, after a
-> project's request.
+> **Status**: parked (11-15); review folded. Not built. First draft 11-15, asked for by the owner after a project's
+> request; a blind cold review the same day found three blocking problems, recorded with how each is taken in
+> "Review (11-15) and status: parked" at the end. For now the owner chose another route: the project calls the
+> providers directly with its own pay-per-use keys. Resume from that section, not from the design text alone.
 
 Source: a research project reproduces a public benchmark in which an "editor" model works for up to 64 turns with four
 tools, under fixed conditions: at most 4096 output tokens per response, temperature 0, reasoning off, nothing in its
@@ -405,3 +407,92 @@ Each step goes live on its own; a point that declares nothing behaves exactly as
 - Prompt caching on the messages route.
 - Reasoning levels on Ollama and the OpenAI-compatible provider beyond what `generation_support` can confirm per model.
 - A GPU-aware queue across local models and capability jobs.
+
+## Review (11-15) and status: parked
+
+**Parked.** On 11-15 the owner chose, for now, that the research project calls OpenAI and Anthropic directly with its own
+pay-per-use keys: its own account, its own spending, its own log of every request. That is an exception the owner made
+for this project, not a change to the 11-09 direction (a project's code asks the platform for model calls). The keys are
+the project's credentials and are declared in its registry `secrets:` like any other. Nothing in C1–C10 is built. When
+this design is resumed, every finding below is taken as written here, before the design text; where the two disagree,
+this section wins.
+
+**What stands on its own, parked or not** (separate fixes, not steps of this design; listed in direction.md):
+- C7: the advisor turned off in every platform run of Claude Code, with its probe (and the probe's positive control,
+  below).
+- The Claude runtime's `complete()` ignores `max_tokens`: say so (doctor, the usage row) instead of implying a cap.
+- `provider_anthropic` forces `tool_choice` for structured output, which current models refuse.
+
+### Blocking
+
+- **B1. The messages request was an open passthrough.** As drafted, a project could put URL-sourced content blocks or a
+  provider's server-side tool types into `tools` or `opaque`, and the provider would reach the internet (or run code)
+  with the owner's key, past the project's sandbox and its `network:`. Taken:
+  - `contracts/messages.v1` is **closed**: `additionalProperties: false` at every level, an enum of block types.
+  - A tool is only `{name, description, input_schema}`. No `type`, so no server-side tool can be named.
+  - Content blocks are `text`, `tool_call`, `tool_result` and `opaque`; no image, document or URL source in v1.
+  - `opaque` is limited, per backend, to that backend's reasoning block types (Anthropic: `thinking`,
+    `redacted_thinking`), each with only the fields the backend defines for it, and only in an assistant turn.
+  - `tool_result` content is a string in v1.
+  - Adapters build the request body from the validated fields only; no object from the request is copied through
+    whole. A test sends each forbidden shape and expects a refusal before any request is made.
+- **B2. Redaction rewrote the structure.** `redact()` over the whole conversation turns every tool-call id (20 or more
+  letters and digits) into `[redacted]` (measured), which breaks the pairing of calls and results and the signatures of
+  reasoning blocks. Taken: under `content: redacted`, only text-bearing fields are masked (`text`, `tool_result`
+  content, the string values of a call's arguments, `system`), never ids, names, schemas or `opaque` blocks. The record
+  counts redactions per field kind.
+- **B3. The budget bounded nothing on the metered route.** The Anthropic and OpenAI adapters return no cost; a model the
+  owner pins by name without a listed `price` gets none; `today_cost()` skips rows whose cost is null; `daily_usd` is
+  optional and platform-wide. A 64-turn run would spend with no limit taking hold. Taken:
+  - The config check requires, for a provider a project's call is pinned to with `location: cloud` and a key, a `price`
+    for the pinned model and an `llm.budget.daily_usd`. A metered call whose cost can't be computed from the reply's
+    tokens is refused, never recorded as free.
+  - A per-project budget, `llm.budget.projects.<project>.daily_usd` (owner-only), checked before every metered call of
+    that project, beside the global one. This is direction.md's "per-project model budgets"; resuming this design
+    needs it first.
+  - O4 is restated accordingly (below).
+
+### Should-fix
+
+- **Reasoning comes back in more places.** Besides Anthropic's `thinking` there is its `redacted_thinking`, and
+  OpenAI-compatible replies carry reasoning in `message.reasoning` or `message.reasoning_content` (measured on Ollama's
+  `/v1` endpoint, where `reasoning_effort: "none"` does turn it off). C3's `reasoning: off` check reads all of them;
+  the OpenAI-compatible adapter may map `off` to `reasoning_effort: "none"` where `generation_support` confirms it.
+- **A cut tool call can vanish.** On Ollama a response cut inside a tool call comes back with empty content and
+  `tool_calls: null` (measured). The contract gets a way to return a cut or invalid assistant turn: a `tool_call` with
+  `arguments_raw` (the text as received, unparsed) and `incomplete: true`. The record says `dropped_by_backend: true`
+  when the backend reports output tokens but returns no content for them.
+- **Undeclared tool calls are returned and flagged, not refused.** A model calling a tool the request didn't declare is
+  part of what a benchmark measures, and the platform executes nothing either way. The call comes back marked
+  `undeclared: true` and the record counts it (C3's tools row changes accordingly).
+- **`brunna records` from a sandboxed session** can't read platform state. It gets a view the platform writes into the
+  project's own folder (as the mailbox does), and the doc says plainly that only the platform's copy is tamper-proof: the
+  project's copy and the result's `record` are the project's to change.
+- **The request copies grow fast.** cap-runner writes each request's `in.json` into platform state; a conversation sent
+  again every turn makes their total grow with the square of the turns (64 turns of a conversation that reaches 200 KB
+  is about 6 MB per run), and platform state goes into the nightly backup. Taken: `in.json` is deleted when the job
+  ends, on every way it ends, and its folder is left out of the backup; doctor's row for the point states the volume of
+  the last run.
+- **Oversize requests fail silently today.** cap-runner's `MAX_REQ` is 512 KB while its header still says 64 KB, and a
+  request over it gets no answer the client sees. Taken: a rejection path (126 with the size and the limit), the header
+  corrected, the limit a setting; and the turn latency measured at large requests (100 KB, 500 KB, 2 MB) before its
+  default is chosen.
+- **Sizing Ollama's window on the messages route** uses the previous turn's reported input tokens (plus an estimate for
+  the new messages and `max_output_tokens`), not the byte estimate alone, which digits and code skew.
+- **Owner caps for every number a project sets.** `context` and `timeout` get owner caps like `max_output_tokens`
+  (`llm.project_max_context`, and `cap_runner.max_timeout_s` named as the timeout's cap); O2 lists them all.
+- **The advisor probe needs a positive control.** A probe that only looks for advisor iterations in the usage passes
+  when the advisor simply wasn't offered. It first runs with `CLAUDE_CODE_ENABLE_EXPERIMENTAL_ADVISOR_TOOL` set and the
+  disable variable unset and must see the advisor tool **in the request** (the tool's verbose request detail or its
+  debug log), then with the platform's environment and must not. The variable set in `_env` also reaches
+  `lease-resume` (a lease continued in the owner's terminal): intended, since a lease is a platform session the owner
+  borrows; the lease's header says so when this lands.
+- **Nits:** C1's example shows `system: none`; with `from_request` the request's `system` is used, and unset means
+  `none`. Ollama reports `done_reason: stop` alongside `tool_calls`, so `stop: tool_calls` is derived from the content,
+  not from the reason. The record adds the model's digest (Ollama's `/api/show`; the provider's model id and version
+  where it gives one) and `cache_read` tokens.
+
+### Owner questions, restated
+
+O1–O3 and O5 stand as written. **O4** becomes: a per-project daily budget for metered calls (owner-only), required before
+any project call can be pinned to a metered provider (B3). A daily ceiling on unmetered (local) calls stays out of v1.

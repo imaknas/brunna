@@ -214,7 +214,13 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   the desktop apps' own copies stay theirs. A user-level change, so only the user turns it on.
 - **A project model call's own time limit:** `models:` takes only `tier`, and a project's call stops at the platform's
   600 s; long prompts on the strong tier hit it (reported 11-15). A `timeout_s` per call point, under a platform cap.
-  Designed as step 2 of `generation-controls.md` (`models.<point>.timeout`, up to `cap_runner.max_timeout_s`).
+  Also step 2 of the parked `generation-controls.md` (`models.<point>.timeout`, up to `cap_runner.max_timeout_s`).
+- **Generation controls for a project's model calls** (`generation-controls.md`): parked 11-15; review folded (three
+  blocking findings, each with how it is taken, in its last section). For now the owner chose that the project that
+  asked calls the providers directly with its own pay-per-use keys. Standing alone, parked or not: the advisor off in
+  every platform run of Claude Code (a probe with a positive control), the Claude runtime's `complete()` saying it
+  doesn't hold `max_tokens`, and `provider_anthropic`'s forced `tool_choice`, which current models refuse. Resuming it
+  needs the per-project budgets above first.
 
 ### 6. Waiting on the owner
 
@@ -245,10 +251,6 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   lists zero as an open-source prerequisite.
 - llm-providers: the switch recommendations from shadow mode, and decision 3 (where memory notes come from for other
   agents).
-- Generation controls for a project's model calls (`generation-controls.md`, designed 11-15, not built, not yet
-  cold-reviewed): O1 which backend serves a benchmark's editor (on current Claude models temperature can't be set, so a
-  faithful run may need a local or an older model), O2 controls set by the project under the owner's caps, O3 unmasked
-  content, O4 a daily ceiling for model calls, O5 the advisor off in every platform run.
 
 ### 7. Not verified on a real run
 
