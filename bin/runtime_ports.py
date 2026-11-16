@@ -656,6 +656,7 @@ class Credential(NamedTuple):
     warn_before: datetime.timedelta | None = None   # how long before expiry to remind
     used_by: str | None = None                      # who uses it (for people; the platform states the uses it knows)
     note: str | None = None                         # a note to print when checking (e.g. the expiry date can't be seen)
+    key: str | None = None                          # a stable name the owner's settings use (logins.not_used)
 
 
 class ToolServer(NamedTuple):

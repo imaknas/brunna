@@ -215,6 +215,20 @@
         }
       }
     },
+    "logins": {
+      "type": "object",
+      "description": "the coding agents' logins on this machine (bin/check-claude-login.py)",
+      "properties": {
+        "not_used": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "keys of logins nothing on this machine uses (e.g. ssh-file: the agent run in an SSH terminal): their expiry is shown, never alerted on"
+        }
+      },
+      "additionalProperties": false
+    },
     "github": {
       "type": "object",
       "properties": {

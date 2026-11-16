@@ -2558,7 +2558,7 @@ def credentials() -> list:
                           present=present, renew=_("run claude once in a terminal on the hub machine so it refreshes, "
                                                    "or /login again"),
                           path=str(creds), expires=expires, warn_before=datetime.timedelta(days=7),
-                          used_by=_("used by claude under SSH"), note=note))
+                          used_by=_("used by claude under SSH"), note=note, key="ssh-file"))
     return out
 
 

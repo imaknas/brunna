@@ -13,7 +13,9 @@ silently falling back to a local model when the login lapsed is a serious silent
      (scheduler, leases, lease-resume). One request with LLM_AUTH=token; remind once the file is over 335 days old
      (30 days before the year runs out)
   3. ~/.claude/.credentials.json (what claude uses when the keychain cannot be read under SSH): only
-     refreshTokenExpiresAt is looked at, reminding when fewer than 7 days remain -- no token is read or printed
+     refreshTokenExpiresAt is looked at, reminding when fewer than 7 days remain -- no token is read or printed. An
+     owner who never runs the agent in an SSH terminal lists its key, ssh-file, in brunna.json logins.not_used: the
+     expiry is then shown and never alerted on
 Only a failed request that is a login problem (Login expired, /login, 401, OAuth…) counts as a broken login;
 timeouts, quota and the like are only recorded in the output, no alert (alerting only after 3 in a row: claude
 itself may be broken).
@@ -120,6 +122,11 @@ def main() -> int:
     base = rt.clean_env({k: v for k, v in os.environ.items() if k != "LLM_AUTH"})
 
     jobs = connector_jobs()
+    # logins the owner says nothing on this machine uses (brunna.json logins.not_used, by the credential's key): their
+    # expiry is still shown here and on the status page, never alerted on (11-16: the SSH file, on a machine whose owner
+    # never runs the agent in an SSH terminal)
+    nu = hubconf.get("logins.not_used", [])
+    not_used = {k for k in nu if isinstance(k, str)} if isinstance(nu, list) else set()
     for c in rt.credentials():
         if c.mode == "subscription":
             if jobs == []:   # nothing the platform runs uses it: a lapsed login there breaks nothing
@@ -152,7 +159,9 @@ def main() -> int:
         if c.present and c.expires:
             left = c.expires - now
             print(_("{name}: refresh valid for {days} more {days:day|days}", name=c.name, days=left.days))
-            if c.warn_before and left < c.warn_before:
+            if c.key and c.key in not_used:   # the owner said nothing here uses it: shown, never alerted
+                print(_("{name}: not alerted on: brunna.json logins.not_used lists {key}", name=c.name, key=c.key))
+            elif c.warn_before and left < c.warn_before:
                 problem(f"{c.path}:expiring", _("{label} ({used_by}): the login expires within {days} {days:day|days} — {renew}",
                                                 label=c.label, used_by=c.used_by, days=max(left.days, 0), renew=c.renew))
         elif c.present and c.note:

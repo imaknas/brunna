@@ -135,6 +135,20 @@ class Check(unittest.TestCase):
                                    renew=rt("run claude once in a terminal on the hub machine so it refreshes, "
                                             "or /login again"))])
 
+    def test_ssh_credentials_the_owner_doesnt_use(self):
+        """brunna.json logins.not_used lists ssh-file (11-16: the owner never runs the agent in an SSH terminal): the
+        expiry is still shown, and raises no alert; the control is the test above (the same expiry, alerted)."""
+        self.fresh_token()
+        self.creds_expiring(3)
+        real_get = self.m.hubconf.get
+        with mock.patch.object(self.m.hubconf, "get",
+                               lambda k, d=None: ["ssh-file"] if k == "logins.not_used" else real_get(k, d)):
+            _, out, hard = self.run_check()
+        self.assertIn(ui("{name}: refresh valid for {days} more {days:day|days}", name=SSH_NAME, days=3), out)
+        self.assertIn(ui("{name}: not alerted on: brunna.json logins.not_used lists {key}", name=SSH_NAME,
+                         key="ssh-file"), out)
+        self.assertEqual(hard, [])
+
     def test_credentials_without_expiry(self):
         self.fresh_token()
         self.creds.write_text(json.dumps({"claudeAiOauth": {"accessToken": "x"}}))
