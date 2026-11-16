@@ -154,8 +154,9 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      owner form from any folder that isn't a sandboxed project's (no `--owner` needed), and `brunna release <project>
      <tag>` publishes a GitHub release with the owner's gh at a commit already on the remote, after showing the plan
      (an archive's DOI warning when the commit has `.zenodo.json`/`CITATION.cff`) and a typed yes; never `--yes`, never
-     in a sandbox or an agent's session. Open for the owner: `gh release view` before the question, a `--yes` for
-     releases, a rules line telling sessions releases are the owner's. Left: the status-page rows, and switching
+     in a sandbox or an agent's session; read-only gh calls run before the question (the 11-16 rule covers changes
+     made with the owner's login); the rules tell sandboxed sessions to ask brunna for a release; listed in `help all`
+     only. Left: the status-page rows, and switching
      the five projects to `all` once their keys are set up.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.

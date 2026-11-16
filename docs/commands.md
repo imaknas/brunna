@@ -133,7 +133,8 @@ Before anything is created it shows the repo and whether it is public, the tag, 
 commits since the last tag, the title (the tag unless `--title`), the notes (`--notes-file <file>` or `--notes <text>`;
 without them the release has none), and, when that commit has a `.zenodo.json` or `CITATION.cff`, a warning: if Zenodo
 (or another archive) is connected to the repo, publishing makes a permanent archived copy with a DOI that can't be
-withdrawn. Then it names the gh account it will use and on which repo, and asks `[y/N]`. Only your typed `y` publishes:
+withdrawn. Then it names the gh account it read with (its name, and that no release of that name exists yet: reads only) and
+what it will create on which repo, and asks `[y/N]`. Only your typed `y` publishes:
 `--yes` isn't taken, and with nobody at the terminal it refuses before contacting anything, because a release can't be
 taken back (watchers are notified and connected services run at once). It refuses a tag the remote already has, a
 release of that name (a draft included), a remote that isn't on GitHub, and running inside a sandbox or a coding

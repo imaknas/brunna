@@ -1103,12 +1103,13 @@ command:
   and the first 15 lines), the title (default: the tag), the notes (the first 20 lines) or that the release has none
   and GitHub generates none, and, when the target has a `.zenodo.json` or `CITATION.cff`, two `!!` lines: the file, and
   "If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy
-  with a DOI that can't be withdrawn." Then the consent, in the push grant's style: which gh account (`gh api user`,
-  the only gh call before the yes), which repo, what it creates (the tag at the sha and a published release), that
-  watchers are notified and webhooks and connected services run, and that deleting the release later takes none of
-  that back; then `[y/N]`, only `y`/`yes` goes on.
-- **After the yes:** `gh release view <tag>` (a draft release can hold a tag name the remote doesn't have yet): a
-  release of that name is refused, and anything but gh's "release not found" fails closed. Then `gh release create
+  with a DOI that can't be withdrawn." Before the question, two read-only gh calls: `gh api user` (the account
+  named) and `gh release view <tag>` (a draft release can hold a tag name the remote doesn't have yet): a release of
+  that name is refused without asking, and anything but gh's "release not found" fails closed. Then the consent, in
+  the push grant's style: which reads ran with the owner's login, which repo, what it will create (the tag at the sha
+  and a published release), that nothing has been changed yet, that watchers are notified and webhooks and connected
+  services run, and that deleting the release later takes none of that back; then `[y/N]`, only `y`/`yes` goes on.
+- **After the yes:** `gh release create
   <tag> --repo github.com/<owner>/<repo> --target <sha> --title <title> --notes-file <file>`: the notes always go
   through a private file (600, in the platform's private temp folder, removed afterwards; an empty file for none), so no
   long text is on argv, gh never prompts, and what was shown is what is sent (an owner's `--notes-file` is read once
@@ -1122,8 +1123,14 @@ command:
   mode, the GitHub URL rewritten by the test's own git config to a throwaway bare repo; every refusal with a control),
   goldens `tests/fixtures/i18n-golden/git-release.txt` and `en/git-release.txt`.
 
-**Open (for the owner):** whether `gh release view` should run before the question instead (it is read-only, like `gh
-api user`, but it is the owner's login, and the 11-16 rule allows only the account name before a yes); whether a
-`--yes` should ever be allowed for releases (not built: a release can't be undone); and whether the project rules
-should tell sessions that a tag or release is the owner's `brunna release` (the rules text says nothing yet; a session
-asked for one says it can't reach gh).
+**Decided (11-16, after the build):**
+1. No `--yes` for releases: kept as built, only a typed `y` publishes one.
+2. `gh release view` runs before the question. The 11-16 consent rule ("the owner is asked before their GitHub login
+   is used") is about *changes* made with the owner's login; read-only calls (`gh api user`, `gh release view`) may run
+   before the yes, and the consent text says which ran. Asking the owner to confirm a release that already exists would
+   be pointless.
+3. The project rules (`templates/agent-instructions.md`, beside the push lines) tell a sandboxed project's sessions
+   that tags and releases aren't theirs: they write a request to brunna naming the tag and the commit or branch, and
+   the owner publishes it with `brunna release <project> <tag>`.
+4. `brunna release` is listed in `brunna help all` only, not in the short `brunna --help` (the small owner surface).
+5. The refusal in a linked worktree of the hub stays, as for `brunna skills sync`.

@@ -54,7 +54,8 @@ Release of proj: github.com/o/proj (public)
   title    v1.0.0
   notes    none: the release has no notes, and GitHub generates none
 
-To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.0.0 exists yet, then creates the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used.
+Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet.
+To publish it, the platform will use that login on github.com/o/proj to create the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
 Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
 Publish the release with your gh login? [y/N] n
 --- stderr
@@ -75,7 +76,8 @@ Release of proj: github.com/o/proj (public)
   title    v1.0.0
   notes    none: the release has no notes, and GitHub generates none
 
-To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.0.0 exists yet, then creates the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used.
+Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet.
+To publish it, the platform will use that login on github.com/o/proj to create the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
 Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
 Publish the release with your gh login? [y/N] 
 --- stderr
@@ -103,7 +105,8 @@ Release of proj: github.com/o/proj (public)
 !! The target has .zenodo.json, which archives such as Zenodo read.
 !! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn.
 
-To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.0.0 exists yet, then creates the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used.
+Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet.
+To publish it, the platform will use that login on github.com/o/proj to create the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
 Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
 Publish the release with your gh login? [y/N] y
 ✓ released v1.0.0 of github.com/o/proj at <SHA>: https://github.com/o/proj/releases/tag/v1.0.0
@@ -118,21 +121,6 @@ refused: the remote has the tag v1.0.0 already (at <SHA>): nothing was created; 
 === a draft release holds the name: brunna release proj v1.1.0
 [exit 2]
 --- stdout
-Release of proj: github.com/o/proj (public)
-  tag      v1.1.0 (new: GitHub makes it at the target)
-  target   <SHA> (the remote's default branch main)
-           describe the archive
-           Dev <dev@example.org>, 2026-11-16T10:00:00Z
-  commits  0 since v1.0.0 (<SHA>)
-  title    v1.1.0
-  notes    none: the release has no notes, and GitHub generates none
-
-!! The target has .zenodo.json, which archives such as Zenodo read.
-!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn.
-
-To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.1.0 exists yet, then creates the tag v1.1.0 at <SHA> and a published release of it. Nothing else of your account is used.
-Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
-Publish the release with your gh login? [y/N] y
 --- stderr
 refused: github.com/o/proj has a release named v1.1.0 already (https://github.com/o/proj/releases/tag/v1.1.0; a draft, if the remote has no such tag): nothing was created
 

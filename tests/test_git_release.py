@@ -182,11 +182,12 @@ class Publishes(Base):
         self.assertFalse(os.path.exists(notes), "the notes file is removed")
         self.assertFalse(pathlib.Path(c["cwd"]).is_relative_to(self.tmp / "ws"))
         self.assertEqual(self.remote_tag("v1.0.0"), self.tip)
-        # the order: the account named, then the yes, then the release looked up and made
+        # the order: the account named and the release looked up (read-only), then the yes, then the release made
         self.assertEqual([x["argv"][:2] for x in self.gh_calls()],
                          [["api", "user"], ["release", "view"], ["release", "create"]])
+        self.assertIn("read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet", out)
         self.assertEqual(len(self.prompts), 1)
-        self.assertIn("your gh login (octo) on github.com/o/proj", out)
+        self.assertIn("will use that login on github.com/o/proj to create the tag v1.0.0", out)
         self.assertIn("https://github.com/o/proj/releases/tag/v1.0.0", out)
         [rec] = self.releases()
         self.assertEqual((rec["tag"], rec["sha"], rec["by"], rec["tag_seen"]), ("v1.0.0", self.tip, "owner", self.tip))
@@ -271,6 +272,7 @@ class Refusals(Base):
         code, _out, err = self.run_("proj", "v1.0.0")
         self.assertEqual(code, git_release.REFUSED)
         self.assertIn("has a release named v1.0.0 already", err)
+        self.assertEqual(self.prompts, [], "asked to confirm a release that exists already")
         self.assert_nothing_created()
 
     def test_gh_that_cant_tell_fails_closed(self):
@@ -278,6 +280,7 @@ class Refusals(Base):
         code, _out, err = self.run_("proj", "v1.0.0")
         self.assertEqual(code, git_release.FAILED)
         self.assertIn("Bad credentials", err)
+        self.assertEqual(self.prompts, [])
         self.assert_nothing_created()
 
     def test_gh_not_signed_in(self):
@@ -361,8 +364,8 @@ class Refusals(Base):
                 code, _out, err = self.run_("proj", "v1.0.0", answer=answer)
                 self.assertEqual(code, git_release.REFUSED)
                 self.assertIn("You said no", err)
-        self.assertEqual([c["argv"][:2] for c in self.gh_calls()], [["api", "user"]] * 5,
-                         "only the account was read before the yes")
+        self.assertEqual([c["argv"][:2] for c in self.gh_calls()], [["api", "user"], ["release", "view"]] * 5,
+                         "only reads before the yes")
         self.assert_nothing_created()
         code, _out, err = self.run_("proj", "v1.0.0", answer="YES")
         self.assertEqual(code, git_release.OK, err)

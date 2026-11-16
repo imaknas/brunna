@@ -25,8 +25,9 @@ by hand after the branch was pushed. This does it the platform's way:
      a .zenodo.json or CITATION.cff, that an archive connected to the repo keeps a permanent copy with a DOI; then the
      consent in the push grant's style (which gh account, which repo, what it creates, that it can't be taken back),
      then [y/N]: only y or yes goes on;
-  6. after the yes: `gh release view <tag>` (a draft release can hold a tag name the remote doesn't have yet; only
-     "release not found" lets it go on), then `gh release create <tag> --repo github.com/<owner>/<repo> --target <sha>
+  6. before the question, read-only: `gh api user` (the account named) and `gh release view <tag>` (a draft release
+     can hold a tag name the remote doesn't have yet; only "release not found" lets it go on; the consent says which
+     reads ran); after the yes: `gh release create <tag> --repo github.com/<owner>/<repo> --target <sha>
      --title <title> --notes-file <file>`: the notes always through a private file (600, in the platform's private temp
      folder; empty for none), so no long text goes on argv and gh never prompts; gh runs from a folder of the platform's;
   7. the remote's tag is read back (ls-remote) and must be at the sha; each release is a line in
@@ -306,10 +307,11 @@ def plan_lines(p: Plan) -> list[str]:
 
 
 def consent_lines(p: Plan, account: str) -> list[str]:
-    return [_("To publish it, the platform will use your gh login ({account}) on github.com/{repo}: it checks that no "
-              "release named {tag} exists yet, then creates the tag {tag} at {sha} and a published release of it. "
-              "Nothing else of your account is used.", account=account, repo=p.repo, tag=visible(p.tag),
-              sha=p.sha[:12]),
+    return [_("Read so far with your gh login ({account}), read-only: the account's name, and that github.com/{repo} "
+              "has no release named {tag} yet.", account=account, repo=p.repo, tag=visible(p.tag)),
+            _("To publish it, the platform will use that login on github.com/{repo} to create the tag {tag} at {sha} and "
+              "a published release of it. Nothing else of your account is used, and nothing has been changed yet.",
+              repo=p.repo, tag=visible(p.tag), sha=p.sha[:12]),
             _("Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and "
               "connected services (archives among them) run; deleting it later takes none of that back. So only your "
               "typed y goes on, never --yes.")]
@@ -471,13 +473,15 @@ def published(project: str, tag: str, origin: str, url: str, repo: str, target: 
             account = git_push_grant.gh_login(cwd=run)
         except git_push_grant.Failed as e:
             raise Failed(str(e)) from None
+        # read-only, so before the question (the 11-16 rule is about changes made with the owner's login): a release
+        # that exists already is refused without asking
+        no_release_yet(repo, tag, run)
         if yes:
             print(_("(--yes isn't taken for a release: answer the question below)"))
         print("\n".join(plan_lines(p)))
         print()
         print("\n".join(consent_lines(p, account)))
         ask()
-        no_release_yet(repo, tag, run)
         link = create(repo, tag, sha, title, text, run)
         now = tag_at(owned, url, tag)
         log(project, repo=repo, tag=tag, sha=sha, branch=branch, title=title, url=link, by="owner",

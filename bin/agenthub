@@ -2524,7 +2524,6 @@ Most of the time you only talk to your agents; they run the rest of brunna for y
   brunna glance            what needs you, and whether the platform is healthy
   brunna owner list        the decisions and to-dos waiting for you (with an assistant, they reach you there)
   brunna push <project>    publish a project's work yourself (its sessions ask the platform to push)
-  brunna release <project> <tag>   publish a GitHub release of what a project already pushed
   brunna doctor            when something seems broken
   brunna upgrade           move to the newest release
 

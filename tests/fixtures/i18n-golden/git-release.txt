@@ -54,7 +54,8 @@ proj 的 release:github.com/o/proj(公開)
   標題     v1.0.0
   說明     沒有:release 不附說明,GitHub 也不會自動產生
 
-為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.0.0 的 release,再在 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西。
+到目前為止只用你的 gh 登入(octo)讀了資料,沒有改任何東西:帳號名稱,以及 github.com/o/proj 還沒有叫 v1.0.0 的 release。
+為了發布,平台會用這個登入在 github.com/o/proj 的 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西,目前也還什麼都沒改。
 看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
 要用你的 gh 登入發布這個 release 嗎? [y/N] n
 --- stderr
@@ -75,7 +76,8 @@ proj 的 release:github.com/o/proj(公開)
   標題     v1.0.0
   說明     沒有:release 不附說明,GitHub 也不會自動產生
 
-為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.0.0 的 release,再在 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西。
+到目前為止只用你的 gh 登入(octo)讀了資料,沒有改任何東西:帳號名稱,以及 github.com/o/proj 還沒有叫 v1.0.0 的 release。
+為了發布,平台會用這個登入在 github.com/o/proj 的 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西,目前也還什麼都沒改。
 看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
 要用你的 gh 登入發布這個 release 嗎? [y/N] 
 --- stderr
@@ -103,7 +105,8 @@ proj 的 release:github.com/o/proj(公開)
 !! 目標 commit 裡有 .zenodo.json,Zenodo 這類封存服務會讀它。
 !! 如果這個 repo 連著 Zenodo(或其他封存服務),發布這個 release 會留下一份帶 DOI 的永久封存副本,無法撤回。
 
-為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.0.0 的 release,再在 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西。
+到目前為止只用你的 gh 登入(octo)讀了資料,沒有改任何東西:帳號名稱,以及 github.com/o/proj 還沒有叫 v1.0.0 的 release。
+為了發布,平台會用這個登入在 github.com/o/proj 的 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西,目前也還什麼都沒改。
 看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
 要用你的 gh 登入發布這個 release 嗎? [y/N] y
 ✓ 已發布 github.com/o/proj 的 v1.0.0,在 <SHA>:https://github.com/o/proj/releases/tag/v1.0.0
@@ -118,21 +121,6 @@ proj 的 release:github.com/o/proj(公開)
 === a draft release holds the name: brunna release proj v1.1.0
 [exit 2]
 --- stdout
-proj 的 release:github.com/o/proj(公開)
-  tag      v1.1.0(新的:GitHub 會把它打在目標上)
-  目標     <SHA>(遠端的預設分支 main)
-           describe the archive
-           Dev <dev@example.org>,2026-11-16T10:00:00Z
-  commit   v1.0.0(<SHA>)之後 0 個
-  標題     v1.1.0
-  說明     沒有:release 不附說明,GitHub 也不會自動產生
-
-!! 目標 commit 裡有 .zenodo.json,Zenodo 這類封存服務會讀它。
-!! 如果這個 repo 連著 Zenodo(或其他封存服務),發布這個 release 會留下一份帶 DOI 的永久封存副本,無法撤回。
-
-為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.1.0 的 release,再在 <SHA> 建 tag v1.1.0,並發布它的 release。不會動用你帳號的其他東西。
-看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
-要用你的 gh 登入發布這個 release 嗎? [y/N] y
 --- stderr
 拒絕:github.com/o/proj 已經有叫 v1.1.0 的 release(https://github.com/o/proj/releases/tag/v1.1.0;遠端沒有這個 tag 的話,就是草稿):什麼都沒建
 

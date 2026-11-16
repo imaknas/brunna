@@ -8,7 +8,6 @@ brunna:在你自己的電腦上，由 AI agent 經營的很多個專案。
   brunna glance            有什麼要你處理、平台是否正常
   brunna owner list        等你決定的事和你的待辦(有助理時會送到助理那裡)
   brunna push <專案>       自己發布專案的成果(它的 session 是請平台推)
-  brunna release <專案> <tag>   把專案已經推上去的成果發布成 GitHub release
   brunna doctor            覺得哪裡壞了的時候
   brunna upgrade           升到最新版
 
