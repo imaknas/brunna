@@ -19,8 +19,7 @@ code run as the owner, outside every sandbox. Here instead:
      in.git, checked.git fetches it from there over file:// with git's fsck (a `.git` tree entry refused), the checks
      (bin/push_checks.py) run in checked.git, and only when they pass does the owned repo fetch from it (r1 S9): a
      refused push leaves nothing there;
-  4. policy: fast-forward only (no force of any kind), no tags, no deletes, one branch per call, no branch named like a
-     commit id (7 to 64 hex digits: brunna release reads such a name as a commit, so one can't stand for another); the default branch is the
+  4. policy: fast-forward only (no force of any kind), no tags, no deletes, one branch per call; the default branch is the
      remote's HEAD by ls-remote --symref (refused when that can't be told, e.g. an empty remote);
   5. `push --no-verify --force-with-lease=refs/heads/<branch>:<old> <url> <sha>:refs/heads/<branch>` from the owned
      repo: the lease pins the push to the remote's ref as checked (it forces nothing: old..sha is a fast-forward). The
@@ -310,19 +309,11 @@ def ref_shape(b: str) -> None:
         raise Refused(_("{arg}: brunna push pushes no tags", arg=b), check="ref")
     if b.startswith("refs/") or b == "HEAD" or "@{" in b:
         raise Refused(_("{arg}: name a branch (as in refs/heads/<branch>), not a ref", arg=b), check="ref")
-    if HEX_NAME.fullmatch(b):
-        raise Refused(_("{arg}: a branch named like a commit id (7 to 64 hex digits) isn't pushed, since it can be "
-                        "taken for one (brunna release reads such a name as a commit): rename the branch", arg=b),
-                      check="ref")
-
-
-HEX_NAME = re.compile(r"[0-9a-fA-F]{7,64}")   # a name a commit id could be read as
 
 
 def valid_branch(owned: Owned, b: str) -> str:
     if b.startswith("-") or owned.git("check-ref-format", f"refs/heads/{b}").returncode != 0:
         raise Refused(_("{arg} is not a branch name", arg=visible(b)), check="ref")
-    ref_shape(b)   # the checked-out branch too, not only one named on the command line
     return b
 
 

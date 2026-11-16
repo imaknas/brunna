@@ -100,6 +100,5 @@
  "{project}: the platform's push credential: {why}": "{project}:平台的推送憑證:{why}",
  "{project}: the platform's push credential reaches its remote": "{project}:平台的推送憑證連得到它的遠端",
  "{project}: the platform's push key: {why}": "{project}:平台的推送金鑰:{why}",
- "the push request could not be written into {path} ({why}): this session's sandbox may not have the folder yet; start a new session, or ask again later": "推送請求寫不進 {path}({why}):這個 session 的沙盒可能還沒有這個資料夾;請開新的 session,或晚點再請求",
- "{arg}: a branch named like a commit id (7 to 64 hex digits) isn't pushed, since it can be taken for one (brunna release reads such a name as a commit): rename the branch": "{arg}:名稱像 commit id(7 到 64 個十六進位字元)的分支不推,因為它會被當成 commit(brunna release 就是這樣讀):請把分支改名"
+ "the push request could not be written into {path} ({why}): this session's sandbox may not have the folder yet; start a new session, or ask again later": "推送請求寫不進 {path}({why}):這個 session 的沙盒可能還沒有這個資料夾;請開新的 session,或晚點再請求"
 }
