@@ -1,0 +1,170 @@
+=== usage: brunna release 
+[exit 2]
+--- stdout
+--- stderr
+拒絕:用法:brunna release <專案> <tag> [--target <分支|sha>] [--title <標題>] [--notes-file <檔案> | --notes <文字>]
+
+=== bad tag: brunna release proj v1..2
+[exit 2]
+--- stdout
+--- stderr
+拒絕:v1..2 不是合法的 tag 名稱(git check-ref-format)
+
+=== nobody at a terminal: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+--- stderr
+拒絕:沒有人在終端機前可以同意:release 發了就收不回,只有你在終端機親手打 y 才會發布。請在你自己的終端機跑 brunna release;什麼都還沒連
+
+=== --yes alone: brunna release proj v1.0.0 --yes
+[exit 2]
+--- stdout
+--- stderr
+拒絕:release 不收 --yes:發了就收不回,只有你在終端機親手打 y 才會發布。請在你自己的終端機跑 brunna release;什麼都還沒連
+
+=== in a coding agent's session: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+--- stderr
+拒絕:brunna release 只能在你自己的終端機跑,不能在 coding agent 的 session 裡跑:release 發了就收不回,所以同意必須是你親手打的
+
+=== --target that isn't on the remote: brunna release proj v1.0.0 --target nosuchbranch
+[exit 2]
+--- stdout
+--- stderr
+拒絕:--target nosuchbranch 既不是遠端有的分支,也不是 commit id
+
+=== unpushed target: brunna release proj v1.0.0 --target <SHA>
+[exit 2]
+--- stdout
+--- stderr
+拒絕:<SHA> 不是遠端上的 commit(遠端沒有任何分支包含它):先推上去(brunna push)再發 release;tag 從不打在還沒推的 commit 上
+
+=== plain plan, answered no: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+proj 的 release:github.com/o/proj(公開)
+  tag      v1.0.0(新的:GitHub 會把它打在目標上)
+  目標     <SHA>(遠端的預設分支 main)
+           add a
+           Dev <dev@example.org>,2026-11-16T10:00:00Z
+  commit   總共 2 個(遠端上沒有更早的 tag)
+           <SHA> add a
+           <SHA> init
+  標題     v1.0.0
+  說明     沒有:release 不附說明,GitHub 也不會自動產生
+
+為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.0.0 的 release,再在 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西。
+看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
+要用你的 gh 登入發布這個 release 嗎? [y/N] n
+--- stderr
+拒絕:你說不要:沒有建 release,什麼都沒改。
+
+=== --yes at a terminal, answered no: brunna release proj v1.0.0 --yes
+[exit 2]
+--- stdout
+(release 不收 --yes:請回答下面的問題)
+proj 的 release:github.com/o/proj(公開)
+  tag      v1.0.0(新的:GitHub 會把它打在目標上)
+  目標     <SHA>(遠端的預設分支 main)
+           add a
+           Dev <dev@example.org>,2026-11-16T10:00:00Z
+  commit   總共 2 個(遠端上沒有更早的 tag)
+           <SHA> add a
+           <SHA> init
+  標題     v1.0.0
+  說明     沒有:release 不附說明,GitHub 也不會自動產生
+
+為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.0.0 的 release,再在 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西。
+看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
+要用你的 gh 登入發布這個 release 嗎? [y/N] 
+--- stderr
+拒絕:你說不要:沒有建 release,什麼都沒改。
+
+=== published, with notes and an archive file: brunna release proj v1.0.0 --title First release --notes-file <TMP>/notes.md
+[exit 0]
+--- stdout
+proj 的 release:github.com/o/proj(公開)
+  tag      v1.0.0(新的:GitHub 會把它打在目標上)
+  目標     <SHA>(遠端的預設分支 main)
+           describe the archive
+           Dev <dev@example.org>,2026-11-16T10:00:00Z
+  commit   v0.9(<SHA>)之後 3 個
+           <SHA> describe the archive
+           <SHA> later work
+           <SHA> add a
+  標題     First release
+  說明     4 行:
+           > First public release.
+           > 
+           > - the reader
+           > - the writer
+
+!! 目標 commit 裡有 .zenodo.json,Zenodo 這類封存服務會讀它。
+!! 如果這個 repo 連著 Zenodo(或其他封存服務),發布這個 release 會留下一份帶 DOI 的永久封存副本,無法撤回。
+
+為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.0.0 的 release,再在 <SHA> 建 tag v1.0.0,並發布它的 release。不會動用你帳號的其他東西。
+看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
+要用你的 gh 登入發布這個 release 嗎? [y/N] y
+✓ 已發布 github.com/o/proj 的 v1.0.0,在 <SHA>:https://github.com/o/proj/releases/tag/v1.0.0
+--- stderr
+
+=== the tag is on the remote now: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+--- stderr
+拒絕:遠端已經有 tag v1.0.0(在 <SHA>):什麼都沒建;請換個名稱
+
+=== a draft release holds the name: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+proj 的 release:github.com/o/proj(公開)
+  tag      v1.1.0(新的:GitHub 會把它打在目標上)
+  目標     <SHA>(遠端的預設分支 main)
+           describe the archive
+           Dev <dev@example.org>,2026-11-16T10:00:00Z
+  commit   v1.0.0(<SHA>)之後 0 個
+  標題     v1.1.0
+  說明     沒有:release 不附說明,GitHub 也不會自動產生
+
+!! 目標 commit 裡有 .zenodo.json,Zenodo 這類封存服務會讀它。
+!! 如果這個 repo 連著 Zenodo(或其他封存服務),發布這個 release 會留下一份帶 DOI 的永久封存副本,無法撤回。
+
+為了發布,平台會用你的 gh 登入(octo)在 github.com/o/proj:先確認還沒有叫 v1.1.0 的 release,再在 <SHA> 建 tag v1.1.0,並發布它的 release。不會動用你帳號的其他東西。
+看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
+要用你的 gh 登入發布這個 release 嗎? [y/N] y
+--- stderr
+拒絕:github.com/o/proj 已經有叫 v1.1.0 的 release(https://github.com/o/proj/releases/tag/v1.1.0;遠端沒有這個 tag 的話,就是草稿):什麼都沒建
+
+=== gh isn't signed in: brunna release proj v1.1.0
+[exit 1]
+--- stdout
+--- stderr
+失敗:gh 沒有登入 github.com(To get started with GitHub CLI, please run:  gh auth login):用 gh auth login 登入後再跑一次;什麼都沒改
+
+=== another forge: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 的 paths.origin git@gitlab.com:o/proj.git 不是 GitHub repo(github.com/<owner>/<repo>):brunna release 只用你的 gh 發 GitHub 的 release;別的 forge 請到那裡發
+
+=== no remote: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 沒有遠端(paths.origin):沒有地方可以發 release
+
+=== not sandboxed: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 沒有沙盒:它的 session 可以自己用 gh 發 release(brunna release 是給碰不到 gh 的沙盒專案用的)
+
+=== not registered: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+拒絕:proj 不在登錄裡
+
+=== the project's letter
+github.com/o/proj 的 release v1.0.0 已經發布,在 <SHA>:https://github.com/o/proj/releases/tag/v1.0.0。tag 和 release 由 Alex 發布(brunna release);你這邊不用做什麼。

@@ -1,0 +1,170 @@
+=== usage: brunna release 
+[exit 2]
+--- stdout
+--- stderr
+refused: usage: brunna release <project> <tag> [--target <branch|sha>] [--title <title>] [--notes-file <file> | --notes <text>]
+
+=== bad tag: brunna release proj v1..2
+[exit 2]
+--- stdout
+--- stderr
+refused: v1..2 is not a valid tag name (git check-ref-format)
+
+=== nobody at a terminal: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+--- stderr
+refused: nobody is at a terminal to say yes: a release can't be undone, so only your y typed at a terminal publishes one. Run brunna release in your own terminal; nothing was contacted
+
+=== --yes alone: brunna release proj v1.0.0 --yes
+[exit 2]
+--- stdout
+--- stderr
+refused: --yes isn't taken for a release: it can't be undone, so only your y typed at a terminal publishes one. Run brunna release in your own terminal; nothing was contacted
+
+=== in a coding agent's session: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+--- stderr
+refused: brunna release runs only in your own terminal, not in a coding agent's session: a release can't be undone, so the yes has to be yours, typed
+
+=== --target that isn't on the remote: brunna release proj v1.0.0 --target nosuchbranch
+[exit 2]
+--- stdout
+--- stderr
+refused: --target nosuchbranch is neither a branch the remote has nor a commit id
+
+=== unpushed target: brunna release proj v1.0.0 --target <SHA>
+[exit 2]
+--- stdout
+--- stderr
+refused: <SHA> is not a commit on the remote (none of its branches has it): push it first (brunna push), then release; a tag is never made on an unpushed commit
+
+=== plain plan, answered no: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+Release of proj: github.com/o/proj (public)
+  tag      v1.0.0 (new: GitHub makes it at the target)
+  target   <SHA> (the remote's default branch main)
+           add a
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  2 in all (no earlier tag on the remote)
+           <SHA> add a
+           <SHA> init
+  title    v1.0.0
+  notes    none: the release has no notes, and GitHub generates none
+
+To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.0.0 exists yet, then creates the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] n
+--- stderr
+refused: You said no: no release was created, and nothing was changed.
+
+=== --yes at a terminal, answered no: brunna release proj v1.0.0 --yes
+[exit 2]
+--- stdout
+(--yes isn't taken for a release: answer the question below)
+Release of proj: github.com/o/proj (public)
+  tag      v1.0.0 (new: GitHub makes it at the target)
+  target   <SHA> (the remote's default branch main)
+           add a
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  2 in all (no earlier tag on the remote)
+           <SHA> add a
+           <SHA> init
+  title    v1.0.0
+  notes    none: the release has no notes, and GitHub generates none
+
+To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.0.0 exists yet, then creates the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] 
+--- stderr
+refused: You said no: no release was created, and nothing was changed.
+
+=== published, with notes and an archive file: brunna release proj v1.0.0 --title First release --notes-file <TMP>/notes.md
+[exit 0]
+--- stdout
+Release of proj: github.com/o/proj (public)
+  tag      v1.0.0 (new: GitHub makes it at the target)
+  target   <SHA> (the remote's default branch main)
+           describe the archive
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  3 since v0.9 (<SHA>)
+           <SHA> describe the archive
+           <SHA> later work
+           <SHA> add a
+  title    First release
+  notes    4 lines:
+           > First public release.
+           > 
+           > - the reader
+           > - the writer
+
+!! The target has .zenodo.json, which archives such as Zenodo read.
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn.
+
+To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.0.0 exists yet, then creates the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] y
+✓ released v1.0.0 of github.com/o/proj at <SHA>: https://github.com/o/proj/releases/tag/v1.0.0
+--- stderr
+
+=== the tag is on the remote now: brunna release proj v1.0.0
+[exit 2]
+--- stdout
+--- stderr
+refused: the remote has the tag v1.0.0 already (at <SHA>): nothing was created; pick another name
+
+=== a draft release holds the name: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+Release of proj: github.com/o/proj (public)
+  tag      v1.1.0 (new: GitHub makes it at the target)
+  target   <SHA> (the remote's default branch main)
+           describe the archive
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  0 since v1.0.0 (<SHA>)
+  title    v1.1.0
+  notes    none: the release has no notes, and GitHub generates none
+
+!! The target has .zenodo.json, which archives such as Zenodo read.
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn.
+
+To publish it, the platform will use your gh login (octo) on github.com/o/proj: it checks that no release named v1.1.0 exists yet, then creates the tag v1.1.0 at <SHA> and a published release of it. Nothing else of your account is used.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] y
+--- stderr
+refused: github.com/o/proj has a release named v1.1.0 already (https://github.com/o/proj/releases/tag/v1.1.0; a draft, if the remote has no such tag): nothing was created
+
+=== gh isn't signed in: brunna release proj v1.1.0
+[exit 1]
+--- stdout
+--- stderr
+failed: gh isn't signed in to github.com (To get started with GitHub CLI, please run:  gh auth login): sign in with gh auth login and run this again; nothing was changed
+
+=== another forge: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+refused: proj's paths.origin git@gitlab.com:o/proj.git is not a GitHub repo (github.com/<owner>/<repo>): brunna release makes only GitHub releases, with your gh; on another forge, make the release there
+
+=== no remote: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+refused: proj has no remote (paths.origin): there is nothing to release on
+
+=== not sandboxed: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+refused: proj is not sandboxed: its sessions can make a release with gh themselves (brunna release is for sandboxed projects, which can't reach gh)
+
+=== not registered: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+--- stderr
+refused: proj is not in the registry
+
+=== the project's letter
+The release v1.0.0 of github.com/o/proj is published, at <SHA>: https://github.com/o/proj/releases/tag/v1.0.0. Tags and releases are made by the owner (brunna release); there is nothing for you to do.

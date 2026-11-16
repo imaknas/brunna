@@ -684,14 +684,14 @@ def refuse_here() -> str | None:
     the platform's state unreadable, which is what any project sandbox does, on Linux too without sandboxed-run's
     mark), inside a coding agent's session (an agent must not be able to approve), or a linked worktree of the hub (the
     state it writes is the live one)."""
-    import isolation
-    import runtime_ports
-    if isolation.confined_now() or isolation.reads_blocked():
+    import owner_terminal
+    why = owner_terminal.refusal()
+    if why == "sandbox":
         return _("brunna skills sync runs only in your own terminal, never inside a project's sandbox")
-    if runtime_ports.current_session():
+    if why == "session":
         return _("brunna skills sync runs only in your own terminal, not in a coding agent's session: the review is "
                  "yours to answer")
-    if hubconf.worktree_lookup():
+    if why == "worktree":
         return _("{root} is a linked worktree of the hub; run brunna skills from the main checkout ({main})",
                  root=hubconf.ROOT, main=hubconf.MAIN)
     return None

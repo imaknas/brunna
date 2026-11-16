@@ -418,10 +418,12 @@ def probe(project: str) -> tuple[bool, str]:
 
 # ---------- gh (the owner's, only here) ----------
 
-def gh(*args: str) -> subprocess.CompletedProcess:
-    """The owner's gh (tests put a recording stand-in first on PATH)."""
+def gh(*args: str, cwd: pathlib.Path | None = None) -> subprocess.CompletedProcess:
+    """The owner's gh (tests put a recording stand-in first on PATH). cwd: a folder of the platform's to run it from (gh
+    reads the git repo it stands in for some commands; the owner may be standing in a project's)."""
     try:
-        return subprocess.run(["gh", *args], capture_output=True, text=True, timeout=TIMEOUT_S, stdin=subprocess.DEVNULL)
+        return subprocess.run(["gh", *args], capture_output=True, text=True, timeout=TIMEOUT_S, stdin=subprocess.DEVNULL,
+                              cwd=cwd)
     except FileNotFoundError:
         raise Failed(_("gh is not installed: the deploy key is added with gh")) from None
     except subprocess.TimeoutExpired:
@@ -466,9 +468,9 @@ def title(project: str) -> str:
     return f"{names.current('cli')} push: {project}"
 
 
-def gh_login() -> str:
+def gh_login(cwd: pathlib.Path | None = None) -> str:
     """The account the owner's gh is signed in as on github.com, named before that login is used."""
-    r = gh("api", "user", "--hostname", "github.com", "--jq", ".login")
+    r = gh("api", "user", "--hostname", "github.com", "--jq", ".login", cwd=cwd)
     login = (r.stdout or "").strip().strip('"')   # an enterprise-managed account's login has a _
     if r.returncode != 0 or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]*", login):
         raise Failed(_("gh isn't signed in to github.com ({why}): sign in with gh auth login and run this again; "
