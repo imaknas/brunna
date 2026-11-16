@@ -378,7 +378,10 @@ def create(repo: str, tag: str, sha: str, title: str, notes: str, cwd: pathlib.P
 def tag_at(owned, url: str, tag: str) -> str | None:
     """The commit the remote's tag names now (read back after the release)."""
     import git_remote
-    r = owned.git(*git_remote.SAFE, "ls-remote", "--", url, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
+    try:   # the release exists by now: whatever this read does, the record and the letter still follow
+        r = owned.git(*git_remote.SAFE, "ls-remote", "--", url, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
+    except (OSError, subprocess.SubprocessError):
+        return None
     if r.returncode != 0:
         return None
     found = {}
