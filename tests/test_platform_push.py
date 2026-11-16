@@ -859,6 +859,53 @@ class Forms(Push):
         self.assertEqual(code, git_remote.REFUSED)
         self.assertIn("push with git as usual", err)
 
+    # the plain owner form (11-16): a sandboxed project named first, from a folder no sandboxed project owns
+
+    def test_the_plain_owner_form_from_the_hub(self):
+        a = self.commit(self.ws, "a.txt", "a\n", "add a")
+        code, out, err = self.main(["proj", "main", "--yes"], hubconf.ROOT)
+        self.assertEqual(code, git_remote.OK, err)
+        self.assertEqual(self.tip(), a)
+        self.assertIn("pushed main", out)
+        self.assertEqual(self.pushes()[-1]["by"], "owner")
+        self.assert_owner_git_only_in_owned_repos()
+
+    def test_the_plain_owner_form_from_an_unsandboxed_project(self):
+        other = self.tmp / "ws" / "notes"
+        other.mkdir(parents=True)
+        self.docs["notes"] = {"name": "notes", "paths": {"workspace": str(other)}}
+        a = self.commit(self.ws, "a.txt", "a\n", "add a")
+        code, _out, err = self.main(["proj", "--yes"], other)   # no branch: the one checked out
+        self.assertEqual(code, git_remote.OK, err)
+        self.assertEqual(self.tip(), a)
+        # a first argument that is no sandboxed project is still refused there, with the plain form named
+        code, _out, err = self.main(["main"], other)
+        self.assertEqual(code, git_remote.REFUSED)
+        self.assertIn("push with git as usual; for a sandboxed project use brunna push <project>", err)
+        code, _out, err = self.main(["notes"], hubconf.ROOT)   # an unsandboxed project's name from the hub
+        self.assertEqual(code, git_remote.REFUSED)
+        self.assertIn("is not sandboxed", err)
+
+    def test_inside_a_sandboxed_project_a_project_name_stays_a_branch(self):
+        ws2 = self.tmp / "ws" / "proj2"
+        self.git(self.tmp, "clone", "-q", str(self.remote), str(ws2))
+        self.docs["proj2"] = {"name": "proj2", "paths": {"workspace": str(ws2), "origin": str(self.remote)},
+                              "enforce": {"sandbox": True}}
+        self.git(self.ws, "branch", "proj2")   # a branch of proj that shares the other project's name
+        push_queue.ensure_folder("proj")
+        sub = self.ws / ".claude" / "worktrees" / "w1"   # where its sessions' worktrees start: still its folder
+        sub.mkdir(parents=True)
+        for cwd in (self.ws, sub):
+            with self.subTest(cwd=cwd):
+                self.calls.clear()
+                code, _out, err = self.main(["proj2", "--no-wait"], cwd)
+                self.assertEqual(code, git_remote.PENDING, err)
+                reqs = [json.loads((self.push_root / "proj" / n).read_text())
+                        for n in os.listdir(self.push_root / "proj") if n.endswith(".request.json")]
+                self.assertIn("proj2", [r["branch"] for r in reqs], "read as a branch of proj, a session's request")
+                self.assertEqual(self.calls, [], "the owner's git ran: it was read as the owner form")
+        self.assertEqual(self.tip(), self.base)
+
     def test_a_confined_run_cant_ask(self):
         import names
         push_queue.ensure_folder("proj")

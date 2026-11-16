@@ -34,6 +34,10 @@ The forms of `brunna push` (decided in this order):
         the owner's push, from anywhere: the commits and every check's flag shown; a failed check is overridden only by an
         interactive "y" to "push anyway?", never by --yes (--yes answers only the plain question of a push that passed
         every check); refused before contacting anything where it can't write the platform's folder (a sandbox)
+  brunna push <project> [<branch>] [--yes]
+        the same owner form without --owner, when <project> is a registered sandboxed project and the current folder
+        is none of a sandboxed project's folders (the hub, an unsandboxed project, anywhere else; 11-16). Inside a
+        sandboxed project's folders the first argument stays a branch (the next form), so the two can't be confused
   brunna push [<branch>] [--no-wait | --wait <seconds>]
         in a sandboxed project's folder (its workspace or runtime folder): a session's request. The branch (the one
         checked out unless named) and its commit, read with git's read-only commands, written as
@@ -41,7 +45,8 @@ The forms of `brunna push` (decided in this order):
         exit 0 pushed or nothing to push, 2 refused, 1 failed, 75 no answer yet (it comes as a letter). In an
         unsandboxed project's folder: push with git as usual (exit 2)
   brunna push <project> [<branch>] [--yes]
-        outside every registered project's folder: the owner form, as before
+        outside every registered project's folder: the owner form whatever <project> is (an unknown or unsandboxed
+        one is refused by name), as before
   git_remote.py serve <project>
         the worker the mailbox dispatch starts (push_queue.tick): one queued request of the project, as the owner,
         outside every sandbox; the project's lock taken blocking, bounded by TIMEOUT_S
@@ -1156,8 +1161,28 @@ def credential_probe(project: str, origin: str, setup_cmd: str) -> tuple[str, st
 # ---------- the forms ----------
 
 USAGE = ("usage: brunna push [<branch>] [--no-wait | --wait <seconds>]   (in a sandboxed project's folder)\n"
+         "       brunna push <project> [<branch>] [--yes]   (anywhere else: the owner's push, as --owner)\n"
          "       brunna push --owner <project> [<branch>] [--yes]\n"
          "       brunna push setup <project> [--branches none|others|all] [--email <address>…]")
+
+
+def sandboxed_folder(cwd: pathlib.Path) -> str | None:
+    """The sandboxed project whose folders (its workspace, the worktrees its sessions start in under it, its runtime
+    folder) hold cwd, if any: there the first argument is a branch (a session's request), never a project."""
+    real = cwd.resolve()
+    services = hubconf.p("services_root")
+    for name, doc in hubconf.projects().items():
+        if name == hubconf.hub_project() or not isolation.sandboxed({**doc, "name": name}):
+            continue
+        for f in (hubconf.workspace(name), services / name if services and doc.get("runtime") is not None else None):
+            if f and (real == f.resolve() or f.resolve() in real.parents):
+                return name
+    return None
+
+
+def names_sandboxed_project(arg: str) -> bool:
+    doc = hubconf.projects().get(arg) if arg and not arg.startswith("-") else None
+    return doc is not None and arg != hubconf.hub_project() and isolation.sandboxed({**doc, "name": arg})
 
 
 def main(argv: list[str], cwd: pathlib.Path | None = None) -> int:
@@ -1178,13 +1203,19 @@ def main(argv: list[str], cwd: pathlib.Path | None = None) -> int:
             project = pos[0]
             rest.remove(project)
             return owner_push(project, rest)
-        here = project_of_folder(cwd or pathlib.Path.cwd())
+        cwd = cwd or pathlib.Path.cwd()
+        # the plain owner form (11-16): a sandboxed project named first, from a folder no sandboxed project owns (the
+        # hub, an unsandboxed project, anywhere else). Inside a sandboxed project's folders the first argument stays a
+        # branch, so a branch that shares a project's name can't be misread
+        if args and names_sandboxed_project(args[0]) and sandboxed_folder(cwd) is None:
+            return owner_push(args[0], args[1:])
+        here = project_of_folder(cwd)
         if here:
             name, doc = here
             if name != hubconf.hub_project() and isolation.sandboxed(doc):
-                return client(name, args, cwd or pathlib.Path.cwd())
-            raise Refused(_("{project} is not sandboxed: push with git as usual; for another project use brunna push "
-                            "--owner <project> <branch>", project=name))
+                return client(name, args, cwd)
+            raise Refused(_("{project} is not sandboxed: push with git as usual; for a sandboxed project use brunna "
+                            "push <project> [<branch>]", project=name))
         if not args or args[0].startswith("-"):
             raise Refused(_(USAGE))
         return owner_push(args[0], args[1:])
