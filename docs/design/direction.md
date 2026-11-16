@@ -56,7 +56,8 @@ that day; they are listed at the end.
   new feature adds no command the owner has to run: a decision reaches the owner as a question to answer to any agent,
   and the agent runs the command. `brunna --help` lists only the owner's few commands (`help all` has the rest);
   `tests/test_owner_surface.py` checks both. Still leaking (11-16): every push of a sandboxed project needs the owner at a
-  terminal, and security questions reach the owner in the platform's own terms.
+  terminal, so does every GitHub release of one (`brunna release`, which takes only a typed yes because a release
+  can't be undone), and security questions reach the owner in the platform's own terms.
 
 ## What is left
 
@@ -148,7 +149,13 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      what the deploy key does (the gh account, the repo, write access to it only, where the key stays, how to undo)
      and add it only after an interactive yes or branches given explicitly (`--branches`/`--push others|all`);
      `--yes` alone or nobody answering gives `none` plus the setup to-do for every visibility, replacing the 11-15
-     "private: `all`" (`platform-push.md`, "11-16: the owner is asked …"). Left: the status-page rows, and switching
+     "private: `all`" (`platform-push.md`, "11-16: the owner is asked …"). **Built (11-16): releases and the plain
+     owner form** (`platform-push.md`, "11-16: releases and the plain owner form"): `brunna push <project>` is the
+     owner form from any folder that isn't a sandboxed project's (no `--owner` needed), and `brunna release <project>
+     <tag>` publishes a GitHub release with the owner's gh at a commit already on the remote, after showing the plan
+     (an archive's DOI warning when the commit has `.zenodo.json`/`CITATION.cff`) and a typed yes; never `--yes`, never
+     in a sandbox or an agent's session. Open for the owner: `gh release view` before the question, a `--yes` for
+     releases, a rules line telling sessions releases are the owner's. Left: the status-page rows, and switching
      the five projects to `all` once their keys are set up.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.

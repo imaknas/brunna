@@ -1059,3 +1059,71 @@ What changed (`bin/git_push_grant.py` `consent()`):
   `git_push_grant.py onboard --confirm`), so the disclosure is followed by `[y/N]`. A no leaves `none` and the to-do.
 - **`--revoke`** is itself the yes: it prints which gh account it uses and on which repos before it deletes.
 - Agent-driven onboarding (`connect_project`, the lease-runner's upgrade) stays `none`.
+
+## 11-16: releases and the plain owner form
+
+Two owner-facing changes, both run by the owner at their own terminal.
+
+**`brunna push <project> [<branch>]` without `--owner`.** It was refused in the hub's folder ("brunna is not
+sandboxed: push with git as usual"), because the first argument was read as a branch of the folder's project. Now the
+rule is: when the first argument names a registered sandboxed project and the current folder is none of a sandboxed
+project's folders (its workspace, the worktrees its sessions start in under it, its runtime folder), it is the owner
+form, the same as `--owner`. Inside a sandboxed project's folders the first argument stays a branch (the session's
+request), unchanged. So a project name that is also a branch of the project you are in can't be misread: the owner
+form only applies outside every sandboxed project. `--owner` still works everywhere; the to-do texts that name it stay.
+Outside every registered project's folder any first argument is the project, as before. (`bin/git_remote.py`
+`sandboxed_folder`, `names_sandboxed_project`; tests in `tests/test_platform_push.py` `Forms`.)
+
+**`brunna release <project> <tag> [--target <branch|sha>] [--title <t>] [--notes-file <f> | --notes <text>]`**
+(`bin/git_release.py`). A sandboxed project's sessions can't reach gh, and `brunna push` never pushes tags. Zenodo
+and similar archives take their copy on GitHub's *release* event, not on a tag, so a release had to be made by hand
+(`gh release create v1.0.0 -R <owner>/<repo> --target <sha> --title … --notes …` after the branch was pushed). The
+command:
+
+- **Only the owner, at their own terminal.** Refused inside a sandbox, in a coding agent's session and in a linked
+  worktree of the hub, with the check `brunna skills sync` uses (now `bin/owner_terminal.py` `refusal()`, which both
+  word their own way). Not a session command (`policy.SESSION_SUBCOMMANDS` doesn't have it). With no terminal it is
+  refused before anything is contacted, and so is `--yes`: a release can't be undone, so only a typed `y` publishes
+  one. With a terminal, `--yes` is said not to count and the question is asked anyway. This follows the 11-16 consent
+  decision above, and is stricter than the push grant, where giving the branches counts as the yes: here nothing given
+  on the command line does.
+- **The project** must be registered and sandboxed, with a GitHub `paths.origin` (`git_push_grant.parse_origin`, the
+  push grant's parsing); any other forge or a local remote is refused with the reason.
+- **The target is a commit already on the remote.** Everything is read in the platform's bare repo for the project
+  (`<state>/git-broker/<project>/remote.git`, `--git-dir`, the owner's git environment like the owner form of `brunna
+  push`; never git in the project's repo), under the project's push lock: `ls-remote --symref` gives the default branch
+  and every tag (peeled); the remote's branches are fetched now into the platform's own namespace there
+  (`refs/<repo dir>/release/heads/*`, pruned), never its tags. The default target is the default branch's tip as fetched
+  now; `--target` takes a branch the remote has, or a commit reachable from one of the branches fetched now: an object
+  the owned repo holds from an earlier, refused push doesn't count. The full sha shown is the one gh is given. A tag the
+  remote has is refused; a tag name `git check-ref-format` refuses, one starting with `-`, one with spaces or
+  characters that can't be printed, or longer than 100 characters is refused.
+- **Before asking, it shows** the repo and its visibility (the anonymous probe), the tag, the target sha with its
+  subject, author and date and which branch it is on, the commits since the nearest earlier tag on the remote (count
+  and the first 15 lines), the title (default: the tag), the notes (the first 20 lines) or that the release has none
+  and GitHub generates none, and, when the target has a `.zenodo.json` or `CITATION.cff`, two `!!` lines: the file, and
+  "If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy
+  with a DOI that can't be withdrawn." Then the consent, in the push grant's style: which gh account (`gh api user`,
+  the only gh call before the yes), which repo, what it creates (the tag at the sha and a published release), that
+  watchers are notified and webhooks and connected services run, and that deleting the release later takes none of
+  that back; then `[y/N]`, only `y`/`yes` goes on.
+- **After the yes:** `gh release view <tag>` (a draft release can hold a tag name the remote doesn't have yet): a
+  release of that name is refused, and anything but gh's "release not found" fails closed. Then `gh release create
+  <tag> --repo github.com/<owner>/<repo> --target <sha> --title <title> --notes-file <file>`: the notes always go
+  through a private file (600, in the platform's private temp folder, removed afterwards; an empty file for none), so no
+  long text is on argv, gh never prompts, and what was shown is what is sent (an owner's `--notes-file` is read once
+  and copied). gh runs from a folder of the platform's, never from wherever the owner stands. A gh that times out is
+  said to have an unknown outcome, with how to look.
+- **Afterwards** the remote's tag is read back and must name the sha (otherwise a warning and exit 1); each release is
+  a line in `<state>/git-broker/<project>/releases.jsonl` (tag, sha, branch, title, URL, the notes' hash and length,
+  the archive files, the tag as read back); the project gets an `info` letter with the tag, sha and URL, saying there
+  is nothing for it to do.
+- Tests: `tests/test_git_release.py` (a stand-in gh on PATH that records each call and the notes file's content and
+  mode, the GitHub URL rewritten by the test's own git config to a throwaway bare repo; every refusal with a control),
+  goldens `tests/fixtures/i18n-golden/git-release.txt` and `en/git-release.txt`.
+
+**Open (for the owner):** whether `gh release view` should run before the question instead (it is read-only, like `gh
+api user`, but it is the owner's login, and the 11-16 rule allows only the account name before a yes); whether a
+`--yes` should ever be allowed for releases (not built: a release can't be undone); and whether the project rules
+should tell sessions that a tag or release is the owner's `brunna release` (the rules text says nothing yet; a session
+asked for one says it can't reach gh).

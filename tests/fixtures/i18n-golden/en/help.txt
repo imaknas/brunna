@@ -7,7 +7,8 @@ Most of the time you only talk to your agents; they run the rest of brunna for y
   brunna init              set brunna up on this machine (or let your agent do it: README, "Set up through your agent")
   brunna glance            what needs you, and whether the platform is healthy
   brunna owner list        the decisions and to-dos waiting for you (with an assistant, they reach you there)
-  brunna push --owner <project>   publish a project's work yourself (its sessions ask the platform to push)
+  brunna push <project>    publish a project's work yourself (its sessions ask the platform to push)
+  brunna release <project> <tag>   publish a GitHub release of what a project already pushed
   brunna doctor            when something seems broken
   brunna upgrade           move to the newest release
 
@@ -102,11 +103,19 @@ owner (you; not commands for project sessions):
                         into the folders its agents load skills from after you type yes, or with the approval code
                         its review printed (bin/skills_sync.py, docs/design/skills-sync.md); the platform reminds you
                         when changes wait for review
-  brunna push --owner <project> [<branch>] [--yes] | setup <project> [--branches none|others|all] [--email <address>…]
+  brunna push <project> [<branch>] [--yes] | setup <project> [--branches none|others|all] [--email <address>…]
                         push a sandboxed project's branch to its registry remote with your git, from a bare repo the
                         platform owns, never in the project's repo (bin/git_remote.py): fast-forward only, no tags; it
                         shows the commits and every check, and asks first (only your y passes a failed check, never
-                        --yes); setup: what the platform may push for the project's sessions (enforce.git_push)
+                        --yes). From any folder that isn't a sandboxed project's; --owner <project> works anywhere
+                        (inside one, brunna push <branch> is its session's request). setup: what the platform may push
+                        for the project's sessions (enforce.git_push)
+  brunna release <project> <tag> [--target <branch|sha>] [--title <t>] [--notes-file <f> | --notes <text>]
+                        publish a GitHub release of a sandboxed project with your gh: the tag made at a commit already
+                        on the remote (its default branch's tip unless --target), never an unpushed one; it shows the
+                        commit, the commits since the last tag, the title, the notes and whether an archive (Zenodo)
+                        may keep a permanent copy, and only your typed y goes on, never --yes (bin/git_release.py).
+                        Only in your own terminal: refused in a sandbox and in a coding agent's session
 for project sessions (these are what the rules files name; the permission rules allow only these, not the admin commands above):
   brunna send | inbox | show | ack | pass | done | thread | open-questions …   = the project mailbox (bin/hubbus subcommands of the
                         same name)

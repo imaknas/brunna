@@ -13,7 +13,8 @@ brunna credentials status     # unattended jobs' sign-ins; a to-do gives the `br
 brunna credentials check-published   # does brunna's published shared sign-in app match this install's
 brunna --version              # the release this checkout is at
 brunna upgrade --check        # is there a newer release, and what changes; `brunna upgrade` installs it
-brunna push --owner <project> [branch]   # push a sandboxed project's branch yourself (it shows the commits and checks, and asks)
+brunna push <project> [branch]   # push a sandboxed project's branch yourself (it shows the commits and checks, and asks)
+brunna release <project> <tag>   # publish a GitHub release of what a sandboxed project already pushed (it shows, then asks)
 brunna push setup <project>   # what the platform may push for that project's sessions, and its push key
 ```
 
@@ -92,11 +93,16 @@ told which check refused and how to fix it; what only you can fix (the branch is
 key, the remote's own rules) becomes a to-do for you. The push key is the platform's own, one per repo, never your
 credential.
 
-**Yourself.** Anywhere, the owner form:
+**Yourself.** The owner form, from the hub's folder or any folder that isn't a sandboxed project's:
 
 ```bash
-brunna push --owner garden-app feature-x     # or no branch: the one checked out
+brunna push garden-app feature-x     # or no branch: the one checked out
 ```
+
+`brunna push --owner garden-app feature-x` is the same and works from anywhere. Inside a sandboxed project's folder
+(its workspace or a worktree of its sessions) the first word after `brunna push` is always a branch, the session's
+request, so a branch that happens to share a project's name is never read as one: the plain owner form applies only
+outside every sandboxed project.
 
 It sends only to the remote in the project's registry entry (`paths.origin`). The project's own sandboxed job bundles
 the branch; your git then pushes it from a copy brunna keeps under its state folder, never from the project's folder.
@@ -111,3 +117,25 @@ pushed code (its scripts and tests): read the changed paths before you say yes. 
 refused too (it has no default branch to compare with): give it a first commit on the forge, such as a README, then
 push. The project's own `origin/<branch>` catches up at its next fetch. Run it again if the remote moved while you
 read: it pushes only onto what it showed you.
+
+## Releasing a sandboxed project
+
+A sandboxed project's sessions can't reach gh, and `brunna push` never pushes tags. Archives such as Zenodo take their
+copy when a GitHub *release* is published, not when a tag appears, so you make the release, in your own terminal:
+
+```bash
+brunna release garden-app v1.0.0 --title "First release" --notes-file notes.md
+```
+
+It tags a commit that is already on the remote: the default branch's tip, or `--target <branch|sha>` (a branch the
+remote has, or a commit one of its branches holds); never an unpushed commit. Push first (`brunna push garden-app`).
+Before anything is created it shows the repo and whether it is public, the tag, the commit (subject, author, date), the
+commits since the last tag, the title (the tag unless `--title`), the notes (`--notes-file <file>` or `--notes <text>`;
+without them the release has none), and, when that commit has a `.zenodo.json` or `CITATION.cff`, a warning: if Zenodo
+(or another archive) is connected to the repo, publishing makes a permanent archived copy with a DOI that can't be
+withdrawn. Then it names the gh account it will use and on which repo, and asks `[y/N]`. Only your typed `y` publishes:
+`--yes` isn't taken, and with nobody at the terminal it refuses before contacting anything, because a release can't be
+taken back (watchers are notified and connected services run at once). It refuses a tag the remote already has, a
+release of that name (a draft included), a remote that isn't on GitHub, and running inside a sandbox or a coding
+agent's session. The project gets a letter with the release's link.
+

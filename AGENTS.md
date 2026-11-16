@@ -85,7 +85,8 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
   `brunna agent` (a project's declared confined agent call, docs/design/project-agent-calls.md), `brunna push` (a
   sandboxed project's push, which the platform checks and makes with its own per-repo key: `bin/git_remote.py`,
   `bin/push_checks.py`, `bin/push_queue.py`, `bin/git_push_grant.py`, docs/design/platform-push.md; the owner's own is
-  `brunna push --owner`) (rules files name only these, never local paths); the same mailbox is also an MCP server, `brunna mcp` (`bin/mcp_server.py`, for any
+  `brunna push <project>` from any folder that isn't a sandboxed project's, `--owner` anywhere, and a GitHub release
+  is the owner's `brunna release <project> <tag>`, `bin/git_release.py`) (rules files name only these, never local paths); the same mailbox is also an MCP server, `brunna mcp` (`bin/mcp_server.py`, for any
   agent that supports MCP; how to register it: docs/mcp.md)
 - **What commands the platform has**: `bin/brunna help all` (`--help` shows only the owner's few; init, doctor, config, llm, modules, onboard, recover,
   rename, status, jobs, run); which provider's model makes the platform's judgments and where the key lives:
