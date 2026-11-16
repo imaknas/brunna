@@ -376,6 +376,21 @@ class Scan(Fixture):
         self.assertIn(("pointer", "workspace/sub", ".git"), got)
         self.assertIn(("pointer", "workspace/.git/worktrees/w", "commondir"), got)
 
+    def test_an_empty_git_file_is_no_finding(self):
+        """uv marks its cache buckets with an empty .git file (beside an empty .gitignore): git stops at it and reads
+        nothing, so the scan says nothing (11-16: a project's own uv cache raised an alert). The control: one byte in
+        it, and it is a pointer git reads oddly."""
+        bucket = self.ws / ".transcribe-tmp" / "uv-cache" / "sdists-v9"
+        bucket.mkdir(parents=True)
+        (bucket / ".git").write_bytes(b"")
+        (bucket / ".gitignore").write_bytes(b"")
+        where = "workspace/.transcribe-tmp/uv-cache/sdists-v9"
+        got = {(f["kind"], f["where"]) for f in self.scan()["projects"]["demo"]["findings"]}
+        self.assertFalse({k for k, w in got if w == where}, got)
+        (bucket / ".git").write_bytes(b" ")
+        got = {(f["kind"], f["where"]) for f in self.scan()["projects"]["demo"]["findings"]}
+        self.assertIn(("pointer", where), got)
+
     def test_a_split_index_is_read_where_it_says(self):
         shared = index_bytes(REPORTED[:1])
         link = hashlib.sha1(shared[:-20]).digest()

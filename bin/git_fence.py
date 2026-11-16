@@ -617,6 +617,14 @@ class Scan:
 
     def gitfile(self, entry: pathlib.Path) -> None:
         w = self.where(entry.parent)
+        # an empty .git file points nowhere: git stops at it ("invalid gitfile format") and reads nothing else, so it is
+        # no finding (uv marks every cache bucket with one, beside an empty .gitignore; 11-16, a project's own uv cache)
+        try:
+            st = os.lstat(entry)
+            if stat.S_ISREG(st.st_mode) and st.st_size == 0:
+                return
+        except OSError:
+            pass
         try:
             target, odd = pointer(entry, b"gitdir: ")
         except Unreadable as e:
