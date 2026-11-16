@@ -44,7 +44,7 @@ refused: <SHA> is not a commit on the remote (none of its branches has it): push
 [exit 2]
 --- stdout
 Release of proj: github.com/o/proj (public)
-  tag      v1.0.0 (new: GitHub makes it at the target)
+  tag      v1.0.0 (new: made at the target before the release)
   target   <SHA> (the remote's default branch main)
            add a
            Dev <dev@example.org>, 2026-11-16T10:00:00Z
@@ -53,6 +53,8 @@ Release of proj: github.com/o/proj (public)
            <SHA> init
   title    v1.0.0
   notes    none: the release has no notes, and GitHub generates none
+
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is switched on).
 
 Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet.
 To publish it, the platform will use that login on github.com/o/proj to create the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
@@ -66,7 +68,7 @@ refused: You said no: no release was created, and nothing was changed.
 --- stdout
 (--yes isn't taken for a release: answer the question below)
 Release of proj: github.com/o/proj (public)
-  tag      v1.0.0 (new: GitHub makes it at the target)
+  tag      v1.0.0 (new: made at the target before the release)
   target   <SHA> (the remote's default branch main)
            add a
            Dev <dev@example.org>, 2026-11-16T10:00:00Z
@@ -75,6 +77,8 @@ Release of proj: github.com/o/proj (public)
            <SHA> init
   title    v1.0.0
   notes    none: the release has no notes, and GitHub generates none
+
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is switched on).
 
 Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet.
 To publish it, the platform will use that login on github.com/o/proj to create the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
@@ -87,7 +91,7 @@ refused: You said no: no release was created, and nothing was changed.
 [exit 0]
 --- stdout
 Release of proj: github.com/o/proj (public)
-  tag      v1.0.0 (new: GitHub makes it at the target)
+  tag      v1.0.0 (new: made at the target before the release)
   target   <SHA> (the remote's default branch main)
            describe the archive
            Dev <dev@example.org>, 2026-11-16T10:00:00Z
@@ -102,8 +106,8 @@ Release of proj: github.com/o/proj (public)
            > - the reader
            > - the writer
 
-!! The target has .zenodo.json, which archives such as Zenodo read.
-!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn.
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is switched on).
+!! The target has .zenodo.json, which such archives read: one may well be connected.
 
 Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet.
 To publish it, the platform will use that login on github.com/o/proj to create the tag v1.0.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
@@ -113,10 +117,29 @@ Publish the release with your gh login? [y/N] y
 --- stderr
 
 === the tag is on the remote now: brunna release proj v1.0.0
-[exit 2]
+[exit 0]
 --- stdout
+Release of proj: github.com/o/proj (public)
+  tag      v1.0.0 (on the remote already, at the target: left by a run that stopped; the release is made on it)
+  target   <SHA> (the remote's default branch main)
+           describe the archive
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  3 since v0.9 (<SHA>)
+           <SHA> describe the archive
+           <SHA> later work
+           <SHA> add a
+  title    v1.0.0
+  notes    none: the release has no notes, and GitHub generates none
+
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is switched on).
+!! The target has .zenodo.json, which such archives read: one may well be connected.
+
+Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet.
+To publish it, the platform will use that login on github.com/o/proj to publish a release of the tag v1.0.0 that is already at <SHA>. Nothing else of your account is used, and nothing has been changed yet.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] y
+✓ released v1.0.0 of github.com/o/proj at <SHA>: https://github.com/o/proj/releases/tag/v1.0.0
 --- stderr
-refused: the remote has the tag v1.0.0 already (at <SHA>): nothing was created; pick another name
 
 === a draft release holds the name: brunna release proj v1.1.0
 [exit 2]
@@ -129,6 +152,84 @@ refused: github.com/o/proj has a release named v1.1.0 already (https://github.co
 --- stdout
 --- stderr
 failed: gh isn't signed in to github.com (To get started with GitHub CLI, please run:  gh auth login): sign in with gh auth login and run this again; nothing was changed
+
+=== a tag made while the plan is shown: brunna release proj v1.1.0
+[exit 2]
+--- stdout
+Release of proj: github.com/o/proj (public)
+  tag      v1.1.0 (new: made at the target before the release)
+  target   <SHA> (the remote's default branch main)
+           describe the archive
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  0 since v1.0.0 (<SHA>)
+  title    v1.1.0
+  notes    none: the release has no notes, and GitHub generates none
+
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is switched on).
+!! The target has .zenodo.json, which such archives read: one may well be connected.
+
+Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.1.0 yet.
+To publish it, the platform will use that login on github.com/o/proj to create the tag v1.1.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] y
+--- stderr
+refused: the remote's tag v1.1.0 appeared at <SHA> after the plan was shown, not at <SHA>: no release was created; look at who made it
+
+=== the release went out on another commit: brunna release proj v1.2.0
+[exit 3]
+--- stdout
+Release of proj: github.com/o/proj (public)
+  tag      v1.2.0 (new: made at the target before the release)
+  target   <SHA> (the remote's default branch main)
+           describe the archive
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  0 since v1.0.0 (<SHA>)
+  title    v1.2.0
+  notes    none: the release has no notes, and GitHub generates none
+
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is switched on).
+!! The target has .zenodo.json, which such archives read: one may well be connected.
+
+Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.2.0 yet.
+To publish it, the platform will use that login on github.com/o/proj to create the tag v1.2.0 at <SHA> and a published release of it. Nothing else of your account is used, and nothing has been changed yet.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] y
+--- stderr
+⚠️ the release v1.2.0 went out on a different commit: its tag names <SHA>, not the <SHA> you were shown. Look at it on GitHub (https://github.com/o/proj/releases/tag/v1.2.0) and delete the release if it shouldn't stay; nothing was recorded and proj wasn't told
+
+=== a tag left at the target: brunna release proj v1.3.0
+[exit 2]
+--- stdout
+Release of proj: github.com/o/proj (public)
+  tag      v1.3.0 (on the remote already, at the target: left by a run that stopped; the release is made on it)
+  target   <SHA> (the remote's default branch main)
+           describe the archive
+           Dev <dev@example.org>, 2026-11-16T10:00:00Z
+  commits  0 since v1.0.0 (<SHA>)
+  title    v1.3.0
+  notes    none: the release has no notes, and GitHub generates none
+
+!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is switched on).
+!! The target has .zenodo.json, which such archives read: one may well be connected.
+
+Read so far with your gh login (octo), read-only: the account's name, and that github.com/o/proj has no release named v1.3.0 yet.
+To publish it, the platform will use that login on github.com/o/proj to publish a release of the tag v1.3.0 that is already at <SHA>. Nothing else of your account is used, and nothing has been changed yet.
+Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
+Publish the release with your gh login? [y/N] n
+--- stderr
+refused: You said no: no release was created, and nothing was changed.
+
+=== notes too long to show: brunna release proj v1.4.0 --notes-file <TMP>/long.md
+[exit 2]
+--- stdout
+--- stderr
+refused: the notes are 201 lines and 3 KB: every line is shown before you say yes, so at most 200 lines and 32 KB are taken; shorten them (they can link to a longer changelog)
+
+=== a --target that is also a branch: brunna release proj v1.4.0 --target <SHA>
+[exit 2]
+--- stdout
+--- stderr
+refused: --target <SHA> is a commit id and also a branch on the remote: rename the branch, or name the commit by another length of its id
 
 === another forge: brunna release proj v1.1.0
 [exit 2]
@@ -155,4 +256,5 @@ refused: proj is not sandboxed: its sessions can make a release with gh themselv
 refused: proj is not in the registry
 
 === the project's letter
+The release v1.0.0 of github.com/o/proj is published, at <SHA>: https://github.com/o/proj/releases/tag/v1.0.0. Tags and releases are made by the owner (brunna release); there is nothing for you to do.
 The release v1.0.0 of github.com/o/proj is published, at <SHA>: https://github.com/o/proj/releases/tag/v1.0.0. Tags and releases are made by the owner (brunna release); there is nothing for you to do.

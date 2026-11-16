@@ -157,7 +157,9 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      in a sandbox or an agent's session; read-only gh calls run before the question (the 11-16 rule covers changes
      made with the owner's login); the rules tell sandboxed sessions to ask brunna for a release; listed in `help all`
      only. Left: the status-page rows, and switching
-     the five projects to `all` once their keys are set up.
+     the five projects to `all` once their keys are set up. Follow-up (11-16, from the release review, not
+     investigated): is a gh token kept in the Keychain reachable from a sandboxed session (`api.github.com` is in
+     `policy.DOMAINS`)? If it is, the sandbox isn't the boundary for the owner's GitHub login that releases rely on.
    - **Step 4 layer 2:** `brunna session <project> --agent` under the platform's OS sandbox (with `--no-daemon` for
      Codex, D9's option i). It waits on M10 and Step 1's platform `CODEX_HOME`.
 

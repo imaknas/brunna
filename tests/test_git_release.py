@@ -64,13 +64,43 @@ if a[:2] == ["release", "view"]:
         sys.exit(1)
     print("release not found", file=sys.stderr)
     sys.exit(1)
+def git(*args):
+    return subprocess.run(["git", "--git-dir", os.environ["FAKE_REMOTE"], *args], capture_output=True, text=True)
+def tag_exists(t):
+    return git("rev-parse", "--verify", "-q", f"refs/tags/{t}").returncode == 0
+if a[:2] == ["api", "--hostname"] and "POST" in a and a[a.index("-X") + 2].endswith("/git/refs"):
+    fields = dict(f.split("=", 1) for f in (a[i + 1] for i, x in enumerate(a) if x == "-f"))
+    if (d / "race-tag").exists():   # someone else tags another commit just before the platform does
+        git("update-ref", fields["ref"], (d / "race-tag").read_text().strip())
+    if git("rev-parse", "--verify", "-q", fields["ref"]).returncode == 0:   # GitHub: an existing ref isn't made again
+        print("gh: Reference already exists (HTTP 422)", file=sys.stderr)
+        sys.exit(1)
+    git("update-ref", fields["ref"], fields["sha"])
+    print(json.dumps({"ref": fields["ref"], "object": {"sha": fields["sha"]}}))
+    sys.exit(0)
 if a[:2] == ["release", "create"]:
-    subprocess.run(["git", "--git-dir", os.environ["FAKE_REMOTE"], "tag", a[2], opt("--target")], check=True)
+    # as GitHub documents it: --target is used only when the tag is made here; an existing tag is kept as it is
+    if (d / "move-tag").exists():
+        git("update-ref", f"refs/tags/{a[2]}", (d / "move-tag").read_text().strip())
+    if not tag_exists(a[2]):
+        if "--verify-tag" in a:
+            print(f"tag {a[2]} doesn't exist in the repo o/proj, aborting due to --verify-tag flag", file=sys.stderr)
+            sys.exit(1)
+        git("tag", a[2], opt("--target") or "HEAD")
     print("https://github.com/o/proj/releases/tag/" + a[2])
     sys.exit(0)
 print("fake gh: " + " ".join(a), file=sys.stderr)
 sys.exit(2)
 '''
+
+
+class Tty(io.StringIO):
+    def __init__(self, tty: bool):
+        super().__init__()
+        self.tty = tty
+
+    def isatty(self):
+        return self.tty
 
 
 class Base(unittest.TestCase):
@@ -132,13 +162,19 @@ class Base(unittest.TestCase):
     def push(self, ref="main"):
         self.git(self.seed, "push", "-q", str(self.remote), ref)
 
-    def run_(self, *args, tty=True, answer="y"):
-        out, err = io.StringIO(), io.StringIO()
+    def run_(self, *args, tty=True, answer="y", out_tty=None, on_answer=None):
+        out, err = Tty(out_tty if out_tty is not None else tty), io.StringIO()
         prompts = []
+
+        def reply(prompt=""):
+            prompts.append(prompt)
+            out.write(f"{prompt}{answer}\n")
+            if on_answer:
+                on_answer()
+            return answer
         with mock.patch("sys.stdout", out), mock.patch("sys.stderr", err), \
                 mock.patch("sys.stdin", mock.Mock(isatty=lambda: tty)), \
-                mock.patch("builtins.input", lambda prompt="": (prompts.append(prompt), out.write(f"{prompt}{answer}\n"),
-                                                                answer)[2]):
+                mock.patch("builtins.input", reply):
             code = git_release.main(list(args))
         self.prompts = prompts
         return code, out.getvalue(), err.getvalue()
@@ -149,6 +185,11 @@ class Base(unittest.TestCase):
 
     def creates(self) -> list[dict]:
         return [c for c in self.gh_calls() if c["argv"][:2] == ["release", "create"]]
+
+    def posts(self) -> list[str]:
+        """The sha of each tag the platform asked GitHub to make (the refs API)."""
+        return [next(x[4:] for x in c["argv"] if x.startswith("sha=")) for c in self.gh_calls()
+                if c["argv"][:2] == ["api", "--hostname"]]
 
     def remote_tag(self, tag) -> str:
         r = subprocess.run(["git", "--git-dir", str(self.remote), "rev-parse", "--verify", "-q", f"refs/tags/{tag}^{{}}"],
@@ -175,16 +216,21 @@ class Publishes(Base):
         self.assertEqual(code, git_release.OK, err)
         [c] = self.creates()
         notes = c["argv"][c["argv"].index("--notes-file") + 1]
-        self.assertEqual(c["argv"], ["release", "create", "v1.0.0", "--repo", "github.com/o/proj", "--target", self.tip,
+        self.assertEqual(c["argv"], ["release", "create", "v1.0.0", "--repo", "github.com/o/proj", "--verify-tag",
                                      "--title", "v1.0.0", "--notes-file", notes])
+        post = [x["argv"] for x in self.gh_calls() if x["argv"][:2] == ["api", "--hostname"]]
+        self.assertEqual(post, [["api", "--hostname", "github.com", "-X", "POST", "repos/o/proj/git/refs",
+                                 "-f", "ref=refs/tags/v1.0.0", "-f", f"sha={self.tip}"]], "the tag pinned first")
         self.assertIn(self.tip, out, "the sha given to gh is the one shown")
         self.assertEqual((c["notes"], c["notes_mode"]), ("", "0o600"), "no notes: an empty private file, gh never asks")
         self.assertFalse(os.path.exists(notes), "the notes file is removed")
         self.assertFalse(pathlib.Path(c["cwd"]).is_relative_to(self.tmp / "ws"))
         self.assertEqual(self.remote_tag("v1.0.0"), self.tip)
-        # the order: the account named and the release looked up (read-only), then the yes, then the release made
+        # the order: the account named and the release looked up (read-only), then the yes, the release looked up again,
+        # the tag made at the shown sha, and only then the release on it
         self.assertEqual([x["argv"][:2] for x in self.gh_calls()],
-                         [["api", "user"], ["release", "view"], ["release", "create"]])
+                         [["api", "user"], ["release", "view"], ["release", "view"], ["api", "--hostname"],
+                          ["release", "create"]])
         self.assertIn("read-only: the account's name, and that github.com/o/proj has no release named v1.0.0 yet", out)
         self.assertEqual(len(self.prompts), 1)
         self.assertIn("will use that login on github.com/o/proj to create the tag v1.0.0", out)
@@ -195,7 +241,8 @@ class Publishes(Base):
         self.assertEqual(project, "proj")
         for s in ("v1.0.0", self.tip[:12], "https://github.com/o/proj/releases/tag/v1.0.0"):
             self.assertIn(s, text)
-        self.assertNotIn("!!", out, "no archive file: no DOI warning")
+        self.assertIn("If Zenodo (or another archive) is connected to this repo", out, "the DOI warning is always said")
+        self.assertNotIn("which such archives read", out, "no archive file named")
 
     def test_notes_go_through_a_file_never_argv(self):
         f = self.tmp / "notes.md"
@@ -210,7 +257,7 @@ class Publishes(Base):
         self.assertIn("--title", c["argv"])
         self.assertEqual(c["argv"][c["argv"].index("--title") + 1], "First release")
         self.assertIn("> - change 0", out)
-        self.assertIn("and 22 more lines", out)
+        self.assertIn("> - change 39", out, "every line is shown before the yes")
         code, _out, err = self.run_("proj", "v1.0.1", "--notes", "short and sweet")
         self.assertEqual(code, git_release.OK, err)
         self.assertEqual(self.creates()[-1]["notes"], "short and sweet")
@@ -221,11 +268,12 @@ class Publishes(Base):
         self.push("feature")
         code, out, err = self.run_("proj", "v1.0.0", "--target", "feature")
         self.assertEqual(code, git_release.OK, err)
-        self.assertEqual(self.creates()[-1]["argv"][6], feat)
+        self.assertEqual(self.posts()[-1], feat)
+        self.assertEqual(self.remote_tag("v1.0.0"), feat)
         self.assertIn("on the remote's branch feature", out)
         code, _out, err = self.run_("proj", "v0.9.0", "--target", self.first[:9])
         self.assertEqual(code, git_release.OK, err)
-        self.assertEqual(self.creates()[-1]["argv"][6], self.first, "a short id is given to gh as the full sha")
+        self.assertEqual(self.posts()[-1], self.first, "a short id is given to GitHub as the full sha")
 
     def test_commits_since_the_previous_tag(self):
         self.git(self.seed, "tag", "-a", "-m", "zero nine", "v0.9", self.first)
@@ -245,9 +293,9 @@ class Publishes(Base):
                 self.push()
                 code, out, err = self.run_("proj", f"v-{name.strip('.').lower()}", answer="n")
                 self.assertEqual(code, git_release.REFUSED)
-                self.assertIn(f"!! The target has {name}", out)
+                self.assertIn(f"!! The target has {name}, which such archives read", out)
                 self.assertIn("If Zenodo (or another archive) is connected to this repo, publishing this release makes "
-                              "a permanent archived copy with a DOI that can't be withdrawn.", out)
+                              "a permanent archived copy with a DOI that can't be withdrawn", out)
                 self.git(self.seed, "rm", "-q", name)
                 self.git(self.seed, "commit", "-q", "-m", f"drop {name}")
 
@@ -341,6 +389,33 @@ class Refusals(Base):
         self.assertEqual(self.gh_calls(), [])
         self.assertFalse(self.owned().exists())
 
+    def test_notes_are_shown_whole_or_refused(self):
+        f = self.tmp / "notes.md"
+        for text, said in (("".join(f"line {i}\n" for i in range(201)), "the notes are 201 lines"),
+                           ("x" * (33 << 10), "KB: every line is shown before you say yes")):
+            with self.subTest(said=said):
+                f.write_text(text)
+                code, _out, err = self.run_("proj", "v1.0.0", "--notes-file", str(f))
+                self.assertEqual(code, git_release.REFUSED)
+                self.assertIn(said, err)
+        self.assertEqual(self.gh_calls(), [])
+        f.write_text("".join(f"line {i}\n" for i in range(200)))   # the control: 200 lines, all shown
+        code, out, err = self.run_("proj", "v1.0.0", "--notes-file", str(f))
+        self.assertEqual(code, git_release.OK, err)
+        self.assertIn("> line 199", out)
+
+    def test_a_target_named_like_a_commit_is_a_commit(self):
+        # a branch on the remote whose name is the full id of the older commit, pointing at the newer one
+        self.git(self.seed, "branch", self.first, self.tip)
+        self.push(f"refs/heads/{self.first}")
+        code, _out, err = self.run_("proj", "v1.0.0", "--target", self.first)
+        self.assertEqual(code, git_release.REFUSED)
+        self.assertIn("is a commit id and also a branch on the remote", err)
+        self.assertEqual(self.gh_calls(), [])
+        code, _out, err = self.run_("proj", "v1.0.0", "--target", self.first[:10])   # the control: another length
+        self.assertEqual(code, git_release.OK, err)
+        self.assertEqual(self.remote_tag("v1.0.0"), self.first, "the commit, never the branch's tip")
+
     def test_nobody_at_a_terminal_and_yes_alone(self):
         code, _out, err = self.run_("proj", "v1.0.0", tty=False)
         self.assertEqual(code, git_release.REFUSED)
@@ -348,6 +423,9 @@ class Refusals(Base):
         code, _out, err = self.run_("proj", "v1.0.0", "--yes", tty=False)
         self.assertEqual(code, git_release.REFUSED)
         self.assertIn("--yes isn't taken for a release", err)
+        code, _out, err = self.run_("proj", "v1.0.0", out_tty=False)   # the plan can't be sent into a pipe
+        self.assertEqual(code, git_release.REFUSED)
+        self.assertIn("nobody is at a terminal", err)
         self.assertEqual(self.gh_calls(), [])
         self.assertFalse(self.owned().exists(), "the remote was contacted")
 
@@ -390,6 +468,56 @@ class Refusals(Base):
                 self.assertEqual(code, git_release.REFUSED)
                 self.assertIn("usage: brunna release", err)
         self.assertEqual(self.gh_calls(), [])
+
+
+class Races(Base):
+    """What changes on GitHub while the plan is on screen, or between the platform's own steps."""
+
+    def test_a_tag_made_while_the_owner_reads(self):
+        # a workflow or another terminal tags the older commit while the plan is shown: gh release create would keep
+        # that tag (--target applies only to a tag gh makes), so nothing may be created
+        def tag_it():
+            subprocess.run(["git", "--git-dir", str(self.remote), "tag", "v1.0.0", self.first], check=True)
+        code, _out, err = self.run_("proj", "v1.0.0", on_answer=tag_it)
+        self.assertEqual(code, git_release.REFUSED)
+        self.assertIn("appeared at", err)
+        self.assertEqual((self.creates(), self.posts()), ([], []))
+        self.assertEqual(self.remote_tag("v1.0.0"), self.first)
+        self.assertEqual((self.releases(), self.letters), ([], []))
+
+    def test_a_tag_made_just_before_the_platforms(self):
+        (self.fake / "race-tag").write_text(self.first)
+        code, _out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.REFUSED)
+        self.assertIn("appeared at", err)
+        self.assertEqual(self.creates(), [])
+        self.assertEqual((self.releases(), self.letters), ([], []))
+
+    def test_a_release_made_while_the_owner_reads(self):
+        code, _out, err = self.run_("proj", "v1.0.0", on_answer=lambda: (self.fake / "release-exists").touch())
+        self.assertEqual(code, git_release.REFUSED)
+        self.assertIn("has a release named v1.0.0 already", err)
+        self.assert_nothing_created()
+        self.assertEqual(self.posts(), [])
+
+    def test_a_release_that_went_out_elsewhere_is_said_and_not_recorded(self):
+        (self.fake / "move-tag").write_text(self.first)
+        code, _out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.ELSEWHERE)
+        self.assertIn("went out on a different commit", err)
+        self.assertIn(self.first[:12], err)
+        self.assertEqual((self.releases(), self.letters), ([], []), "recorded or told although it isn't the shown sha")
+
+    def test_a_tag_left_at_the_target_goes_on(self):
+        subprocess.run(["git", "--git-dir", str(self.remote), "tag", "v1.0.0", self.tip], check=True)
+        code, out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.OK, err)
+        self.assertIn("on the remote already, at the target", out)
+        self.assertIn("publish a release of the tag v1.0.0 that is already at", out)
+        self.assertEqual(self.posts(), [], "no second tag")
+        self.assertEqual(len(self.creates()), 1)
+        self.assertTrue(self.releases()[0]["tag_left_over"])
+        self.assertNotIn("v1.0.0 (", out.split("commits", 1)[1].split("\n", 1)[0], "counted as an earlier release")
 
 
 class Cli(unittest.TestCase):

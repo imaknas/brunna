@@ -103,7 +103,8 @@ owner(你本人;不是專案 session 的指令):
                         用你的 gh 發布沙盒專案的 GitHub release:tag 打在已經在遠端的 commit 上(預設是預設分支最新的
                         commit,或 --target 指定的),從不打在還沒推的 commit 上;先列出那個 commit、上一個 tag 以來的
                         commit、標題、說明,以及會不會有封存服務(Zenodo)留下永久的副本,只有你親手打 y 才發布,
-                        --yes 不行(bin/git_release.py)。只能在你自己的終端機跑:沙盒裡、coding agent 的 session 裡都拒絕
+                        --yes 不行(bin/git_release.py)。給你在自己的終端機用:看得出是在沙盒裡或 coding agent 的 session 裡就拒絕
+                        (防的是例行或不小心的使用;沙盒專案的 session 本來就碰不到 gh)
 專案的 session 用的(規則檔裡寫的就是這些;權限規則只放行這幾個,不放行上面的管理指令):
   brunna send | inbox | show | ack | pass | done | thread | open-questions …   = 專案信箱(bin/hubbus 同名的子指令)
   brunna merge-branch …    = bin/merge-branch(平行 session 的合併閘門)

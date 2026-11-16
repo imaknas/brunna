@@ -8,6 +8,7 @@ tests/test_git_release.py's throwaway registry, remote and stand-in gh; shas and
 import os
 import pathlib
 import re
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -64,6 +65,22 @@ class Golden(Base):
         (self.fake / "no-login").touch()
         self.case("gh isn't signed in", "proj", "v1.1.0")
         (self.fake / "no-login").unlink()
+        older = self.git(self.seed, "rev-parse", "HEAD~1").strip()
+        self.case("a tag made while the plan is shown", "proj", "v1.1.0", answer="y", on_answer=lambda: subprocess.run(
+            ["git", "--git-dir", str(self.remote), "tag", "v1.1.0", older], check=True))
+        subprocess.run(["git", "--git-dir", str(self.remote), "tag", "-d", "v1.1.0"], capture_output=True)
+        (self.fake / "move-tag").write_text(older)
+        self.case("the release went out on another commit", "proj", "v1.2.0")
+        (self.fake / "move-tag").unlink()
+        subprocess.run(["git", "--git-dir", str(self.remote), "tag", "v1.3.0", self.git(self.seed, "rev-parse", "HEAD")
+                        .strip()], check=True)
+        self.case("a tag left at the target", "proj", "v1.3.0", answer="n")
+        long = self.tmp / "long.md"
+        long.write_text("".join(f"- item {i}\n" for i in range(201)))
+        self.case("notes too long to show", "proj", "v1.4.0", "--notes-file", str(long))
+        self.git(self.seed, "branch", older, "HEAD")
+        self.push(f"refs/heads/{older}")
+        self.case("a --target that is also a branch", "proj", "v1.4.0", "--target", older)
         for origin, name in (("git@gitlab.com:o/proj.git", "another forge"), (None, "no remote")):
             self.docs["proj"]["paths"]["origin"] = origin
             self.case(name, "proj", "v1.1.0")

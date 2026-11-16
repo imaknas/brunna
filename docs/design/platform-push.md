@@ -1080,10 +1080,14 @@ and similar archives take their copy on GitHub's *release* event, not on a tag, 
 (`gh release create v1.0.0 -R <owner>/<repo> --target <sha> --title … --notes …` after the branch was pushed). The
 command:
 
-- **Only the owner, at their own terminal.** Refused inside a sandbox, in a coding agent's session and in a linked
-  worktree of the hub, with the check `brunna skills sync` uses (now `bin/owner_terminal.py` `refusal()`, which both
-  word their own way). Not a session command (`policy.SESSION_SUBCOMMANDS` doesn't have it). With no terminal it is
-  refused before anything is contacted, and so is `--yes`: a release can't be undone, so only a typed `y` publishes
+- **For the owner, at their own terminal.** Refused where it can tell it runs inside a sandbox or a coding agent's
+  session, and in a linked worktree of the hub, with the check `brunna skills sync` uses (now `bin/owner_terminal.py`
+  `refusal()`, which both word their own way). That check is a guard against routine or accidental use, not a
+  boundary: an unsandboxed agent runs as the owner, holds the owner's gh login anyway, and can change the environment
+  the session check reads. For a sandboxed project the boundary is its sandbox, which denies gh's credentials to its
+  sessions. Not a session command (`policy.SESSION_SUBCOMMANDS` doesn't have it). Unless both stdin and stdout are a
+  terminal (so the plan can't be sent into a pipe and hidden) it is refused before anything is contacted, and so is
+  `--yes`: a release can't be undone, so only a typed `y` publishes
   one. With a terminal, `--yes` is said not to count and the question is asked anyway. This follows the 11-16 consent
   decision above, and is stricter than the push grant, where giving the branches counts as the yes: here nothing given
   on the command line does.
@@ -1094,33 +1098,52 @@ command:
   push`; never git in the project's repo), under the project's push lock: `ls-remote --symref` gives the default branch
   and every tag (peeled); the remote's branches are fetched now into the platform's own namespace there
   (`refs/<repo dir>/release/heads/*`, pruned), never its tags. The default target is the default branch's tip as fetched
-  now; `--target` takes a branch the remote has, or a commit reachable from one of the branches fetched now: an object
-  the owned repo holds from an earlier, refused push doesn't count. The full sha shown is the one gh is given. A tag the
-  remote has is refused; a tag name `git check-ref-format` refuses, one starting with `-`, one with spaces or
+  now; `--target` takes 7 to 64 hex digits as a commit, which must be reachable from one of the branches fetched now
+  (an object the owned repo holds from an earlier, refused push doesn't count) and is refused when a remote branch has
+  that very name; anything else must be a branch the remote has. `brunna push` refuses to push a branch named like a
+  commit id (7 to 64 hex digits, named or checked out), so one can't stand for another. A tag the remote has is
+  refused, unless it names the target itself (one left by a run that stopped between the tag and the release): the
+  plan says so and the release is made on it. A tag name `git check-ref-format` refuses, one starting with `-`, one with spaces or
   characters that can't be printed, or longer than 100 characters is refused.
 - **Before asking, it shows** the repo and its visibility (the anonymous probe), the tag, the target sha with its
   subject, author and date and which branch it is on, the commits since the nearest earlier tag on the remote (count
-  and the first 15 lines), the title (default: the tag), the notes (the first 20 lines) or that the release has none
-  and GitHub generates none, and, when the target has a `.zenodo.json` or `CITATION.cff`, two `!!` lines: the file, and
-  "If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent archived copy
-  with a DOI that can't be withdrawn." Before the question, two read-only gh calls: `gh api user` (the account
+  and the first 15 lines), the title (default: the tag), every line of the notes (notes over 200 lines or 32 KB are
+  refused with "shorten them": what goes out is what was read) or that the release has none and GitHub generates none,
+  and always "!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a permanent
+  archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives every release once it is
+  switched on)." When the target has a `.zenodo.json` or `CITATION.cff`, a second `!!` line names it as evidence that
+  one may well be connected. Before the question, two read-only gh calls: `gh api user` (the account
   named) and `gh release view <tag>` (a draft release can hold a tag name the remote doesn't have yet): a release of
   that name is refused without asking, and anything but gh's "release not found" fails closed. Then the consent, in
   the push grant's style: which reads ran with the owner's login, which repo, what it will create (the tag at the sha
   and a published release), that nothing has been changed yet, that watchers are notified and webhooks and connected
   services run, and that deleting the release later takes none of that back; then `[y/N]`, only `y`/`yes` goes on.
-- **After the yes:** `gh release create
-  <tag> --repo github.com/<owner>/<repo> --target <sha> --title <title> --notes-file <file>`: the notes always go
+- **After the yes, the tag is pinned before any release exists** (blind review B1, 11-16). `gh release create
+  --target` applies only when gh makes the tag itself (gh's manual: "Use `--target` to point to a different branch or
+  commit for the automatic tag creation"): a tag that appeared while the plan was on screen would carry the release to
+  its own commit. So `gh release view` is asked again, the remote's tags are read again, and a tag now at another
+  commit is refused; a missing one is made at the shown sha with `gh api --hostname github.com -X POST
+  repos/<owner>/<repo>/git/refs -f ref=refs/tags/<tag> -f sha=<sha>`. GitHub's REST docs for "Create a reference" list
+  201, 409 and 422 ("Validation failed") without saying which an existing ref gives (422 "Reference already exists"
+  is what it is known to answer; not verified from the docs), so whatever gh answers the tag is read back, and only
+  the shown sha goes on: one made at another commit in between is refused, nothing released. Then `gh release create
+  <tag> --repo github.com/<owner>/<repo> --verify-tag --title <title> --notes-file <file>` (`--verify-tag`: abort
+  when the tag isn't there, never a tag gh makes itself): the notes always go
   through a private file (600, in the platform's private temp folder, removed afterwards; an empty file for none), so no
   long text is on argv, gh never prompts, and what was shown is what is sent (an owner's `--notes-file` is read once
   and copied). gh runs from a folder of the platform's, never from wherever the owner stands. A gh that times out is
   said to have an unknown outcome, with how to look.
-- **Afterwards** the remote's tag is read back and must name the sha (otherwise a warning and exit 1); each release is
-  a line in `<state>/git-broker/<project>/releases.jsonl` (tag, sha, branch, title, URL, the notes' hash and length,
-  the archive files, the tag as read back); the project gets an `info` letter with the tag, sha and URL, saying there
-  is nothing for it to do.
+- **Afterwards** the remote's tag is read back. Only when it names the shown sha is the release a line in
+  `<state>/git-broker/<project>/releases.jsonl` (tag, sha, branch, title, URL, the notes' hash and length, the archive
+  files, the tag as read back, whether it was left over) and the project told by an `info` letter with the tag, sha and
+  URL, saying there is nothing for it to do. A tag at another commit is said plainly ("the release went out on a
+  different commit … delete the release if it shouldn't stay"), exit 3; a tag that can't be read back, exit 1; neither
+  is recorded or told. Exit codes: 0 published, 1 failed, 2 refused (nothing created), 3 published elsewhere.
 - Tests: `tests/test_git_release.py` (a stand-in gh on PATH that records each call and the notes file's content and
-  mode, the GitHub URL rewritten by the test's own git config to a throwaway bare repo; every refusal with a control),
+  mode and behaves as GitHub documents: an existing tag is kept and `--target` ignored, an existing ref isn't made
+  again; the GitHub URL rewritten by the test's own git config to a throwaway bare repo; every refusal with a control;
+  `Races`: a tag or a release made while the plan is shown, a tag made just before the platform's, a release that went
+  out elsewhere, a tag left at the target),
   goldens `tests/fixtures/i18n-golden/git-release.txt` and `en/git-release.txt`.
 
 **Decided (11-16, after the build):**
@@ -1134,3 +1157,10 @@ command:
    the owner publishes it with `brunna release <project> <tag>`.
 4. `brunna release` is listed in `brunna help all` only, not in the short `brunna --help` (the small owner surface).
 5. The refusal in a linked worktree of the hub stays, as for `brunna skills sync`.
+
+**After the blind code review (11-16):** B1 (a tag made between the plan and the release carried the release to its
+commit) is fixed by pinning the tag first, above. S1: a 7–64 hex `--target` is a commit first, and `brunna push`
+refuses such branch names. S2: the wording says the session check is a guard, not a boundary. S3: every note line is
+shown, with a cap. Nits: stdout must be a terminal too; the archive warning is always said. Follow-up, not
+investigated: whether a gh token kept in the Keychain is reachable from a session sandbox (`api.github.com` is in
+`policy.DOMAINS`), which would let a sandboxed session use the owner's login without `brunna release` (direction.md).

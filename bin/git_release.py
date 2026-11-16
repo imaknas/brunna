@@ -6,34 +6,49 @@ A sandboxed project's sessions can't reach gh, and `brunna push` never pushes ta
 copy on GitHub's *release* event, not on a tag, so the owner makes the release; until now that was `gh release create`
 by hand after the branch was pushed. This does it the platform's way:
 
-  1. only the owner, at their own terminal: refused inside a sandbox, in a coding agent's session and in a linked
-     worktree of the hub (owner_terminal.refusal, the check `brunna skills sync` uses), and with no terminal: a release
-     can't be undone, so only a typed y publishes one; `--yes` is never taken for it (with a terminal it still asks);
+  1. only the owner, at their own terminal: refused where it can tell it runs inside a sandbox or a coding agent's
+     session, and in a linked worktree of the hub (owner_terminal.refusal, the check `brunna skills sync` uses), and
+     unless both stdin and stdout are a terminal (the plan can't be hidden): a release can't be undone, so only a typed
+     y publishes one; `--yes` is never taken for it (with a terminal it still asks). The session check is a guard
+     against routine or accidental use, not a boundary: an unsandboxed agent holds the owner's gh login anyway. For a
+     sandboxed project the boundary is its sandbox, which denies gh's credentials to its sessions;
   2. the project is registered and sandboxed, and its paths.origin is a GitHub repo (git_push_grant.parse_origin, the
      push grant's parsing); any other forge is refused with the reason;
   3. the remote is read from the bare repo the platform owns for the project (`<state>/git-broker/<project>/remote.git`,
      git_remote.Owned, --git-dir, the owner's git environment as the owner form of `brunna push` uses; never git in the
      project's repo): `ls-remote --symref` names the default branch and every tag, and the remote's branches are fetched
      into the platform's own namespace there (refs/<repo dir>/release/heads/*, pruned), never its tags;
-  4. the target is a commit on the remote: the default branch's tip as fetched now, or `--target <branch|sha>`, a branch
-     the remote has or a commit reachable from one of the branches fetched now (an object the owned repo holds from an
-     earlier, refused push doesn't count). The full sha is what is shown and what gh is given, so GitHub makes the tag
-     there and nowhere else. A tag the remote has already is refused; a tag name git's check-ref-format refuses, one
+  4. the target is a commit on the remote: the default branch's tip as fetched now, or `--target <branch|sha>`: 7 to 64
+     hex digits are a commit (refused when a remote branch has that very name), reachable from one of the branches
+     fetched now (an object the owned repo holds from an earlier, refused push doesn't count); anything else a branch
+     the remote has. A tag the remote has already is refused, unless it names the target itself (one left by a run that
+     stopped before its release): the release is then made on it. A tag name git's check-ref-format refuses, one
      starting with "-", or one that can't be printed is refused;
   5. the plan is shown (the repo and its visibility, the tag, the target with its subject, author and date, the commits
-     since the nearest earlier tag, the title, the notes or that there are none) and, prominently, when the target has
-     a .zenodo.json or CITATION.cff, that an archive connected to the repo keeps a permanent copy with a DOI; then the
+     since the nearest earlier tag, the title, every line of the notes (at most 200 lines and 32 KB, or refused) or
+     that there are none) and, prominently and always, that an archive connected to the repo (Zenodo archives every
+     release once connected) keeps a permanent copy with a DOI, with the target's .zenodo.json or CITATION.cff named as
+     evidence when it has one; then the
      consent in the push grant's style (which gh account, which repo, what it creates, that it can't be taken back),
      then [y/N]: only y or yes goes on;
   6. before the question, read-only: `gh api user` (the account named) and `gh release view <tag>` (a draft release
      can hold a tag name the remote doesn't have yet; only "release not found" lets it go on; the consent says which
-     reads ran); after the yes: `gh release create <tag> --repo github.com/<owner>/<repo> --target <sha>
-     --title <title> --notes-file <file>`: the notes always through a private file (600, in the platform's private temp
-     folder; empty for none), so no long text goes on argv and gh never prompts; gh runs from a folder of the platform's;
-  7. the remote's tag is read back (ls-remote) and must be at the sha; each release is a line in
-     `<state>/git-broker/<project>/releases.jsonl`, and the project gets an info letter (tag, sha, URL).
+     reads ran);
+  7. after the yes, the tag is pinned before any release exists (`gh release create --target` applies only when gh
+     makes the tag itself; a tag that appeared meanwhile would carry the release elsewhere): `gh release view` is asked
+     again and the remote's tags read again; a tag now at another commit is refused; a missing one is made with
+     `gh api --hostname github.com -X POST repos/<owner>/<repo>/git/refs -f ref=refs/tags/<tag> -f sha=<sha>` (a ref
+     that exists can't be made again: GitHub's REST docs list 422 "Validation failed" and 409 without saying which an
+     existing ref gives, so whatever the answer the tag is read back and only the shown sha goes on). Then
+     `gh release create <tag> --repo github.com/<owner>/<repo> --verify-tag --title <title> --notes-file <file>`: the
+     notes always through a private file (600, in the platform's private temp folder; empty for none), so no long text
+     goes on argv and gh never prompts; gh runs from a folder of the platform's;
+  8. the remote's tag is read back (ls-remote): only when it names the shown sha is the release a line in
+     `<state>/git-broker/<project>/releases.jsonl` and the project told by an info letter (tag, sha, URL). Otherwise it
+     says plainly that the release went out on another commit (exit 3), or that the tag couldn't be read (exit 1).
 
-Exit: 0 published, 1 failed (git, gh, the network), 2 refused (nothing was created).
+Exit: 0 published, 1 failed (git, gh, the network), 2 refused (nothing was created), 3 published on a commit other
+than the one shown.
 """
 from __future__ import annotations
 
@@ -58,12 +73,13 @@ import names  # noqa: E402
 _ = i18n.domain(__file__)
 _c = i18n.domain(__file__, content=True)
 
-OK, FAILED, REFUSED = 0, 1, 2
+OK, FAILED, REFUSED, ELSEWHERE = 0, 1, 2, 3
 ARCHIVE_FILES = (".zenodo.json", "CITATION.cff")   # what Zenodo (and archives like it) read from a release
 SHOWN_COMMITS = 15
-SHOWN_NOTE_LINES = 20
+MAX_NOTE_LINES = 200   # notes are shown whole before the yes: longer ones are refused
+MAX_NOTE_BYTES = 32 << 10
 WALK = 5000            # commits looked through for the nearest earlier tag
-MAX_NOTES = 125_000    # GitHub's limit on a release's body (characters)
+HEX = re.compile(r"[0-9a-fA-F]{7,64}")
 MAX_TITLE = 200
 
 
@@ -138,8 +154,11 @@ def read_notes(notes_file: str | None, notes: str | None) -> str:
     notes = (notes or "").replace("\r\n", "\n")
     if "\0" in notes:
         raise Refused(_("the notes hold a NUL character"))
-    if len(notes) > MAX_NOTES:
-        raise Refused(_("the notes are {n} characters; GitHub takes at most {max}", n=len(notes), max=MAX_NOTES))
+    lines = notes.rstrip("\n").count("\n") + 1 if notes.strip() else 0
+    if lines > MAX_NOTE_LINES or len(notes.encode()) > MAX_NOTE_BYTES:
+        raise Refused(_("the notes are {n} lines and {kb} KB: every line is shown before you say yes, so at most {max} "
+                        "lines and {max_kb} KB are taken; shorten them (they can link to a longer changelog)",
+                        n=lines, kb=(len(notes.encode()) + 1023) >> 10, max=MAX_NOTE_LINES, max_kb=MAX_NOTE_BYTES >> 10))
     return notes
 
 
@@ -233,15 +252,19 @@ def resolve_target(owned, target: str | None, remote: Remote, heads: dict[str, s
             raise Refused(_("the remote's default branch can't be told (ls-remote --symref shows no HEAD; an empty "
                             "remote?): push its first commit, then release"))
         return heads[remote.default], remote.default
-    if target in heads:
-        return heads[target], target
-    if re.fullmatch(r"[0-9a-fA-F]{7,64}", target):
+    if HEX.fullmatch(target):
+        # a commit id first: a branch named like one (which brunna push refuses to push) could stand for another commit
+        if target in heads:
+            raise Refused(_("--target {target} is a commit id and also a branch on the remote: rename the branch, or "
+                            "name the commit by another length of its id", target=visible(target)))
         sha = owned.sha(target.lower())
         if sha and on_remote(owned, sha, heads):
             on = [b for b in heads if owned.git("merge-base", "--is-ancestor", sha, heads[b]).returncode == 0]
             return sha, (remote.default if remote.default in on else sorted(on)[0])
         raise Refused(_("{target} is not a commit on the remote (none of its branches has it): push it first (brunna "
                         "push), then release; a tag is never made on an unpushed commit", target=visible(target)))
+    if target in heads:
+        return heads[target], target
     raise Refused(_("--target {target} is neither a branch the remote has nor a commit id", target=visible(target)))
 
 
@@ -253,11 +276,13 @@ class Plan:
 
 
 def plan(owned, project: str, repo: str, tag: str, sha: str, branch: str, remote: Remote, title: str, notes: str,
-         vis: str) -> Plan:
+         vis: str, leftover: bool = False) -> Plan:
     fmt = owned.out("log", "-1", "--no-show-signature", "--format=%an%n%ae%n%aI%n%s", sha).split("\n")
     author, email, date, subject = (fmt + ["", "", "", ""])[:4]
     by_sha: dict[str, list[str]] = {}
     for t, s in remote.tags.items():
+        if t == tag:
+            continue   # a tag of this name left at the target is not an earlier release
         by_sha.setdefault(s, []).append(t)
     prev = None
     for c in owned.out("rev-list", f"--max-count={WALK}", sha).split():
@@ -270,13 +295,15 @@ def plan(owned, project: str, repo: str, tag: str, sha: str, branch: str, remote
     archive = [f for f in ARCHIVE_FILES if owned.git("cat-file", "-e", f"{sha}:{f}").returncode == 0]
     return Plan(project=project, repo=repo, tag=tag, sha=sha, branch=branch, default=remote.default, author=author,
                 email=email, date=date, subject=subject, prev=prev, n=n, log=log, title=title, notes=notes, vis=vis,
-                archive=archive)
+                archive=archive, leftover=leftover)
 
 
 def plan_lines(p: Plan) -> list[str]:
     vis = {"public": _("public"), "private": _("private")}.get(p.vis, _("of unknown visibility"))
     out = [_("Release of {project}: github.com/{repo} ({visibility})", project=p.project, repo=p.repo, visibility=vis),
-           _("  tag      {tag} (new: GitHub makes it at the target)", tag=visible(p.tag))]
+           _("  tag      {tag} (on the remote already, at the target: left by a run that stopped; the release is made "
+             "on it)", tag=visible(p.tag)) if p.leftover else
+           _("  tag      {tag} (new: made at the target before the release)", tag=visible(p.tag))]
     where = _("the remote's default branch {branch}", branch=visible(p.branch)) if p.branch == p.default else \
         _("on the remote's branch {branch}", branch=visible(p.branch))
     out += [_("  target   {sha} ({where})", sha=p.sha, where=where),
@@ -293,22 +320,24 @@ def plan_lines(p: Plan) -> list[str]:
     if p.notes.strip():
         lines = p.notes.rstrip("\n").split("\n")
         out.append(_("  notes    {n} {n:line|lines}:", n=len(lines)))
-        out += [f"           > {visible(line)}" for line in lines[:SHOWN_NOTE_LINES]]
-        if len(lines) > SHOWN_NOTE_LINES:
-            out.append(_("           … and {n} more {n:line|lines}", n=len(lines) - SHOWN_NOTE_LINES))
+        out += [f"           > {visible(line)}" for line in lines]
     else:
         out.append(_("  notes    none: the release has no notes, and GitHub generates none"))
+    out += ["", _("!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a "
+                  "permanent archived copy with a DOI that can't be withdrawn (Zenodo's GitHub integration archives "
+                  "every release once it is switched on).")]
     if p.archive:
-        out += ["",
-                _("!! The target has {files}, which archives such as Zenodo read.", files=", ".join(p.archive)),
-                _("!! If Zenodo (or another archive) is connected to this repo, publishing this release makes a "
-                  "permanent archived copy with a DOI that can't be withdrawn.")]
+        out.append(_("!! The target has {files}, which such archives read: one may well be connected.",
+                     files=", ".join(p.archive)))
     return out
 
 
 def consent_lines(p: Plan, account: str) -> list[str]:
     return [_("Read so far with your gh login ({account}), read-only: the account's name, and that github.com/{repo} "
               "has no release named {tag} yet.", account=account, repo=p.repo, tag=visible(p.tag)),
+            _("To publish it, the platform will use that login on github.com/{repo} to publish a release of the tag {tag} "
+              "that is already at {sha}. Nothing else of your account is used, and nothing has been changed yet.",
+              repo=p.repo, tag=visible(p.tag), sha=p.sha[:12]) if p.leftover else
             _("To publish it, the platform will use that login on github.com/{repo} to create the tag {tag} at {sha} and "
               "a published release of it. Nothing else of your account is used, and nothing has been changed yet.",
               repo=p.repo, tag=visible(p.tag), sha=p.sha[:12]),
@@ -352,8 +381,26 @@ def no_release_yet(repo: str, tag: str, cwd: pathlib.Path) -> None:
                        or r.returncode))
 
 
-def create(repo: str, tag: str, sha: str, title: str, notes: str, cwd: pathlib.Path) -> str:
-    """gh release create with the notes in a private file; → the release's URL."""
+def pin_tag(owned, url: str, repo: str, tag: str, sha: str, cwd: pathlib.Path) -> None:
+    """The tag at the shown sha before any release exists (after the yes). The remote's tags are read again: one at
+    another commit is refused, one at the sha (left by a run that stopped) is kept; a missing one is made with the refs
+    API, which can't move a ref that exists. Whatever gh answers, the tag is read back and only the sha goes on."""
+    at = read_remote(owned, url).tags.get(tag)
+    if at is None:
+        r = gh("api", "--hostname", "github.com", "-X", "POST", f"repos/{repo}/git/refs", "-f", f"ref=refs/tags/{tag}",
+               "-f", f"sha={sha}", cwd=cwd)
+        at = tag_at(owned, url, tag)
+        if at is None:
+            raise Failed(_("the tag {tag} couldn't be made at {sha}: {why}; no release was created", tag=visible(tag),
+                           sha=sha[:12], why=visible((r.stderr or "").strip()[-300:]) or r.returncode))
+    if at != sha:
+        raise Refused(_("the remote's tag {tag} appeared at {seen} after the plan was shown, not at {sha}: no release was "
+                        "created; look at who made it", tag=visible(tag), seen=at[:12], sha=sha[:12]))
+
+
+def create(repo: str, tag: str, title: str, notes: str, cwd: pathlib.Path) -> str:
+    """gh release create on the tag that exists (--verify-tag: never one gh makes itself), the notes in a private file;
+    → the release's URL."""
     import git_push_grant
     fd, path = tempfile.mkstemp(prefix="release-notes-", suffix=".md", dir=hubconf.private_tmp())
     try:
@@ -361,7 +408,7 @@ def create(repo: str, tag: str, sha: str, title: str, notes: str, cwd: pathlib.P
             fh.write(notes)
         os.chmod(path, 0o600)
         try:
-            r = git_push_grant.gh("release", "create", tag, "--repo", git_push_grant.gh_repo(repo), "--target", sha,
+            r = git_push_grant.gh("release", "create", tag, "--repo", git_push_grant.gh_repo(repo), "--verify-tag",
                                   "--title", title, "--notes-file", path, cwd=cwd)
         except git_push_grant.Failed as e:
             raise Failed(_("{why}: whether the release was made isn't known. Look with gh release view {tag} --repo "
@@ -380,7 +427,7 @@ def create(repo: str, tag: str, sha: str, title: str, notes: str, cwd: pathlib.P
 def tag_at(owned, url: str, tag: str) -> str | None:
     """The commit the remote's tag names now (read back after the release)."""
     import git_remote
-    try:   # the release exists by now: whatever this read does, the record and the letter still follow
+    try:
         r = owned.git(*git_remote.SAFE, "ls-remote", "--", url, f"refs/tags/{tag}", f"refs/tags/{tag}^{{}}")
     except (OSError, subprocess.SubprocessError):
         return None
@@ -429,7 +476,7 @@ def release(project: str, tag: str, *, target: str | None = None, title: str | N
     check_title(title)
     text = read_notes(notes_file, notes)
     _doc, origin, repo = project_doc(project)
-    if not sys.stdin.isatty():
+    if not (sys.stdin.isatty() and sys.stdout.isatty()):   # the plan is shown on a terminal, never into a pipe
         if yes:
             raise Refused(_("--yes isn't taken for a release: it can't be undone, so only your y typed at a terminal "
                             "publishes one. Run {cli} release in your own terminal; nothing was contacted",
@@ -463,12 +510,13 @@ def published(project: str, tag: str, origin: str, url: str, repo: str, target: 
         owned = git_remote.Owned(git_remote.broker_dir(project) / "remote.git", git_remote.owner_env())
         owned.init()
         remote = read_remote(owned, url)
-        if tag in remote.tags:
-            raise Refused(_("the remote has the tag {tag} already (at {sha}): nothing was created; pick another "
-                            "name", tag=visible(tag), sha=remote.tags[tag][:12]))
         heads = fetch_heads(owned, url)
         sha, branch = resolve_target(owned, target, remote, heads)
-        p = plan(owned, project, repo, tag, sha, branch, remote, title, text, git_remote.visibility(origin))
+        if tag in remote.tags and remote.tags[tag] != sha:
+            raise Refused(_("the remote has the tag {tag} already (at {sha}): nothing was created; pick another "
+                            "name", tag=visible(tag), sha=remote.tags[tag][:12]))
+        p = plan(owned, project, repo, tag, sha, branch, remote, title, text, git_remote.visibility(origin),
+                 leftover=tag in remote.tags)
         try:
             account = git_push_grant.gh_login(cwd=run)
         except git_push_grant.Failed as e:
@@ -482,18 +530,27 @@ def published(project: str, tag: str, origin: str, url: str, repo: str, target: 
         print()
         print("\n".join(consent_lines(p, account)))
         ask()
-        link = create(repo, tag, sha, title, text, run)
+        no_release_yet(repo, tag, run)   # again: the plan was on screen for a while
+        pin_tag(owned, url, repo, tag, sha, run)
+        link = create(repo, tag, title, text, run)
         now = tag_at(owned, url, tag)
+        if now is None:
+            print(_("⚠️ the release {tag} is published ({url}), but its tag couldn't be read back: nothing was recorded "
+                    "and {project} wasn't told; look at it on GitHub", tag=visible(tag), url=link or "?",
+                    project=project), file=sys.stderr)
+            return FAILED
+        if now != sha:
+            print(_("⚠️ the release {tag} went out on a different commit: its tag names {seen}, not the {sha} you were "
+                    "shown. Look at it on GitHub ({url}) and delete the release if it shouldn't stay; nothing was "
+                    "recorded and {project} wasn't told", tag=visible(tag), seen=now[:12], sha=sha[:12],
+                    url=link or "?", project=project), file=sys.stderr)
+            return ELSEWHERE
         log(project, repo=repo, tag=tag, sha=sha, branch=branch, title=title, url=link, by="owner",
             notes_sha256=hashlib.sha256(text.encode()).hexdigest(), notes_chars=len(text), archive=p.archive,
-            tag_seen=now)
+            tag_seen=now, tag_left_over=p.leftover)
         tell_project(project, repo, tag, sha, link)
         print(_("✓ released {tag} of github.com/{repo} at {sha}: {url}", tag=visible(tag), repo=repo, sha=sha[:12],
                 url=link or "?"))
-        if now != sha:
-            print(_("⚠️ the remote's tag {tag} reads {seen} right after, not {sha}: look at the release on GitHub",
-                    tag=visible(tag), seen=(now or _("missing"))[:12], sha=sha[:12]), file=sys.stderr)
-            return FAILED
         return OK
     finally:
         shutil.rmtree(run, ignore_errors=True)

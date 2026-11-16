@@ -131,9 +131,11 @@ It tags a commit that is already on the remote: the default branch's tip, or `--
 remote has, or a commit one of its branches holds); never an unpushed commit. Push first (`brunna push garden-app`).
 Before anything is created it shows the repo and whether it is public, the tag, the commit (subject, author, date), the
 commits since the last tag, the title (the tag unless `--title`), the notes (`--notes-file <file>` or `--notes <text>`;
-without them the release has none), and, when that commit has a `.zenodo.json` or `CITATION.cff`, a warning: if Zenodo
+without them the release has none; shown whole, so capped at 200 lines and 32 KB), and always a warning: if Zenodo
 (or another archive) is connected to the repo, publishing makes a permanent archived copy with a DOI that can't be
-withdrawn. Then it names the gh account it read with (its name, and that no release of that name exists yet: reads only) and
+withdrawn (a `.zenodo.json` or `CITATION.cff` in that commit is named as a sign one may be). After your yes it makes
+the tag at exactly the commit it showed, then the release on that tag; a tag someone made meanwhile at another commit
+stops it. Then it names the gh account it read with (its name, and that no release of that name exists yet: reads only) and
 what it will create on which repo, and asks `[y/N]`. Only your typed `y` publishes:
 `--yes` isn't taken, and with nobody at the terminal it refuses before contacting anything, because a release can't be
 taken back (watchers are notified and connected services run at once). It refuses a tag the remote already has, a
