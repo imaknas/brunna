@@ -886,6 +886,23 @@ class Forms(Push):
         self.assertEqual(code, git_remote.REFUSED)
         self.assertIn("is not sandboxed", err)
 
+    def test_a_branch_named_like_a_commit_id_isnt_pushed(self):
+        # brunna release reads 7 to 64 hex digits as a commit, so such a branch could stand for another commit
+        sha = self.git(self.ws, "rev-parse", "HEAD").strip()
+        self.git(self.ws, "checkout", "-q", "-b", sha[:10])
+        self.commit(self.ws, "a.txt", "a\n", "add a")
+        for args in ([sha[:10], "--yes"], ["--yes"]):   # named, and the one checked out
+            with self.subTest(args=args):
+                self.calls.clear()
+                code, _out, err = self.main(["proj", *args], hubconf.ROOT)
+                self.assertEqual(code, git_remote.REFUSED)
+                self.assertIn("named like a commit id", err)
+        self.assertEqual(self.tip(), self.base)
+        self.git(self.ws, "branch", "-m", "feature-a")   # the control: renamed, it is pushed
+        code, _out, err = self.main(["proj", "--yes"], hubconf.ROOT)
+        self.assertEqual(code, git_remote.OK, err)
+        self.assertNotEqual(self.bare(self.remote, "rev-parse", "--verify", "-q", "refs/heads/feature-a"), "")
+
     def test_inside_a_sandboxed_project_a_project_name_stays_a_branch(self):
         ws2 = self.tmp / "ws" / "proj2"
         self.git(self.tmp, "clone", "-q", str(self.remote), str(ws2))
