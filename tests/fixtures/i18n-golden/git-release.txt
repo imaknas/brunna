@@ -195,7 +195,7 @@ proj 的 release:github.com/o/proj(公開)
 看得到這個 repo 的人馬上就看得到這個 release,關注它的人會收到通知,webhook 和連上的服務(包括封存服務)會跑起來;之後刪掉也收不回這些。所以只有你親手打 y 才會繼續,--yes 不算。
 要用你的 gh 登入發布這個 release 嗎? [y/N] y
 --- stderr
-⚠️ release v1.2.0 發在別的 commit 上了:它的 tag 指在 <SHA>,不是給你看的 <SHA>。請到 GitHub 看一下(https://github.com/o/proj/releases/tag/v1.2.0),不該留的話就刪掉這個 release;沒有記錄,也沒有告訴 proj
+⚠️ release v1.2.0 發在別的 commit 上了:它的 tag 指在 <SHA>,不是給你看的 <SHA>。請到 GitHub 看一下(https://github.com/o/proj/releases/tag/v1.2.0),不該留的話就刪掉這個 release;連著這個 repo 的封存服務可能已經留了副本,而開了 immutable releases 的話,這個名稱就不能再用。沒有記錄,也沒有告訴 proj
 
 === a tag left at the target: brunna release proj v1.3.0
 [exit 2]

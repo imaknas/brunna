@@ -97,7 +97,8 @@ owner (you; not commands for project sessions):
                         commit, the commits since the last tag, the title, the notes and whether an archive (Zenodo)
                         may keep a permanent copy, and only your typed y goes on, never --yes (bin/git_release.py).
                         For your own terminal: refused where it can tell it runs in a sandbox or a coding agent's
-                        session (a guard against routine use; a sandboxed project's sessions can't reach gh at all)
+                        session (a guard against routine use; a sandboxed project's sessions are meant not to reach
+                        gh's credentials at all, pending a check of the Keychain)
 for project sessions (these are what the rules files name; the permission rules allow only these, not the admin commands above):
   brunna send | inbox | show | ack | pass | done | thread | open-questions …   = the project mailbox (bin/hubbus subcommands of the
                         same name)

@@ -195,7 +195,7 @@ To publish it, the platform will use that login on github.com/o/proj to create t
 Everyone who can see the repo sees the release at once, its watchers are notified, and webhooks and connected services (archives among them) run; deleting it later takes none of that back. So only your typed y goes on, never --yes.
 Publish the release with your gh login? [y/N] y
 --- stderr
-⚠️ the release v1.2.0 went out on a different commit: its tag names <SHA>, not the <SHA> you were shown. Look at it on GitHub (https://github.com/o/proj/releases/tag/v1.2.0) and delete the release if it shouldn't stay; nothing was recorded and proj wasn't told
+⚠️ the release v1.2.0 went out on a different commit: its tag names <SHA>, not the <SHA> you were shown. Look at it on GitHub (https://github.com/o/proj/releases/tag/v1.2.0) and delete the release if it shouldn't stay; an archive connected to the repo may have its copy already, and with immutable releases on, the name can't be used again. Nothing was recorded and proj wasn't told
 
 === a tag left at the target: brunna release proj v1.3.0
 [exit 2]

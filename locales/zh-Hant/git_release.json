@@ -60,5 +60,8 @@
  "the remote's tag {tag} appeared at {seen} after the plan was shown, not at {sha}: no release was created; look at who made it": "列出計畫之後,遠端出現了 tag {tag},指在 {seen},不是 {sha}:沒有建 release;請查是誰建的",
  "the tag {tag} couldn't be made at {sha}: {why}; no release was created": "沒能在 {sha} 建 tag {tag}:{why};沒有建 release",
  "⚠️ the release {tag} is published ({url}), but its tag couldn't be read back: nothing was recorded and {project} wasn't told; look at it on GitHub": "⚠️ release {tag} 已經發布({url}),但讀不回它的 tag:沒有記錄,也沒有告訴 {project};請到 GitHub 看一下",
- "⚠️ the release {tag} went out on a different commit: its tag names {seen}, not the {sha} you were shown. Look at it on GitHub ({url}) and delete the release if it shouldn't stay; nothing was recorded and {project} wasn't told": "⚠️ release {tag} 發在別的 commit 上了:它的 tag 指在 {seen},不是給你看的 {sha}。請到 GitHub 看一下({url}),不該留的話就刪掉這個 release;沒有記錄,也沒有告訴 {project}"
+ "  tag      {tag} (an annotated tag already at the target, made by someone else; the release is made on it)": "  tag      {tag}(目標上已經有別人打的 annotated tag;release 就發在它上面)",
+ "GitHub answered, but the tag isn't there when read back": "GitHub 回應了,但讀回時 tag 不在",
+ "{why}. The tag {tag} is left at {sha}: running brunna release again continues from it": "{why}。tag {tag} 留在 {sha}:再跑一次 brunna release 會從它接著做",
+ "⚠️ the release {tag} went out on a different commit: its tag names {seen}, not the {sha} you were shown. Look at it on GitHub ({url}) and delete the release if it shouldn't stay; an archive connected to the repo may have its copy already, and with immutable releases on, the name can't be used again. Nothing was recorded and {project} wasn't told": "⚠️ release {tag} 發在別的 commit 上了:它的 tag 指在 {seen},不是給你看的 {sha}。請到 GitHub 看一下({url}),不該留的話就刪掉這個 release;連著這個 repo 的封存服務可能已經留了副本,而開了 immutable releases 的話,這個名稱就不能再用。沒有記錄,也沒有告訴 {project}"
 }

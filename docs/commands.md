@@ -120,25 +120,39 @@ read: it pushes only onto what it showed you.
 
 ## Releasing a sandboxed project
 
-A sandboxed project's sessions can't reach gh, and `brunna push` never pushes tags. Archives such as Zenodo take their
+A sandboxed project's sessions aren't meant to reach gh, and `brunna push` never pushes tags. Archives such as Zenodo take their
 copy when a GitHub *release* is published, not when a tag appears, so you make the release, in your own terminal:
 
 ```bash
 brunna release garden-app v1.0.0 --title "First release" --notes-file notes.md
 ```
 
-It tags a commit that is already on the remote: the default branch's tip, or `--target <branch|sha>` (a branch the
-remote has, or a commit one of its branches holds); never an unpushed commit. Push first (`brunna push garden-app`).
-Before anything is created it shows the repo and whether it is public, the tag, the commit (subject, author, date), the
-commits since the last tag, the title (the tag unless `--title`), the notes (`--notes-file <file>` or `--notes <text>`;
-without them the release has none; shown whole, so capped at 200 lines and 32 KB), and always a warning: if Zenodo
-(or another archive) is connected to the repo, publishing makes a permanent archived copy with a DOI that can't be
-withdrawn (a `.zenodo.json` or `CITATION.cff` in that commit is named as a sign one may be). After your yes it makes
-the tag at exactly the commit it showed, then the release on that tag; a tag someone made meanwhile at another commit
-stops it. Then it names the gh account it read with (its name, and that no release of that name exists yet: reads only) and
-what it will create on which repo, and asks `[y/N]`. Only your typed `y` publishes:
-`--yes` isn't taken, and with nobody at the terminal it refuses before contacting anything, because a release can't be
-taken back (watchers are notified and connected services run at once). It refuses a tag the remote already has, a
-release of that name (a draft included), a remote that isn't on GitHub, and running inside a sandbox or a coding
-agent's session. The project gets a letter with the release's link.
+It tags a commit that is already on the remote: the default branch's tip, or `--target <branch|sha>` (4 to 64 hex
+digits are a commit, refused if a remote branch has that very name; anything else a branch the remote has); never an
+unpushed commit. Push first (`brunna push garden-app`). In order:
+
+1. **The plan:** the repo and whether it is public, the tag, the commit (subject, author, date), the commits since the
+   last tag, the title (the tag unless `--title`), the notes (`--notes-file <file>` or `--notes <text>`; without them
+   the release has none; shown whole, so capped at 200 lines and 32 KB), and always a warning: if Zenodo (or another
+   archive) is connected to the repo, publishing makes a permanent archived copy with a DOI that can't be withdrawn (a
+   `.zenodo.json` or `CITATION.cff` in that commit is named as a sign one may be).
+2. **The gh account** it read with, and what it read (the account's name, and that no release of that name exists
+   yet: reads only), then what it will create on which repo, then `[y/N]`. Only your typed `y` publishes: `--yes`
+   isn't taken, and unless both input and output are a terminal it refuses before contacting anything, because a
+   release can't be taken back (watchers are notified and connected services run at once).
+3. **The tag is pinned:** after your yes it checks again that no release of that name exists, then makes the tag at
+   exactly the commit it showed. A tag already at that commit is used (a lightweight one left by a run that stopped,
+   or someone's annotated one: the plan says which); a tag at another commit, already there or made meanwhile, stops
+   it with nothing released.
+4. **The release** is made on that tag (`gh release create --verify-tag`). If that fails, the tag stays at the commit
+   and running the command again continues from it.
+5. **Read back:** only when the remote's tag still names the commit you were shown is the release recorded and the
+   project sent a letter with the link. If it names another one, it says plainly that the release went out on a
+   different commit and exits 3 (look at it on GitHub; an archive may already have its copy).
+
+It refuses a release of that name (a draft included), a remote that isn't on GitHub, and running where it can tell it
+is inside a sandbox or a coding agent's session (a guard against routine use, not a wall against an agent that already
+runs as you). One window stays: between the pin and the release, and after the read-back, someone with write access to
+the repo can move the tag, since GitHub's release create has no compare-and-swap. Only someone who could publish a
+release directly can do that; a tag ruleset on the repo that restricts updating and deleting tags closes it.
 

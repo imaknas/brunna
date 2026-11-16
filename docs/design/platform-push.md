@@ -1084,8 +1084,9 @@ command:
   session, and in a linked worktree of the hub, with the check `brunna skills sync` uses (now `bin/owner_terminal.py`
   `refusal()`, which both word their own way). That check is a guard against routine or accidental use, not a
   boundary: an unsandboxed agent runs as the owner, holds the owner's gh login anyway, and can change the environment
-  the session check reads. For a sandboxed project the boundary is its sandbox, which denies gh's credentials to its
-  sessions. Not a session command (`policy.SESSION_SUBCOMMANDS` doesn't have it). Unless both stdin and stdout are a
+  the session check reads. For a sandboxed project the boundary is meant to be its sandbox, denying gh's credentials to
+  its sessions; that is intended, pending the check below of whether a gh token kept in the Keychain is reachable from
+  a session sandbox. Not a session command (`policy.SESSION_SUBCOMMANDS` doesn't have it). Unless both stdin and stdout are a
   terminal (so the plan can't be sent into a pipe and hidden) it is refused before anything is contacted, and so is
   `--yes`: a release can't be undone, so only a typed `y` publishes
   one. With a terminal, `--yes` is said not to count and the question is asked anyway. This follows the 11-16 consent
@@ -1098,12 +1099,12 @@ command:
   push`; never git in the project's repo), under the project's push lock: `ls-remote --symref` gives the default branch
   and every tag (peeled); the remote's branches are fetched now into the platform's own namespace there
   (`refs/<repo dir>/release/heads/*`, pruned), never its tags. The default target is the default branch's tip as fetched
-  now; `--target` takes 7 to 64 hex digits as a commit, which must be reachable from one of the branches fetched now
-  (an object the owned repo holds from an earlier, refused push doesn't count) and is refused when a remote branch has
-  that very name; anything else must be a branch the remote has. `brunna push` refuses to push a branch named like a
-  commit id (7 to 64 hex digits, named or checked out), so one can't stand for another. A tag the remote has is
-  refused, unless it names the target itself (one left by a run that stopped between the tag and the release): the
-  plan says so and the release is made on it. A tag name `git check-ref-format` refuses, one starting with `-`, one with spaces or
+  now; `--target` takes 4 to 64 hex digits as a commit when they name one uniquely (git takes ids from 4 digits on),
+  which must be reachable from one of the branches fetched now (an object the owned repo holds from an earlier,
+  refused push doesn't count), and is refused when a remote branch has that very name; anything else must be a branch
+  the remote has. A tag the remote has is refused, unless it names the target itself: the release is then made on it,
+  and the plan says which: a lightweight tag is one a run that stopped between the tag and the release left; an
+  annotated one is someone else's ("an annotated tag already at the target"). A tag name `git check-ref-format` refuses, one starting with `-`, one with spaces or
   characters that can't be printed, or longer than 100 characters is refused.
 - **Before asking, it shows** the repo and its visibility (the anonymous probe), the tag, the target sha with its
   subject, author and date and which branch it is on, the commits since the nearest earlier tag on the remote (count
@@ -1128,7 +1129,9 @@ command:
   is what it is known to answer; not verified from the docs), so whatever gh answers the tag is read back, and only
   the shown sha goes on: one made at another commit in between is refused, nothing released. Then `gh release create
   <tag> --repo github.com/<owner>/<repo> --verify-tag --title <title> --notes-file <file>` (`--verify-tag`: abort
-  when the tag isn't there, never a tag gh makes itself): the notes always go
+  when the tag isn't there, never a tag gh makes itself; `--target` isn't passed with it, since what gh does with both
+  isn't verified). Any failure after the pin (gh's create failing or timing out) says the tag was left at the sha and
+  that a rerun continues from it; a POST that times out is read back like any other answer. The notes always go
   through a private file (600, in the platform's private temp folder, removed afterwards; an empty file for none), so no
   long text is on argv, gh never prompts, and what was shown is what is sent (an owner's `--notes-file` is read once
   and copied). gh runs from a folder of the platform's, never from wherever the owner stands. A gh that times out is
@@ -1138,7 +1141,15 @@ command:
   files, the tag as read back, whether it was left over) and the project told by an `info` letter with the tag, sha and
   URL, saying there is nothing for it to do. A tag at another commit is said plainly ("the release went out on a
   different commit … delete the release if it shouldn't stay"), exit 3; a tag that can't be read back, exit 1; neither
-  is recorded or told. Exit codes: 0 published, 1 failed, 2 refused (nothing created), 3 published elsewhere.
+  is recorded or told; the exit-3 message also says an archive connected to the repo may have its copy already and
+  that with immutable releases on the name can't be used again. Exit codes: 0 published, 1 failed, 2 refused (nothing
+  created), 3 published elsewhere.
+- **The window that stays.** Between the pin's read-back and `gh release create`, and after the final read-back,
+  anyone with write access to the repo can move or delete and remake the tag: GitHub's release create has no
+  compare-and-swap on the tag. The final read-back catches a move before the record (exit 3), not one after it. Only an
+  actor with write access can do this, and such an actor could publish a release directly anyway. On the owner's side,
+  a tag ruleset restricting updates and deletions of tags closes it; immutable releases may help too, but what they do
+  beyond making the release fail closed isn't verified.
 - Tests: `tests/test_git_release.py` (a stand-in gh on PATH that records each call and the notes file's content and
   mode and behaves as GitHub documents: an existing tag is kept and `--target` ignored, an existing ref isn't made
   again; the GitHub URL rewritten by the test's own git config to a throwaway bare repo; every refusal with a control;
@@ -1159,8 +1170,11 @@ command:
 5. The refusal in a linked worktree of the hub stays, as for `brunna skills sync`.
 
 **After the blind code review (11-16):** B1 (a tag made between the plan and the release carried the release to its
-commit) is fixed by pinning the tag first, above. S1: a 7–64 hex `--target` is a commit first, and `brunna push`
-refuses such branch names. S2: the wording says the session check is a guard, not a boundary. S3: every note line is
-shown, with a cap. Nits: stdout must be a terminal too; the archive warning is always said. Follow-up, not
+commit) is fixed by pinning the tag first, above. S1: a 4–64 hex `--target` is a commit first, refused when a remote
+branch has that name; a refusal of such branch names in `brunna push` was built and reverted after the re-review (it
+blocked legitimate names, dates and numbers, and added nothing, since the release side already refuses the collision).
+S2: the wording says the session check is a guard, not a boundary. S3: every note line is shown, with a cap; tabs and
+U+3000 are shown as they are, every other unprintable character escaped, and a title may hold U+3000. Nits: stdout
+must be a terminal too; the archive warning is always said; an annotated tag at the target is someone else's. Follow-up, not
 investigated: whether a gh token kept in the Keychain is reachable from a session sandbox (`api.github.com` is in
 `policy.DOMAINS`), which would let a sandboxed session use the owner's login without `brunna release` (direction.md).

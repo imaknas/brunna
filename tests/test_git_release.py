@@ -70,6 +70,11 @@ def tag_exists(t):
     return git("rev-parse", "--verify", "-q", f"refs/tags/{t}").returncode == 0
 if a[:2] == ["api", "--hostname"] and "POST" in a and a[a.index("-X") + 2].endswith("/git/refs"):
     fields = dict(f.split("=", 1) for f in (a[i + 1] for i, x in enumerate(a) if x == "-f"))
+    if (d / "ruleset").exists():   # a tag ruleset refuses the platform's tag
+        print("gh: Repository rule violations found (HTTP 422)", file=sys.stderr)
+        sys.exit(1)
+    if (d / "silent-post").exists():   # gh says yes, the tag isn't there
+        sys.exit(0)
     if (d / "race-tag").exists():   # someone else tags another commit just before the platform does
         git("update-ref", fields["ref"], (d / "race-tag").read_text().strip())
     if git("rev-parse", "--verify", "-q", fields["ref"]).returncode == 0:   # GitHub: an existing ref isn't made again
@@ -78,6 +83,9 @@ if a[:2] == ["api", "--hostname"] and "POST" in a and a[a.index("-X") + 2].endsw
     git("update-ref", fields["ref"], fields["sha"])
     print(json.dumps({"ref": fields["ref"], "object": {"sha": fields["sha"]}}))
     sys.exit(0)
+if a[:2] == ["release", "create"] and (d / "create-fails").exists():
+    print("HTTP 502: Bad Gateway", file=sys.stderr)
+    sys.exit(1)
 if a[:2] == ["release", "create"]:
     # as GitHub documents it: --target is used only when the tag is made here; an existing tag is kept as it is
     if (d / "move-tag").exists():
@@ -516,8 +524,71 @@ class Races(Base):
         self.assertIn("publish a release of the tag v1.0.0 that is already at", out)
         self.assertEqual(self.posts(), [], "no second tag")
         self.assertEqual(len(self.creates()), 1)
-        self.assertTrue(self.releases()[0]["tag_left_over"])
+        self.assertEqual(self.releases()[0]["tag_existing"], "lightweight")
         self.assertNotIn("v1.0.0 (", out.split("commits", 1)[1].split("\n", 1)[0], "counted as an earlier release")
+
+
+class AfterThePin(Base):
+    def test_an_annotated_tag_at_the_target_is_someone_elses(self):
+        subprocess.run(["git", "--git-dir", str(self.remote), "-c", "user.name=W", "-c", "user.email=w@x", "tag", "-a",
+                        "-m", "from a workflow", "v1.0.0", self.tip], check=True)
+        code, out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.OK, err)
+        self.assertIn("an annotated tag already at the target, made by someone else", out)
+        self.assertNotIn("left by a run that stopped", out)
+        self.assertEqual(self.releases()[0]["tag_existing"], "annotated")
+
+    def test_a_ruleset_that_refuses_the_tag_fails_closed(self):
+        (self.fake / "ruleset").touch()
+        code, _out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.FAILED)
+        self.assertIn("Repository rule violations", err)
+        self.assert_nothing_created()
+
+    def test_gh_says_yes_but_no_tag_is_there(self):
+        (self.fake / "silent-post").touch()
+        code, _out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.FAILED)
+        self.assertIn("GitHub answered, but the tag isn't there when read back", err)
+        self.assertNotIn(": 0", err)
+        self.assert_nothing_created()
+
+    def test_a_failure_after_the_pin_leaves_the_tag_and_a_rerun_goes_on(self):
+        (self.fake / "create-fails").touch()
+        code, _out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.FAILED)
+        self.assertIn(f"The tag v1.0.0 is left at {self.tip[:12]}: running brunna release again continues from it", err)
+        self.assertEqual(self.remote_tag("v1.0.0"), self.tip)
+        (self.fake / "create-fails").unlink()
+        code, out, err = self.run_("proj", "v1.0.0")
+        self.assertEqual(code, git_release.OK, err)
+        self.assertIn("left by a run that stopped", out)
+        self.assertEqual(len(self.posts()), 1, "the tag made once")
+
+    def test_four_to_six_hex_are_a_commit_first(self):
+        code, _out, err = self.run_("proj", "v0.1", "--target", self.first[:6])
+        self.assertEqual(code, git_release.OK, err)
+        self.assertEqual(self.posts()[-1], self.first)
+        short = self.first[:5]
+        self.git(self.seed, "branch", short, self.tip)
+        self.push(f"refs/heads/{short}")
+        code, _out, err = self.run_("proj", "v0.2", "--target", short)
+        self.assertEqual(code, git_release.REFUSED)
+        self.assertIn("is a commit id and also a branch on the remote", err)
+
+    def test_the_owners_own_text_keeps_tabs_and_wide_spaces_but_no_controls(self):
+        f = self.tmp / "n.md"
+        f.write_text("tab\there\nfull\u3000width\nok \x1b[2Jline\nrtl \u202egnp.exe\nzw a\u200bb\n")
+        code, out, err = self.run_("proj", "v1.0.0", "--title", "First\u3000release", "--notes-file", str(f), answer="n")
+        self.assertEqual(code, git_release.REFUSED, err)
+        self.assertIn("> tab\there", out)
+        self.assertIn("> full\u3000width", out)
+        self.assertIn("title    First\u3000release", out)
+        for bad in ("\x1b", "\u202e", "\u200b"):
+            self.assertNotIn(bad, out)
+        code, _out, err = self.run_("proj", "v1.0.0", "--title", "a\u202eb")
+        self.assertEqual(code, git_release.REFUSED)
+        self.assertIn("one printable line", err)
 
 
 class Cli(unittest.TestCase):
