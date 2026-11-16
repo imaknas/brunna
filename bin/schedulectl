@@ -281,8 +281,18 @@ def run_here(name, job, env) -> int:
             sys.stdout.write(line)
             f.write(line)
         code = p.wait()
+    scheduler_module().record_run(name, code)   # clears or sets its failing mark, as a scheduled run's would
     print(_("{name} finished (exit {code}); today's schedule won't run it again", name=name, code=code))
     return code
+
+
+def recorded(name, job) -> str:
+    """The job's command as a manual run starts it: when it ends, its exit code clears or sets the job's failing mark
+    (scheduler.py --record-run), as a scheduled run's would; the job's own exit code is kept."""
+    import shlex
+    rec = f'{hubconf.sh_py(HUB / "bin" / "scheduler.py")} --record-run {shlex.quote(name)} "$rc"'
+    # the job in a subshell: a command that runs `exit` itself still leaves the shell to record it
+    return f'(\n{hubconf.job_command(job["command"])}\n)\nrc=$?; {rec} >/dev/null 2>&1; exit "$rc"'
 
 
 def start(name, job, env):
@@ -294,14 +304,14 @@ def start(name, job, env):
         subprocess.run(["systemd-run", "--user", "--collect", f"--unit={label}",
                         f"--property=StandardOutput=append:{log}", f"--property=StandardError=append:{log}",
                         *[f"--setenv={k}={v}" for k, v in env.items()], "/bin/sh", "-lc",
-                        hubconf.job_command(job["command"])], check=True)
+                        recorded(name, job)], check=True)
         print(_("Started {name}; its output goes to {log} (today's schedule won't run it again)", name=name, log=log))
         return
     plist = hubconf.private_tmp() / f"{label}.plist"   # launchd runs what it says, as the user
     import plistlib
     plist.write_bytes(plistlib.dumps({
         "Label": label,
-        "ProgramArguments": [hubconf.login_shell(), "-lc", hubconf.job_command(job["command"])],
+        "ProgramArguments": [hubconf.login_shell(), "-lc", recorded(name, job)],
         "EnvironmentVariables": env,
         "RunAtLoad": True,
         "StandardOutPath": str(log),

@@ -673,5 +673,20 @@ def tick() -> None:
         log("gen-status-page took over 5 minutes; stopped")
 
 
+def record_run(name: str, code: int) -> None:
+    """A manual run's result (`schedulectl run`, which starts the job outside a tick): it clears or sets the job's
+    failing mark as a scheduled run's would, so a job fixed and run by hand doesn't stay "failing" until its next
+    scheduled day (a monthly job: weeks of daily alerts). Only the mark; the day's run mark is schedulectl's."""
+    mark_job(name, code != 0, f"exit {code} (run by hand)")
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["--record-run"] and len(sys.argv) == 4:
+        if hubconf.worktree_lookup():
+            sys.exit(_("scheduler: {root} is a linked worktree of the hub; nothing recorded", root=hubconf.ROOT))
+        try:
+            record_run(sys.argv[2], int(sys.argv[3]))
+        except ValueError:
+            sys.exit(_("scheduler --record-run <job> <exit code>"))
+        sys.exit(0)
     main()
