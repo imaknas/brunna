@@ -266,6 +266,14 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   built: the nightly signal list, the sessions' rules text and the letter after an upgrade; pushing from an upgraded
   sandboxed project is designed in `platform-push.md` (11-15), ahead of the rest of the git broker.
 - **Mail handler:** one that may change code (`mailbox-routing.md` step 4).
+- **Who to ask** (`who-to-ask.md`, design 11-17, not built; the owner's three questions are open). A session with a
+  question that spans projects knows how to send but not whom to send to. Recommended:
+  - per-project cards, each written by its own project's agent on a platform request and held by the platform;
+  - a `who-to-ask` judgment point that returns labels only;
+  - `brunna who "<question>"` printing at most three matches and, as a last resort, the owner.
+
+  Out of scope, recorded there: where a sensitive answer persists, and the context a question carries to the
+  answering project.
 - **Budgets:** per-project model budgets (today there is one platform-wide daily budget).
 - **Config pipeline:** an applier for `sync-local-setup` (`new-user.md` 1.5).
 - **Rename:** `brunna.v1.schema.json`, and step 4 (writers stop falling back to the old spellings).
