@@ -2216,6 +2216,10 @@ def frontmatter_keys(text: str) -> set[str]:
 # Where it loads a project's skills from, in each session folder (its docs, "skills": .claude/skills/<name>/SKILL.md;
 # docs/design/skills-sync.md)
 SKILL_DIRS = (".claude/skills",)
+# Claude Code loads a plugin from a skills folder too ("a plugin auto-loaded from a skills folder", its plugin
+# reference), whose hooks run as the user outside every sandbox; the exact trigger is unmeasured, so both a manifest
+# folder and a hooks list count (11-18, the agent-surface inventory)
+SKILL_REFUSED = (".claude-plugin", "hooks.json")
 
 
 def skill_notes(files: dict) -> list[str]:

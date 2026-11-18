@@ -102,6 +102,8 @@ The current interfaces (the other layers get added one at a time, following the 
                                                          skills from (`brunna skills sync` installs there;
                                                          docs/design/skills-sync.md); none: no skills installed for it
     skill_notes(files) -> list[str] (optional)           what to show the owner first about a skill's files
+    SKILL_REFUSED (optional) = (name, …)                 names that make a skill folder something it loads as code (a
+                                                         plugin's manifest): refused at any depth inside a skill
                                                          ({rel: bytes}) before installing it (e.g. hooks it declares)
     control_root() -> (folder, writable names) (optional) the tool's own folder in the project and the entries in it
                                                          that stay writable (its worktrees): a sandboxed project's
@@ -309,6 +311,19 @@ def skill_dirs(name: str) -> tuple[str, ...]:
     except Exception:
         return ()
     return tuple(d for d in got if isinstance(d, str) and d and not d.startswith("/") and ".." not in d.split("/"))
+
+
+def skill_refused() -> set[str]:
+    """The names, case-folded, that a runtime the platform protects would load as code from inside a skill folder
+    (each adapter's optional SKILL_REFUSED): refused at any depth (docs/design/skills-sync.md, 11-18)."""
+    out: set[str] = set()
+    for name in protected_runtimes():
+        try:
+            got = getattr(_module(name), "SKILL_REFUSED", ())
+        except Exception:
+            continue
+        out |= {n.casefold() for n in got if isinstance(n, str) and n and "/" not in n}
+    return out
 
 
 def user_controls() -> tuple[list[str], list[str]]:

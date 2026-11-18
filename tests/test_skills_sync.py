@@ -394,6 +394,21 @@ class Source(Base):
         self.skill("foo", {"SKILL.md": "x\n", ".claude/settings.json": "{}"})
         self.refused(".claude")
 
+    def test_a_plugin_inside_a_skill_is_refused(self):
+        """A skill folder holding a plugin's manifest or hooks list loads as a plugin whose hooks run as the user: refused
+        (11-18). The control: the same skill without them is installed."""
+        for extra, marker in (({".claude-plugin/plugin.json": "{}"}, ".claude-plugin"),
+                              ({"hooks/hooks.json": "{}"}, "hooks.json"),
+                              ({"deep/.Claude-Plugin/x": "{}"}, ".Claude-Plugin")):
+            with self.subTest(marker=marker):
+                shutil.rmtree(self.ws / "skills", ignore_errors=True)
+                self.skill("foo", {"SKILL.md": "x\n", **extra})
+                self.refused(marker)
+        shutil.rmtree(self.ws / "skills", ignore_errors=True)
+        self.skill("foo", {"SKILL.md": "x\n", "hooks/notes.md": "plain\n"})
+        rc, out, err = self.sync()
+        self.assertEqual(rc, 0, err)
+
     def test_size_caps(self):
         self.skill("foo", {"SKILL.md": "x\n"})
         with mock.patch.object(skills_sync, "FILE_MAX", 10):

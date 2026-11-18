@@ -61,5 +61,6 @@
  "--yes takes the approval code the review prints: --yes=<code>": "--yes 要帶審查印出的核准代碼:--yes=<代碼>",
  "the review is not the one that code was given for (its code is {code}); nothing was installed": "這份審查不是那個代碼對應的(它的代碼是 {code});什麼都沒裝",
  "nothing was installed: without a terminal, run it again with --yes={code} after reading the review": "什麼都沒裝:沒有終端機時,看完審查後加 --yes={code} 再跑一次",
- "changed since sync installed it: shown in full, installed again": "sync 裝好之後被改過:整份顯示,重新安裝"
+ "changed since sync installed it: shown in full, installed again": "sync 裝好之後被改過:整份顯示,重新安裝",
+ "{file}: a plugin's manifest inside a skill (an agent would load it as code it runs)": "{file}:skill 裡有 plugin 的清單檔(agent 會把它當成自己要執行的程式載入)"
 }

@@ -48,6 +48,7 @@ import datetime
 import difflib
 import errno
 import fcntl
+import functools
 import hashlib
 import json
 import os
@@ -123,6 +124,15 @@ def printable(s: str) -> str:
     return "".join(out)
 
 
+@functools.lru_cache(maxsize=1)
+def _plugin_markers() -> frozenset[str]:
+    """Names that make a skill folder something an agent loads as code it runs (a plugin's manifest; each adapter's
+    SKILL_REFUSED, runtime_ports.skill_refused): a reviewed skill is instructions, so these are refused at any depth
+    (11-18)."""
+    import runtime_ports
+    return frozenset(runtime_ports.skill_refused())
+
+
 def _control_tops() -> set[str]:
     """The first part of every control name (policy.protect), case-folded (a case-insensitive volume opens a name in
     any case, and the long s folds to s): never a folder or file inside a skill."""
@@ -190,6 +200,10 @@ def _walk(fd: int, prefix: str, tree: Tree, budget: list[int], depth: int, tops:
             continue
         if strict and name.casefold() in tops:
             tree.odd.append(_("{file}: a coding agent's control name inside a skill", file=rel))
+            continue
+        if strict and name.casefold() in _plugin_markers():
+            tree.odd.append(_("{file}: a plugin's manifest inside a skill (an agent would load it as code it runs)",
+                              file=rel))
             continue
         try:
             st = os.stat(name, dir_fd=fd, follow_symlinks=False)
