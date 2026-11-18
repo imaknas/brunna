@@ -265,8 +265,9 @@ ESCALATE = datetime.timedelta(hours=24)   # an agent's letter not settled by the
 # Anything not here stays the owner's: logins, credentials, safety refusals, what watches the mailbox itself, and every
 # key a new caller makes until it is listed.
 PLATFORM_KEYS = ("runtime-held-", "runtime-checks-", "runtime-install-", "runtime-latest-", "runtime-daily-",
-                 "runtime-job-", "session-version", "session-unusable-", "completion-tools:", "git-fence",
-                 "claude-git-filter", "memory-copy-refused:")
+                 "runtime-job-", "session-version", "session-unusable-", "completion-tools:", "claude-git-filter")
+# not here on purpose: git-fence (what it finds in a project's git is a security finding) and every safety refusal
+# (memory-sync-refused, memory-copy-refused, tool-servers): the owner's
 JOB_KEY = "scheduler-job:"
 # the platform's jobs that keep the mailbox running: their failure can't go through it
 OWNER_JOBS = ("hubbus-bridge",)

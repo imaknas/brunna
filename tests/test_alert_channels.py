@@ -527,7 +527,7 @@ class Routing(unittest.TestCase):
         self.assertEqual([s[1] for s in self.sent], ["open"])
 
     def test_a_take_back_that_fails_is_tried_again_one_already_closed_is_done(self):
-        k = "git-fence"
+        k = "runtime-daily-claude"
         self.once(k, ["x"])
         self.letter_ok = lambda a: a[0] != "done"
         self.once(k, [])
@@ -578,14 +578,15 @@ class Routing(unittest.TestCase):
 
     def test_a_letter_that_cant_go_reaches_the_owner(self):
         self.letter_ok = False
-        self.once("git-fence", ["x"])
+        self.once("runtime-daily-claude", ["x"])
         self.assertEqual([s[1] for s in self.sent], ["open"])
 
     def test_the_owners_keys_and_the_mailboxs_own_jobs_go_straight_to_the_owner(self):
-        for k in ("claude-login", "secrets", "scheduler-job:brunna/hubbus-bridge", "memory-sync-refused:garden"):
+        for k in ("claude-login", "secrets", "scheduler-job:brunna/hubbus-bridge", "memory-sync-refused:garden",
+                  "git-fence", "memory-copy-refused:garden"):
             self.once(k, ["x"])
         self.assertEqual(self.letters, [])
-        self.assertEqual(len(self.sent), 4)
+        self.assertEqual(len(self.sent), 6)
 
     def test_one_the_owner_was_told_of_before_routing_stays_the_owners(self):
         self.a.SENT.write_text(json.dumps({"scheduler-job:garden/n": {"problems": ["x"], "ids": ["garden/n"],

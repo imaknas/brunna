@@ -72,8 +72,8 @@ The mailbox lane's further points, adopted:
 
 As built (`alert.route`, `alert._agent`): `scheduler-job:<project>/<job>` goes to that project when it is a registered
 project, else to brunna (its own jobs and the modules'), except `OWNER_JOBS` (the bridge); `PLATFORM_KEYS`
-(update-runtimes, session versions, completion tools, the git fence, a memory copy refused) to brunna; everything else
-to the owner. A letter is a `request` with a fixed id per opening; a changed list goes to its thread as `info`; fixed,
+(update-runtimes, session versions, completion tools) to brunna; everything else to the owner, the git fence's
+findings and every safety refusal included (security findings are the owner's). A letter is a `request` with a fixed id per opening; a changed list goes to its thread as `info`; fixed,
 the platform takes the letter back (`done --withdraw`). A day unsettled, or a letter that can't be sent: the owner is
 told, prefixed with which project was told first, and from then on it is an ordinary owner alert (its daily reminder,
 its recovery to the assistant, the letter taken back). A problem the owner was told of before routing stays the
