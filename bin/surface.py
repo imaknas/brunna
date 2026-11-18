@@ -120,7 +120,7 @@ def labels() -> dict:
     return {"open": _("needs you"), "title": _("brunna: needs you"), "empty": _("Nothing needs you."),
             "refresh": _("refresh"), "todo": _("to-do"), "question": _("question"), "ask": _("ask here"),
             "copy": _("copy"), "health": _("Platform health"),
-            "read_only": _("Settled on {assistant}'s side; shown here only."),
+            "read_only": _("Settled on the assistant's side; shown here only."),
             "unreadable": _("What needs you could not be read here.")}
 
 

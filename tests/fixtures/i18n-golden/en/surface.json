@@ -28,7 +28,7 @@
   "ask": "ask here",
   "copy": "copy",
   "health": "Platform health",
-  "read_only": "Settled on Sage's side; shown here only.",
+  "read_only": "Settled on the assistant's side; shown here only.",
   "unreadable": "What needs you could not be read here."
  },
  "commands": [

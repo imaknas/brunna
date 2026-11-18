@@ -9,7 +9,7 @@
  "ask here": "在這裡問",
  "copy": "複製",
  "Platform health": "平台狀態",
- "Settled on {assistant}'s side; shown here only.": "這些在 {assistant} 那邊處理;這裡只顯示。",
+ "Settled on the assistant's side; shown here only.": "這些在 {assistant} 那邊處理;這裡只顯示。",
  "What needs you could not be read here.": "這裡讀不到要你處理的事。",
  "{n} {n:needs|need} you": "{n} 件事要你處理",
  "the platform has problems": "平台有問題",
