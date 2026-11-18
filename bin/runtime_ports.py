@@ -206,6 +206,10 @@ The current interfaces (the other layers get added one at a time, following the 
                                                          people
     relocate(sid, old_cwd, new_cwd) -> bool              the project folder moved (rename, upgrade): make this
                                                          conversation resumable in the new folder too
+    folder_refusal(cwd) -> str | None (optional)         why a long-running session doesn't start in this folder: it
+                                                         would load code the folder holds that runs as the user (Claude
+                                                         Code: a plugin in a skills folder); the lease runner asks before
+                                                         opening a lease, and the runtime's own runs refuse it too
 
 More than one runtime the user opens sessions with ({settings} runtime.installed; docs/design/mailbox-runtimes.md A1):
 installed(), qualify(name, id) / runtime_of(sid) between a runtime's own session ids and the platform's (bare for

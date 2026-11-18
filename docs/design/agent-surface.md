@@ -389,19 +389,38 @@ folders are). `--plugin-dir` loads under `--restricted` too; the platform never 
 naming a folder, `~/.claude/skills` isn't read. So P1 holds without anything turned off; the mod does nothing there
 either (rule 4).
 
-**Finding, not fixed (11-18): runs without `--restricted` load them.** A lease's runs (`lease-session`, `lease-work`,
-`lease-handover`: `--settings` and `--strict-mcp-config`, no `--restricted`) start in the project's workspace on the
-user's `~/.claude`. One run of the lease's shape was measured (its flags by hand, a throwaway config dir, plain `-p`):
-a skills-folder plugin of a trusted project ran its hooks list and its hooks module, as the user, outside the project's
-sandbox. The user's own plugins (skills folders, marketplace installs) load in such a run too (the control runs above),
-as the vercel plugin's SessionEnd hook already showed in a platform run (`runtime_claude._env`). The other points
-without it (`librarian-index`, `agent-job`, `login-check`) follow from their flags, not measured one by one; their
-folders are the platform's or a project the owner's settings already run. P3's guarantee (read-only tools) doesn't
-cover a plugin's hooks. No switch that turns plugins off and keeps the project's rules file was found (from
-`claude --help` and the binary's environment names, not run): `--restricted`, `--safe-mode` and `--bare` (which skips
-settings' and installed plugins' hooks) all drop CLAUDE.md too, and no environment variable turns plugins off. For the
-owner: a lease of a sandboxed project under `--restricted` (its rules file passed by the runner instead), or leases
-refused there while a skills folder holds a plugin (the foreign-control check already reports one).
+**Closed (11-18): runs without `--restricted` don't start beside a plugin.** A lease's runs (`lease-session`,
+`lease-work`, `lease-handover`: `--settings` and `--strict-mcp-config`, no `--restricted`) start in the project's
+workspace on the user's `~/.claude`. One run of the lease's shape was measured (its flags by hand, a throwaway config
+dir, plain `-p`): a skills-folder plugin of a trusted project ran its hooks list and its hooks module, as the user,
+outside the project's sandbox. P3's guarantee (read-only tools) doesn't cover a plugin's hooks. No switch that turns
+plugins off and keeps the project's rules file was found (from `claude --help` and the binary's environment names, not
+run): `--restricted`, `--safe-mode` and `--bare` (which skips settings' and installed plugins' hooks) all drop CLAUDE.md
+too, and no environment variable turns plugins off.
+
+The owner decided (11-18): such a run doesn't start while a skills folder it would read holds a plugin. Built in the
+Claude adapter (`runtime_claude.unrestricted_refusal` → `folder_refusal`): before `run()` and `exec_stream()` start the
+tool, a run whose final argv lacks `--restricted` looks through the skills folders (`SKILL_DIRS`) of
+`plugin_folders(cwd)` for `SKILL_REFUSED` (`.claude-plugin`, `hooks.json`) at any depth, in any case, a link of the name
+counted and no link followed (S7's `plugin_markers`), and refuses on a find, and on a skills folder it can't look through
+whole (a link to a folder, unreadable, over the entry cap): fail closed. The reason names the folder and the marker;
+`llm.py` reports it on the point's failure path (`job.failed`, `llm_error`). The folders are the run's folder, its
+repository's top (a run in a subfolder) and, in a linked worktree, the main checkout (read from the `.git` pointers as
+files, `gitdirs`, no git run). Which of the last two Claude Code reads for a worktree or a subfolder, and whether it
+reads skills folders of the folders above the repository or nested below the run's folder, is unmeasured: the first two
+are looked at, the rest not (the folders above are the user's). `claude mcp list`, which an `agent-job` with connectors
+runs in the job's folder before its run (no `--restricted`, and it starts a plugin's tool servers), is refused the same
+way. The lease runner asks the runtime's optional `folder_refusal` before it opens a lease, resumes one for a message or
+switches its mode, and answers `409 folder_refused` with the reason (lease-runner.v2: a new error code), so the assistant
+says why it didn't open; a lease's handover resume is refused by the adapter, and the runner's minimal handover follows.
+A `--restricted` run isn't looked at: it loads no plugin (`platform-run-plugins`).
+
+The points without `--restricted`, from `runtime_claude._flags` (neither `settings: platform` nor `restricted: true`;
+completions always carry it): `librarian-index`, `agent-job`, `login-check`, `lease-session`, `lease-work`,
+`lease-handover` (`tests/test_unrestricted_plugins.py` pins the list, so a new one is looked at). Out of scope: the
+user's own plugins (their skills folder, marketplace installs), which the owner installed and which load in these runs
+too (the control runs above; the vercel plugin's SessionEnd hook in a platform run, `runtime_claude._env`); the runs the
+platform starts outside a project's folder (`claude agents --json`, `claude auth status`); and a session the user opens.
 
 ### Open questions for the owner
 

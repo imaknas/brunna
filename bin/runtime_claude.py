@@ -1460,6 +1460,10 @@ def _listed_servers(task) -> list[str]:
     config directory): the only place the account's connectors show up. It health-checks each server (connects and
     lists its tools, calls none), as the run itself would on starting."""
     import runtime_ports
+    # `claude mcp list` has no --restricted and starts the servers it lists, a plugin's among them: the same refusal as
+    # a run without it (whether it loads the folder's plugins is unmeasured)
+    if (why := folder_refusal(task.cwd)):
+        raise ValueError(why)
     try:
         exe, e = _run_copy()
         r = subprocess.run([exe, "mcp", "list"], cwd=task.cwd or None, env=_env(task, entry=e), capture_output=True,
@@ -1576,6 +1580,8 @@ def run(task) -> TaskResult:
         return TaskResult(False, error=str(e))
     version = copy.version if copy else None
     cmd = _command(task, exe)
+    if (why := unrestricted_refusal(cmd, task.cwd)):   # never started (the owner's decision of 11-18)
+        return TaskResult(False, error=why, runtime_version=version)
     try:
         r = subprocess.run(cmd, cwd=task.cwd or None, capture_output=True, text=True, timeout=task.timeout_s,
                            env=env, input=task.prompt)
@@ -1620,6 +1626,8 @@ def exec_stream(task) -> None:
     env = _env(task, entry=copy)
     cmd = _flags(task, exe)   # no prompt argument (never is): messages come from stdin (stream-json)
     cmd += ["--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--verbose"]
+    if (why := unrestricted_refusal(cmd, task.cwd)):   # a lease's session: never started (llm.py says why)
+        raise ValueError(why)
     runtime_store.inheritable(NAME)   # the lease's process keeps the version it runs held (runtime_store.held)
     os.execvpe(cmd[0], cmd, env)
 
@@ -2241,6 +2249,67 @@ def plugin_markers(workspace) -> tuple[list[str], list[str]]:
             else:
                 todo.append(rel / name)
     return sorted(found), sorted(unwalked)
+
+
+# The owner's decision of 11-18 (docs/design/agent-surface.md, "Platform runs"): a platform run without --restricted
+# loads the plugins in its folder's skills folders once the folder is trusted (measured 11-18 on 2.1.327), and their hooks
+# run as the user outside every sandbox. No switch turns plugins off and keeps the rules file, so such a run doesn't
+# start while a skills folder it would read holds one. The user's own plugins (their skills folder, marketplace
+# installs) are the owner's and out of scope.
+RESTRICTED_FLAG = "--restricted"
+
+
+def plugin_folders(cwd) -> list[pathlib.Path]:
+    """The folders whose skills folders a run started in cwd may load from: cwd itself, its repository's top (a run in a
+    subfolder) and, in a linked worktree, the main checkout. Which of the last two Claude Code reads is unmeasured, so
+    both are looked at; nothing above the repository's top (the folders there are the user's). The pointers are read as
+    plain files (gitdirs), no git run; one a project planted only adds folders to look at."""
+    import gitdirs
+    here = pathlib.Path(cwd or os.getcwd())
+    out = [here]
+    try:
+        found = gitdirs.dirs(here)
+    except (OSError, RuntimeError):
+        found = None
+    if found:
+        out.append(found.top)
+        if found.common.name == ".git":
+            out.append(found.common.parent)
+    seen, uniq = set(), []
+    for p in out:
+        key = os.path.realpath(p)
+        if key not in seen:
+            seen.add(key)
+            uniq.append(p)
+    return uniq
+
+
+def folder_refusal(cwd) -> str | None:
+    """Why a run without --restricted (a lease's session among them) doesn't start in cwd: a plugin's manifest or hooks
+    list (SKILL_REFUSED, any depth, any case, a link of the name counted) in a skills folder of plugin_folders(cwd), or
+    one of those folders that can't be looked through whole (a link to a folder, unreadable, too many entries): fail
+    closed. None: nothing there. runtime_ports' optional folder_refusal: the lease runner asks it before opening a lease."""
+    found, unwalked = [], []
+    for base in plugin_folders(cwd):
+        try:
+            got, missed = plugin_markers(base)
+        except OSError as e:   # the folder itself can't be opened: nothing known about it
+            got, missed = [], [_("{folder} can't be looked through ({why})", folder=str(base), why=e)]
+        found += [str(base / rel) for rel in got]
+        unwalked += [f"{base}: {w}" for w in missed]
+    if not found and not unwalked:
+        return None
+    if found:
+        return _("not started: a run here without --restricted would load the plugin at {paths}, whose hooks run as you "
+                 "outside every sandbox; remove it from the skills folder first", paths=", ".join(found[:3]))
+    return _("not started: a run here without --restricted loads any plugin in its skills folders, and these can't be "
+             "looked through for one: {why}", why="; ".join(unwalked[:3]))
+
+
+def unrestricted_refusal(cmd, cwd) -> str | None:
+    """folder_refusal for a run whose argv lacks --restricted; None for one that has it (it loads no plugin: the
+    conformance check platform-run-plugins holds that for every version), which isn't looked at."""
+    return None if RESTRICTED_FLAG in cmd else folder_refusal(cwd)
 
 
 # What a skill's or agent's frontmatter may declare that the owner must see first: hooks (its sessions run them,

@@ -282,9 +282,10 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   the worktree hooks are later candidates. Fixed from its blind review (11-18): skills sync refuses a plugin's
   `.claude-plugin`/`hooks.json` in a skill, the foreign-control check reports them and the plugin keys of a committed
   settings file, a sandboxed project's worktree has its settings from the make, and the conformance check
-  `platform-run-plugins` holds that no plugin loads in a `--restricted` platform run. Open, for the owner: leases and
-  the other runs without `--restricted` load the project's skills-folder plugins and the user's own (measured), and no
-  switch turns plugins off without dropping the rules file.
+  `platform-run-plugins` holds that no plugin loads in a `--restricted` platform run. The runs without it (leases,
+  `librarian-index`, `agent-job`, `login-check`) don't start while a skills folder they would read holds a plugin, or
+  can't be looked through (the owner's decision, 11-18; a lease says `folder_refused`); the user's own plugins stay
+  theirs.
 - **Budgets:** per-project model budgets (today there is one platform-wide daily budget).
 - **Config pipeline:** an applier for `sync-local-setup` (`new-user.md` 1.5).
 - **Rename:** `brunna.v1.schema.json`, and step 4 (writers stop falling back to the old spellings).

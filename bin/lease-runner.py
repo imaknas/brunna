@@ -351,11 +351,25 @@ def preamble(project: str, mode: str = "discuss") -> str:
                         purpose=doc.get("purpose", ""))
 
 
+class FolderRefused(RuntimeError):
+    """The runtime won't start a session in the lease's folder (its optional folder_refusal): the reason, for people."""
+
+
+def refuse_folder(cwd: str) -> None:
+    """Raises FolderRefused when the runtime says a session must not start in cwd (Claude Code: a plugin in a skills
+    folder, whose hooks would run as the owner outside the project's sandbox; the owner's decision of 11-18). Asked before
+    every start, so a plugin that appears mid-lease stops the next resume too, and before the lease's state changes."""
+    check = getattr(rt(), "folder_refusal", None)
+    if callable(check) and (why := check(cwd)):
+        raise FolderRefused(why)
+
+
 def start_proc(lease: Lease, resume: bool) -> None:
     # resuming presumes the transcript exists: Claude Code writes it only after the first turn finishes. Switching
     # mode, an idle stop or a runner restart before anything was said would crash --resume with "No conversation
     # found" (the owner hit it on 10-25, lease 34c84c53)
     import runtime_claude  # the flags are still Claude Code's (to move into the runtime with the long-running sessions)
+    refuse_folder(lease.cwd)
     wanted = resume or lease.started_once
     can_resume = wanted and rt().resumable(lease.id)
     pair = "same"
@@ -515,6 +529,7 @@ def send_message(lease: Lease, text: str, attachments: list | None = None) -> No
         lease.emit("attachments", paths=paths)
     with _lock:
         if lease.proc is None or lease.proc.poll() is not None:
+            refuse_folder(lease.cwd)   # before the state changes: a refused lease stays as it was
             lease.set_state("resuming")
             start_proc(lease, resume=True)
         lease.touch()
@@ -1072,6 +1087,11 @@ class H(http.server.BaseHTTPRequestHandler):
                 l.seen_msgs.append(b["client_msg_id"])
             try:
                 send_message(l, b.get("text") or "", atts)
+            except FolderRefused as e:
+                with _lock:   # not taken: the same message can be sent again once the folder is fixed
+                    if b["client_msg_id"] in l.seen_msgs:
+                        l.seen_msgs.remove(b["client_msg_id"])
+                return self.err(409, "folder_refused", str(e))
             except Exception as e:
                 return self.err(500, "resume_failed", repr(e)[:300])
             return self.reply(202, {"v": 1})
@@ -1096,7 +1116,11 @@ class H(http.server.BaseHTTPRequestHandler):
                 if l.mode == mode:
                     return self.reply(200, {"v": 1, **l.public()})
                 # switching judgment point = switching process: stop it, resume the same session with --resume (the
-                # permission relay restarts too)
+                # permission relay restarts too). A folder the runtime won't start in: refused before anything stops
+                try:
+                    refuse_folder(l.cwd)
+                except FolderRefused as e:
+                    return self.err(409, "folder_refused", str(e))
                 stop_proc(l, "attaching")
                 l.mode = mode
                 l.emit("state", state="attaching", mode=mode)
@@ -1243,6 +1267,10 @@ class H(http.server.BaseHTTPRequestHandler):
             ok, why = work_ready(proj)
             if not ok:
                 return self.err(400, "work_not_allowed", why)
+        try:   # said here, not as a crash after the lease opened: the assistant shows why it didn't open
+            refuse_folder(str(ws))
+        except FolderRefused as e:
+            return self.err(409, "folder_refused", str(e))
         with _lock:
             if sid in LEASES and live(LEASES[sid]):
                 return self.reply(200, {"v": 1, **LEASES[sid].public()})
