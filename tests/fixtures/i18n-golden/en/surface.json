@@ -1,0 +1,51 @@
+{
+ "lines": {
+  "one need": [
+   "brunna · 1 needs you"
+  ],
+  "everything": [
+   "brunna · 3 need you",
+   "the platform has problems",
+   "2 letters held here for over 30 min, not handled yet"
+  ],
+  "one held": [
+   "brunna · 1 letter held here for over 30 min, not handled yet"
+  ],
+  "gated": [
+   "brunna · 2 letters wait for another session: this session's version failed the platform's sandbox check"
+  ],
+  "gated, one": [
+   "brunna · 1 letter waits for another session: this session's version failed the platform's sandbox check"
+  ]
+ },
+ "labels": {
+  "open": "needs you",
+  "title": "brunna: needs you",
+  "empty": "Nothing needs you.",
+  "refresh": "refresh",
+  "todo": "to-do",
+  "question": "question",
+  "ask": "ask here",
+  "copy": "copy",
+  "health": "Platform health",
+  "read_only": "Settled on Sage's side; shown here only.",
+  "unreadable": "What needs you could not be read here."
+ },
+ "commands": [
+  {
+   "name": "inbox",
+   "summary": "Read and handle this project's letters",
+   "prompt": "Run `brunna inbox` and handle the letters as your rules say."
+  },
+  {
+   "name": "brunna",
+   "summary": "What needs you, and the platform's health"
+  }
+ ],
+ "item prompts": [
+  "About my open to-do task-garden-app-1 in garden-app: tell me what it needs from me, and once I say it is done, report it as your rules say.",
+  "This project's question m11180900-ab12 waits for my answer: show it to me with its options, and once I have answered, act on it and close it as your rules say."
+ ],
+ "usage": "usage: brunna surface --runtime <name> --session <id> --cwd <folder> [--json]",
+ "not served": "not served here (not_recorded)"
+}

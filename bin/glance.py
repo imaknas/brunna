@@ -84,24 +84,39 @@ def status_page() -> dict:
     return {"url": url, "local_to": None} if url else {"url": LOCAL_PAGE, "local_to": "hub"}
 
 
+def snapshot() -> dict | None:
+    try:
+        snap = json.loads(SNAPSHOT.read_text())
+    except (OSError, ValueError):
+        return None
+    return snap if isinstance(snap, dict) else None
+
+
+def health(snap: dict | None, sched_ok: bool) -> dict:
+    if snap is None:   # no tick has written one yet (or an older release): said, never guessed
+        return {"state": "unknown", "alerts": [], "as_of": None}
+    alerts = snap.get("alerts") or []
+    bad = any(a.get("level") == "bad" for a in alerts) or not sched_ok
+    return {"state": "problem" if bad else "ok", "alerts": alerts, "as_of": snap.get("as_of")}
+
+
+def owner() -> dict:
+    """What a session's band needs of the owner's view (brunna surface, contracts/session-surface.v1): how many items need
+    the owner, who settles them (the owner side), and the health state. Counts and states only, no text."""
+    snap = snapshot()
+    return {"needs_you": len((snap or {}).get("needs_you") or []), "side": hubconf.owner_side(),
+            "health": health(snap, scheduler(datetime.datetime.now())["alive"])["state"]}
+
+
 def glance() -> dict:
     now = datetime.datetime.now()
     if not hubconf.config_path().exists():
         return {"v": 1, "set_up": False}
-    try:
-        snap = json.loads(SNAPSHOT.read_text())
-    except (OSError, ValueError):
-        snap = None
-    alerts = (snap or {}).get("alerts") or []
+    snap = snapshot()
     out = {"v": 1, "set_up": True, "at": _iso(now), "instance": str(hubconf.instance_home() or hubconf.ROOT),
            "needs_you": (snap or {}).get("needs_you") or [],
            "mail": mail(), "scheduler": scheduler(now), "jobs_failed": jobs_failed(), "status_page": status_page()}
-    sched_ok = out["scheduler"]["alive"]
-    if snap is None:   # no tick has written one yet (or an older release): said, never guessed
-        out["health"] = {"state": "unknown", "alerts": [], "as_of": None}
-    else:
-        bad = any(a.get("level") == "bad" for a in alerts) or not sched_ok
-        out["health"] = {"state": "problem" if bad else "ok", "alerts": alerts, "as_of": snap.get("as_of")}
+    out["health"] = health(snap, out["scheduler"]["alive"])
     if snap and snap.get("needs_you_error"):
         out["needs_you_error"] = snap["needs_you_error"]
     return out

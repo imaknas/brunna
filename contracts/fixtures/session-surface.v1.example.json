@@ -1,0 +1,43 @@
+{
+ "v": 1,
+ "set_up": true,
+ "served": true,
+ "why_not": null,
+ "project": "garden-app",
+ "owner": {
+  "needs_you": 2,
+  "side": "builtin",
+  "health": "ok"
+ },
+ "mail": {
+  "held": [
+   {
+    "id": "m11180900-ab12",
+    "from": "seed-shop",
+    "type": "request",
+    "since": "2026-11-18T09:00:00+08:00"
+   }
+  ],
+  "waiting": 1
+ },
+ "labels": {
+  "open": "needs you",
+  "title": "brunna: needs you",
+  "empty": "Nothing needs you."
+ },
+ "lines": [
+  "brunna · 2 need you",
+  "1 letter held here for over 30 min, not handled yet"
+ ],
+ "commands": [
+  {
+   "name": "inbox",
+   "summary": "Read and handle this project's letters",
+   "prompt": "Run `brunna inbox` and handle the letters as your rules say."
+  },
+  {
+   "name": "brunna",
+   "summary": "What needs you, and the platform's health"
+  }
+ ]
+}

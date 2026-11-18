@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "session-surface.v1",
+  "title": "brunna surface --json",
+  "description": "What the platform shows and offers inside one coding agent session (bin/surface.py, docs/design/agent-surface.md), for a surface adapter, which draws only this and glance.v1 and composes no wording. Read-only. served false carries why_not and nothing else, except why_not gated (the session's tool version failed a safety check in a sandboxed project), which keeps project, owner, labels, lines and commands. lines and labels are in the interface language, a command's prompt in the content language. lines hold counts and states only: no sender, to-do text or alert. mail lists ids, senders and types, never a letter's text. An instance that isn't set up is {v: 1, set_up: false}.",
+  "type": "object",
+  "required": [
+    "v",
+    "set_up"
+  ],
+  "properties": {
+    "v": {
+      "const": 1
+    },
+    "set_up": {
+      "type": "boolean"
+    },
+    "served": {
+      "type": "boolean"
+    },
+    "why_not": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "not_a_project",
+            "not_recorded",
+            "gated",
+            "not_served",
+            "no_bus_access"
+          ]
+        }
+      ]
+    },
+    "project": {
+      "type": "string"
+    },
+    "lines": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "labels": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "owner": {
+      "type": "object",
+      "required": [
+        "needs_you",
+        "side",
+        "health"
+      ],
+      "properties": {
+        "needs_you": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "side": {
+          "enum": [
+            "builtin",
+            "assistant"
+          ]
+        },
+        "health": {
+          "enum": [
+            "ok",
+            "problem",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "mail": {
+      "type": "object",
+      "required": [
+        "held",
+        "waiting"
+      ],
+      "properties": {
+        "held": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "from",
+              "type",
+              "since"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "from": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string"
+              },
+              "since": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "waiting": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "commands": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "summary"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]{0,63}$"
+          },
+          "summary": {
+            "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

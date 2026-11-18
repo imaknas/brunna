@@ -212,6 +212,8 @@ provides:
 - {contract: session-record, v: 1, schema: contracts/session-record.v1.schema.json}
 # what needs the owner and the platform's health in one look, for status bars and other clients (docs/design/herdr.md)
 - {contract: glance, v: 1, schema: contracts/glance.v1.schema.json}
+# what the platform shows and offers inside one coding agent session, for surface adapters (docs/design/agent-surface.md)
+- {contract: session-surface, v: 1, schema: contracts/session-surface.v1.schema.json}
 # v2 = v1 + the English token set; v1 stays until every reader (the assistant) reads v2
 - {contract: todo-md, v: 1, schema: contracts/todo-md.v1.md}
 - {contract: todo-md, v: 2, schema: contracts/todo-md.v2.md}

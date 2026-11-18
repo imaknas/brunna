@@ -244,6 +244,16 @@ class Json(unittest.TestCase):
             if schema:
                 self.assertTrue((C / schema).exists(), f"{name}:{schema}")
 
+    def test_session_surface_example(self):
+        """brunna surface's contract (docs/design/agent-surface.md) and glance's, with its optional prompt/command"""
+        for name in ("session-surface", "glance"):
+            with self.subTest(name):
+                self.assertEqual(contracts.check_json(C / f"{name}.v1.schema.json",
+                                                      json.loads((F / f"{name}.v1.example.json").read_text())), [])
+        bad = json.loads((F / "glance.v1.example.json").read_text())
+        bad["needs_you"][0]["command"] = ["brunna"]
+        self.assertTrue(contracts.check_json(C / "glance.v1.schema.json", bad), "a command is an argv with an argument")
+
     def test_hubbus_message(self):
         ev = {"seq": 1, "id": "m1", "ts": "2026-10-22T00:00:00+08:00", "type": "message", "source": "example",
               "to_project": "owner", "ref": None, "payload": {"v": 1, "type": "task", "text": "x", "due": "2026-11-01"}}

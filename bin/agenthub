@@ -59,6 +59,9 @@ projects:
   brunna status [project]  = bin/overview.sh
   brunna glance [--json]   what needs you and whether the platform is healthy, in one look (bin/glance.py;
                           for status bars: the herdr mod in integrations/herdr/, iTerm2, menu-bar scripts)
+  brunna surface --runtime <name> --session <id> --cwd <folder> --json
+                        what brunna shows and offers inside one coding agent session, for a surface adapter such as
+                        the Claude Code mod in integrations/claude-code/ (bin/surface.py; read-only)
   brunna runtimes [check <runtime>]   the coding agents' versions: what platform runs start, each version's
                           conformance checks, the versions sessions ran (bin/runtimes.py)
   brunna first-look <project>   a newly connected project's first STATE.md now, from its README and history
@@ -2480,6 +2483,7 @@ COMMANDS = {
     "first-look": passthrough("first-look.py"),
     "state": passthrough("state.py"),
     "glance": passthrough("glance.py"),
+    "surface": passthrough("surface.py"),
     "runtimes": passthrough("runtimes.py"),
     "uninstall": passthrough("uninstall.py"),
     "jobs": lambda argv: subprocess.run([*hubconf.launch(BIN / "schedulectl"), "list", *argv]).returncode,

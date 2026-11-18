@@ -1,0 +1,51 @@
+{
+ "lines": {
+  "one need": [
+   "brunna · 1 件事要你處理"
+  ],
+  "everything": [
+   "brunna · 3 件事要你處理",
+   "平台有問題",
+   "2 封信在這個 session 留了超過 30 分鐘,還沒處理"
+  ],
+  "one held": [
+   "brunna · 1 封信在這個 session 留了超過 30 分鐘,還沒處理"
+  ],
+  "gated": [
+   "brunna · 2 封信在等別的 session:這個 session 的版本沒通過平台的 sandbox 檢查"
+  ],
+  "gated, one": [
+   "brunna · 1 封信在等別的 session:這個 session 的版本沒通過平台的 sandbox 檢查"
+  ]
+ },
+ "labels": {
+  "open": "要你處理",
+  "title": "brunna:要你處理的事",
+  "empty": "沒有要你處理的事。",
+  "refresh": "重新整理",
+  "todo": "待辦",
+  "question": "問題",
+  "ask": "在這裡問",
+  "copy": "複製",
+  "health": "平台狀態",
+  "read_only": "這些在 Sage 那邊處理;這裡只顯示。",
+  "unreadable": "這裡讀不到要你處理的事。"
+ },
+ "commands": [
+  {
+   "name": "inbox",
+   "summary": "讀並處理這個專案的信",
+   "prompt": "執行 `brunna inbox`,照你的規則處理這些信。"
+  },
+  {
+   "name": "brunna",
+   "summary": "要你處理的事,和平台狀態"
+  }
+ ],
+ "item prompts": [
+  "關於我在 garden-app 還沒完成的待辦 task-garden-app-1:告訴我它需要我做什麼;我說做完之後,照你的規則回報。",
+  "這個專案的問題 m11180900-ab12 在等我回答:把問題和選項給我看;我回答之後,照你的規則處理並結案。"
+ ],
+ "usage": "用法:brunna surface --runtime <名稱> --session <id> --cwd <資料夾> [--json]",
+ "not served": "這裡沒有服務(not_recorded)"
+}
