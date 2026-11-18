@@ -151,6 +151,42 @@ class Glance(unittest.TestCase):
         doc = {"v": 1, "set_up": True, "needs_you": got}
         self.assertEqual(contracts.check_json(SCHEMA, doc), [])
 
+    def test_a_raised_review_arrives_with_its_command(self):
+        """End to end on the bus: skills_sync's way of raising its review to-do (sent as the platform's own project) comes
+        back from the owner's open items filed under that project, so the tick gives it the command; the same key sent
+        by a project gets only a prompt."""
+        self.set_up()
+        cfg = json.loads((self.tmp / "config" / "hub.json").read_text())
+        cfg["mailbox"] = {"records": True}   # to-dos to the owner go as Acts records, which the owner's items are read from
+        (self.tmp / "config" / "hub.json").write_text(json.dumps(cfg))
+        sync = self.tmp / "state" / "skills-sync"
+        sync.mkdir(parents=True)
+        (sync / "app.json").write_text(json.dumps({"reminder": {"key": "skills-app-1", "set": "x"}}))
+        code = ("import importlib.util, json, sys; sys.path.insert(0, sys.argv[1]); import hubconf; "
+                "spec = importlib.util.spec_from_file_location('gsp', sys.argv[1] + '/gen-status-page.py'); "
+                "m = importlib.util.module_from_spec(spec); spec.loader.exec_module(m); "
+                "print(json.dumps([hubconf.hub_project(), m.needs_you()]))")
+        hub = json.loads(subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import hubconf, json; "
+                                         "print(json.dumps(hubconf.hub_project()))", str(ROOT / "bin")], env=self.env,
+                                        capture_output=True, text=True, timeout=60).stdout)
+        for frm, key in ((hub, "skills-app-1"), ("box", "skills-app-1-box")):
+            r = self.run_("hubbus", "send", "--from", frm, "--to", "owner", "--type", "task", "--id", key, "--text",
+                          "app: changes to its skills wait for your review")
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        (sync / "box.json").write_text(json.dumps({"reminder": {"key": "skills-app-1-box", "set": "x"}}))
+        r = subprocess.run([sys.executable, "-c", code, str(ROOT / "bin")], env=self.env, cwd=self.tmp,
+                           capture_output=True, text=True, timeout=120)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        hub_name, (items, error) = json.loads(r.stdout)
+        self.assertEqual(error, "")
+        got = {x["id"]: x for x in items}
+        self.assertIn("skills-app-1", got, (items, r.stderr[-2000:]))
+        self.assertEqual(got["skills-app-1"]["project"], hub_name)
+        self.assertEqual(got["skills-app-1"]["command"], ["brunna", "skills", "sync", "app"])
+        self.assertEqual(got["skills-app-1-box"]["project"], "box")
+        self.assertNotIn("command", got["skills-app-1-box"], "filed under a project: never a command")
+        self.assertIn("prompt", got["skills-app-1-box"])
+
     def test_the_raisers_record_their_commands(self):
         """skills_sync and push_queue name a command only for a to-do they sent and haven't closed, from their own
         records; a push to-do whose fix isn't `brunna push setup` gets none."""

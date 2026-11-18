@@ -468,7 +468,7 @@ Installing the mod is a user-level change: done only on the owner's own yes in a
 
 ## Slice 1 as built (11-18)
 
-Built on the branch after the owner's decisions; nothing is merged yet.
+Built 11-18, after the owner's decisions.
 
 - **`brunna surface`** (`bin/surface.py`, contract `contracts/session-surface.v1.schema.json` in the platform's
   `provides`, listed under `help all` only). It follows the draft above, with two additions to the contract:
