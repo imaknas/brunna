@@ -274,6 +274,14 @@ Built: steps 0–2 and step 4, the waiting report. Left:
 
   Out of scope, recorded there: where a sensitive answer persists, and the context a question carries to the
   answering project.
+- **Agent surface** (`agent-surface.md`, design 11-18, not built; the owner's four questions are open). The owner asked
+  whether brunna's Claude Code hooks could become a Claude Code mod. The inventory (40 points: 11 G, 25 C, 4 U) found
+  nothing to move yet. The recommendation is a neutral display-and-commands layer: glance.v1, plus a new session-scoped
+  `brunna surface --json`. A display-only mod in `integrations/claude-code/` is its first adapter. Codex shows nothing
+  until its UI is measured, and every agent keeps working without an adapter. Slice 1 removes no hook. The waiter and
+  the worktree hooks are later candidates. A finding to check and fix on its own: per the plugin reference (unmeasured here), a
+  reviewed skill holding `.claude-plugin/` would load as a plugin that runs as the user, and `.claude-plugin` is not a
+  control name that skills sync refuses.
 - **Budgets:** per-project model budgets (today there is one platform-wide daily budget).
 - **Config pipeline:** an applier for `sync-local-setup` (`new-user.md` 1.5).
 - **Rename:** `brunna.v1.schema.json`, and step 4 (writers stop falling back to the old spellings).
