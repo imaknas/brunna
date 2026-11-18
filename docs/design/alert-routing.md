@@ -31,7 +31,7 @@ Three causes, all the platform's:
 - `.state/alerts-log.jsonl`: one line per notice tried (key, state, sent), so whether the alerts got quieter can be
   counted without reading the assistant's data.
 
-## Step 2: route by who can fix it (designed, not built)
+## Step 2: route by who can fix it (built 11-18)
 
 - One table in `alert.py`, by key prefix, defaulting to the owner: a new caller with no entry still reaches the owner.
   The call sites don't change.
@@ -69,5 +69,15 @@ The mailbox lane's further points, adopted:
   without an answer, the owner.
 - With no brunna session open the triage can only write notes, so the one-day escalation is what makes the platform's
   letters safe.
+
+As built (`alert.route`, `alert._agent`): `scheduler-job:<project>/<job>` goes to that project when it is a registered
+project, else to brunna (its own jobs and the modules'), except `OWNER_JOBS` (the bridge); `PLATFORM_KEYS`
+(update-runtimes, session versions, completion tools, the git fence, a memory copy refused) to brunna; everything else
+to the owner. A letter is a `request` with a fixed id per opening; a changed list goes to its thread as `info`; fixed,
+the platform takes the letter back (`done --withdraw`). A day unsettled, or a letter that can't be sent: the owner is
+told, prefixed with which project was told first, and from then on it is an ordinary owner alert (its daily reminder,
+its recovery to the assistant, the letter taken back). A problem the owner was told of before routing stays the
+owner's. Every step is in `alerts-log.jsonl` (`letter`, `letter-update`, `letter-resolved`, `open`, `reminder`,
+`resolved`).
 
 Separate: the login check's two sources sending the same problem twice (`check-claude-login` ids).

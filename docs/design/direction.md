@@ -301,9 +301,9 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   doesn't hold `max_tokens`, and `provider_anthropic`'s forced `tool_choice`, which current models refuse. Resuming it
   needs the per-project budgets above first.
 
-- **Alerts** (`alert-routing.md`, 11-18): step 1 (one alert per failing job, recoveries not pushed, a log of
-  notices) is built; step 2, routing each alert to whoever can fix it, is designed and waits on its four checks, two of
-  them in the mailbox lane.
+- **Alerts** (`alert-routing.md`, 11-18): both steps built: one alert per failing job, recoveries not pushed, a log of
+  notices; and each alert routed to whoever can fix it (a project's job → the project, the platform's → brunna, a day
+  unsettled → the owner). Left: count the log after a week against the 72-in-ten-days baseline.
 
 ### 6. Waiting on the owner
 

@@ -69,6 +69,9 @@ class FailingJobs(unittest.TestCase):
         orig_conf = alert.configured
         self.addCleanup(setattr, alert, "configured", orig_conf)
         alert.configured = lambda: ["discord"]   # a channel is set up (none: nothing is told, and nothing logged)
+        orig_route = alert.route
+        self.addCleanup(setattr, alert, "route", orig_route)
+        alert.route = lambda key: "owner"   # who is told is test_alert_channels.Routing's; here, one alert per job
         old = "2020-01-01T00:00:00"
         self.m.FAILING_FILE.write_text(json.dumps({"p/a": {"since": old, "detail": "log a-11-08"},
                                                    "p/b": {"since": old, "detail": "log b-11-08"}}))

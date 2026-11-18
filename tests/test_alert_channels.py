@@ -475,5 +475,91 @@ class RecoveryNotPushed(unittest.TestCase):
             self.assertEqual(calls, ["⚠️ broken"])
 
 
+class Routing(unittest.TestCase):
+    """11-18 (docs/design/alert-routing.md): an alert goes first to whoever can fix it. A project's own job → a letter to
+    that project; the platform's own checks → a letter to brunna; everything else, and anything a day unsettled, the
+    owner."""
+
+    def setUp(self):
+        from unittest import mock
+        import tempfile
+        import alert
+        self.a = alert
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self.letters, self.sent = [], []
+        self.letter_ok = True
+        patches = [mock.patch.object(alert, "SENT", tmp / "sent.json"), mock.patch.object(alert, "FAILED", tmp / "f.json"),
+                   mock.patch.object(alert, "LOG", tmp / "log.jsonl"), mock.patch.object(alert, "_held", lambda: False),
+                   mock.patch.object(alert, "configured", lambda: ["discord", "assistant"]),
+                   mock.patch.object(alert, "_hubbus", lambda *a: self.letters.append(a) or self.letter_ok),
+                   mock.patch.object(alert, "send", lambda t, notice=None, plain=True: self.sent.append((t, notice["state"], plain)) or True),
+                   mock.patch.object(alert.hubconf, "projects", lambda: {"garden": {}, "brunna": {"type": "platform"}}),
+                   mock.patch.object(alert.hubconf, "hub_project", lambda: "brunna")]
+        for pt in patches:
+            pt.start()
+            self.addCleanup(pt.stop)
+
+    def once(self, key, problems, ids=None):
+        self.a.once(key, problems, "fine", ids=ids)
+
+    def test_a_projects_job_goes_to_the_project_then_back_when_fixed(self):
+        k = "scheduler-job:garden/nightly"
+        self.once(k, ["garden/nightly failing (log a)"], ids=["garden/nightly"])
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.letters[0][:6], ("send", "--from", "brunna", "--to", "garden", "--type"))
+        self.assertEqual(self.letters[0][6], "request")
+        letter = self.letters[0][self.letters[0].index("--id") + 1]
+        self.once(k, ["garden/nightly failing (log b)"], ids=["garden/nightly"])   # the same problem: nothing
+        self.assertEqual(len(self.letters), 1)
+        self.once(k, [], ids=[])
+        self.assertEqual(self.letters[-1][:2], ("done", letter))
+        self.assertIn("--withdraw", self.letters[-1])
+        self.assertEqual(self.sent, [], "the owner never hears of it")
+
+    def test_a_changed_list_goes_to_the_same_thread(self):
+        k = "runtime-held-claude"
+        self.once(k, ["a"])
+        letter = self.letters[0][self.letters[0].index("--id") + 1]
+        self.once(k, ["a", "b"])
+        self.assertEqual(self.letters[1][self.letters[1].index("--type") + 1], "info")
+        self.assertEqual(self.letters[1][self.letters[1].index("--reply-to") + 1], letter)
+        self.assertEqual(self.letters[1][self.letters[1].index("--to") + 1], "brunna")
+
+    def test_a_day_unsettled_reaches_the_owner_once_then_closes_both(self):
+        k = "runtime-held-claude"
+        self.once(k, ["a"])
+        rec = json.loads(self.a.SENT.read_text())
+        rec[k]["opened"] = "2020-01-01T00:00:00"
+        self.a.SENT.write_text(json.dumps(rec))
+        self.once(k, ["a"])
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn("brunna", self.sent[0][0])
+        self.assertEqual(self.sent[0][1:], ("open", True))
+        self.once(k, ["a"])   # escalated: the owner's from now on, reminded only after a day
+        self.assertEqual(len(self.sent), 1)
+        self.once(k, [])
+        self.assertEqual(self.sent[-1][1:], ("resolved", False))
+        self.assertIn("--withdraw", self.letters[-1])
+
+    def test_a_letter_that_cant_go_reaches_the_owner(self):
+        self.letter_ok = False
+        self.once("git-fence", ["x"])
+        self.assertEqual([s[1] for s in self.sent], ["open"])
+
+    def test_the_owners_keys_and_the_mailboxs_own_jobs_go_straight_to_the_owner(self):
+        for k in ("claude-login", "secrets", "scheduler-job:brunna/hubbus-bridge", "memory-sync-refused:garden"):
+            self.once(k, ["x"])
+        self.assertEqual(self.letters, [])
+        self.assertEqual(len(self.sent), 4)
+
+    def test_one_the_owner_was_told_of_before_routing_stays_the_owners(self):
+        self.a.SENT.write_text(json.dumps({"scheduler-job:garden/n": {"problems": ["x"], "ids": ["garden/n"],
+                                                                     "at": "2020-01-01T00:00:00"}}))
+        self.once("scheduler-job:garden/n", ["x"], ids=["garden/n"])
+        self.assertEqual(self.letters, [])
+        self.assertEqual([s[1] for s in self.sent], ["open"])   # its daily reminder, as before
+
+
 if __name__ == "__main__":
     unittest.main()

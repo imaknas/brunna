@@ -513,7 +513,9 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
 - **Alerts** (`bin/alert.py`; channels: Discord, ntfy, email, macOS notifications, configured in brunna.json `alerts`): a
   new problem is sent at once, an unresolved one is re-sent every 24 hours, and a recovery goes only to the assistant (it
   closes its item; nothing is pushed to the owner); every notice tried is logged in `.state/alerts-log.jsonl`
-  (design `docs/design/alert-routing.md`);
+  (design `docs/design/alert-routing.md`). An alert whose problem the platform's agents can fix goes first as a letter to
+  that project (a project's own job) or to brunna (the platform's jobs and self-checks), and to the owner only after a
+  day unsettled (`alert.route`);
   **an alert that cannot be sent is recorded in `.state/alerts-failed.json` and the status page shows red**. The
   secrets job first checks every day that the alert channels still work (without sending a message). The scheduler
   watchdog deliberately uses its own copy and does not depend on this script. The assistant's channel can't report its

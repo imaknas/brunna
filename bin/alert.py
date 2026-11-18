@@ -20,7 +20,9 @@ does not import this (it must still be able to send when the scheduler and the p
                                                assistant closes its item; nothing pushed, 11-18). A problem is told apart by
                                                its wording, or by its ids[i] when given (one stable name per problem, so
                                                a text that carries a changing detail, an error's tail or a count, is
-                                               still the same problem and is not sent again as new)
+                                               still the same problem and is not sent again as new). Routed first
+                                               (route(key)): a problem the platform's agents can fix is a letter to that
+                                               project or brunna, and reaches the owner only a day unsettled
   alert.probe() -> bool                         whether the token still works (GET /users/@me, no message sent;
                                                check-secrets calls it daily)
 
@@ -257,6 +259,97 @@ def failures() -> dict:
     return _load(FAILED) if configured() else {}
 
 
+ESCALATE = datetime.timedelta(hours=24)   # an agent's letter not settled by then: the owner hears of it, once
+# keys whose problem the platform's agents can fix: a letter to brunna, not the owner (docs/design/alert-routing.md).
+# Anything not here stays the owner's: logins, credentials, safety refusals, what watches the mailbox itself, and every
+# key a new caller makes until it is listed.
+PLATFORM_KEYS = ("runtime-held-", "runtime-checks-", "runtime-install-", "runtime-latest-", "runtime-daily-",
+                 "runtime-job-", "session-version", "session-unusable-", "completion-tools:", "git-fence",
+                 "claude-git-filter", "memory-copy-refused:")
+JOB_KEY = "scheduler-job:"
+# the platform's jobs that keep the mailbox running: their failure can't go through it
+OWNER_JOBS = ("hubbus-bridge",)
+
+
+def route(key: str) -> str:
+    """Who is told first: "owner", or the project whose agents can fix it (the platform's own: hubconf.hub_project())."""
+    if key.startswith(JOB_KEY):
+        job = key[len(JOB_KEY):]
+        project, _sep, name = job.partition("/")
+        if name in OWNER_JOBS:
+            return "owner"
+        docs = hubconf.projects()
+        if project in docs and project != hubconf.hub_project() and docs[project].get("type") != "platform":
+            return project
+        return hubconf.hub_project()   # brunna's own jobs and the modules'
+    if key.startswith(PLATFORM_KEYS):
+        return hubconf.hub_project()
+    return "owner"
+
+
+def _hubbus(*args: str) -> bool:
+    """One mailbox call as the platform (from the hub's folder). A test never reaches the real bus."""
+    if _reaches_out(subprocess.run):
+        return False
+    try:
+        r = subprocess.run([sys.executable, str(hubconf.ROOT / "bin" / "hubbus"), *args], cwd=hubconf.ROOT,
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0
+
+
+def _letter_text(to: str, problems: list[str]) -> str:
+    return (_("The platform found a problem for {project} to fix (an alert; the owner is not told yet):", project=to)
+            + "\n" + "\n".join(f"- {p}" for p in problems) + "\n"
+            + _("When it's fixed the platform sees it and closes this letter itself. Not fixed within a day, it goes to "
+                "the owner."))
+
+
+def _withdraw(letter: str | None) -> None:
+    if letter:
+        _hubbus("done", letter, "--withdraw", "--note", _("fixed: the platform no longer sees the problem"))
+
+
+def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last: dict | None, sent: dict,
+           now: datetime.datetime) -> bool:
+    """alert.once for a problem the platform's agents fix: a request letter to that project instead of the owner's
+    channels; changes go to its thread as info (no new request: one open letter per key, a project's dispatch budget is
+    small); a day unsettled → the owner, once, and from then on as any owner alert; fixed → the letter is taken back.
+    Returns False when the owner must be told instead (the letter couldn't be sent, or it is time to escalate)."""
+    last = last or {}
+    letter = last.get("letter") if last.get("problems") else None
+    if ident == last_ident:
+        if not problems:
+            clear_failure(key)
+            return True
+        opened = last.get("opened")
+        return not (opened and now - datetime.datetime.fromisoformat(opened) >= ESCALATE)
+    record = {"problems": sorted(problems), **({"ids": ident} if ids is not None else {}),
+              "at": now.isoformat(timespec="seconds"), "to": to}
+    if problems and letter:
+        ok = _hubbus("send", "--from", hubconf.hub_project(), "--to", to, "--type", "info", "--reply-to", letter,
+                     "--text", _letter_text(to, problems))
+        state = "letter-update"
+        record |= {"letter": letter, "opened": last.get("opened")}
+    elif problems:
+        letter = f"alert-{''.join(c if c.isalnum() else '-' for c in key)[:60]}-{now:%Y%m%d%H%M%S}"
+        ok = _hubbus("send", "--from", hubconf.hub_project(), "--to", to, "--type", "request", "--id", letter,
+                     "--text", _letter_text(to, problems))
+        state = "letter"
+        record |= {"letter": letter, "opened": record["at"]}
+    else:
+        _withdraw(last.get("letter"))   # one its recipient already closed can't be taken back: gone either way
+        ok, state = True, "letter-resolved"
+    _log(key, state, ok)
+    if not ok:
+        return False
+    sent[key] = record
+    _save(SENT, sent)
+    clear_failure(key)
+    return True
+
+
 def open_keys(prefix: str) -> list[str]:
     """The keys under this prefix whose problems were last sent and not resolved since (a caller that splits one alert
     into many finds the ones it must close)."""
@@ -278,6 +371,16 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
     ident = sorted(ids) if ids is not None else sorted(problems)
     last_ident = sorted((last or {}).get("ids") if ids is not None and "ids" in (last or {})
                         else (last or {}).get("problems", []))
+    to = route(key)
+    # the owner's already: escalated, or told before routing (a record with problems and no "to")
+    escalated = bool((last or {}).get("escalated")) or bool(to != "owner" and (last or {}).get("problems")
+                                                             and "to" not in (last or {}))
+    if to != "owner" and not escalated:
+        if _agent(key, to, problems, ids, ident, last_ident, last, sent, now):
+            return
+        # the owner is told: the letter couldn't go, or a day passed unsettled. From now on it is the owner's alert
+        escalated = True
+        last_ident = []   # what follows sends it as new
     if ident == last_ident:
         if not problems:
             clear_failure(key)  # the earlier one was not sent and the problem has fixed itself: nothing to resend
@@ -289,6 +392,9 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
             + "\n".join(problems)
     elif problems:
         text = "⚠️ " + "\n".join(problems)
+        if to != "owner":
+            text = "⚠️ " + _("{project} has not fixed this (the platform's agents were told first):", project=to) \
+                + "\n" + "\n".join(problems)
     else:
         text = "✅ " + ok_text
     # a retry is the same notice, to a channel that can tell (`at`): its time stays with the failure until it has gone out
@@ -308,7 +414,10 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
     ok = send(text, notice, plain=bool(problems))
     _log(key, "reminder" if ident == last_ident else notice["state"], ok)
     if ok:
-        sent[key] = {"problems": wanted, **({"ids": ident} if ids is not None else {}), "at": now.isoformat(timespec="seconds")}
+        sent[key] = {"problems": wanted, **({"ids": ident} if ids is not None else {}), "at": now.isoformat(timespec="seconds"),
+                     **({"escalated": True, "to": to, "letter": (last or {}).get("letter")} if escalated and problems else {})}
+        if escalated and not problems:
+            _withdraw((last or {}).get("letter"))
         _save(SENT, sent)
         clear_failure(key)
     else:
