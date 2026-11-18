@@ -1,6 +1,7 @@
 """A small subset of JSON Schema (standard library only): all that contracts/ and muninn's contracts use:
 type (including ["string","null"]), required, properties, additionalProperties (true/false/schema), items,
-enum, const, pattern, minimum, minLength, maxLength, minItems, if/then/else, anyOf, $ref (#/$defs/…).
+prefixItems, enum, const, pattern, minimum, minLength, maxLength, minItems, if/then/else, anyOf, $ref
+(#/$defs/…).
 Unknown keywords are ignored (as in the JSON Schema spec).
 
   errors(schema, instance) -> list[str]     empty = valid
@@ -74,6 +75,8 @@ def errors(schema: dict, x, path: str = "$", root: dict | None = None) -> list[s
     if isinstance(x, list):
         if "minItems" in schema and len(x) < schema["minItems"]:
             out.append(_("{path}: needs at least {n} {n:item|items}", path=path, n=schema["minItems"]))
+        for i, (sub, v) in enumerate(zip(schema.get("prefixItems") or [], x)):
+            out += errors(sub, v, f"{path}[{i}]", root)
         if "items" in schema:
             for i, v in enumerate(x):
                 out += errors(schema["items"], v, f"{path}[{i}]", root)

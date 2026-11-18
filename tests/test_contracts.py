@@ -253,6 +253,9 @@ class Json(unittest.TestCase):
         bad = json.loads((F / "glance.v1.example.json").read_text())
         bad["needs_you"][0]["command"] = ["brunna"]
         self.assertTrue(contracts.check_json(C / "glance.v1.schema.json", bad), "a command is an argv with an argument")
+        for argv in (["sh", "-c", "x"], ["brunna", "push setup"], ["brunna", "x;y"]):
+            bad["needs_you"][0]["command"] = argv
+            self.assertTrue(contracts.check_json(C / "glance.v1.schema.json", bad), argv)
 
     def test_hubbus_message(self):
         ev = {"seq": 1, "id": "m1", "ts": "2026-10-22T00:00:00+08:00", "type": "message", "source": "example",
