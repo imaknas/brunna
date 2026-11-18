@@ -1,0 +1,12 @@
+{
+  "name": "brunna",
+  "description": "brunna in the session you have open: what needs you and the platform's health, a needs-you pane, /inbox and /brunna. Display only: it changes nothing brunna guarantees, puts nothing into the model's context and registers no tool.",
+  "author": {
+    "name": "brunna"
+  },
+  "license": "Apache-2.0",
+  "engines": {
+    "claude-code": ">=2.1.325"
+  },
+  "types": "./types/index.d.ts"
+}

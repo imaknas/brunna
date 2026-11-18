@@ -1,0 +1,14 @@
+{
+  "name": "brunna",
+  "description": "brunna's Claude Code mod, read from this checkout so it is always the release the platform runs.",
+  "owner": {
+    "name": "brunna"
+  },
+  "plugins": [
+    {
+      "name": "brunna",
+      "source": "./integrations/claude-code",
+      "description": "brunna in the session you have open: what needs you, the platform's health, /inbox and /brunna. Display only."
+    }
+  ]
+}
