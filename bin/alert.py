@@ -16,7 +16,8 @@ does not import this (it must still be able to send when the scheduler and the p
   alert.send(text) -> bool
   alert.once(key, problems, ok_text, ids=None) -> None
                                                new problems are sent at once; unresolved ones are repeated every 24
-                                               hours; one recovery message when resolved. A problem is told apart by
+                                               hours; one recovery when resolved, to the keyed channels only (the
+                                               assistant closes its item; nothing pushed, 11-18). A problem is told apart by
                                                its wording, or by its ids[i] when given (one stable name per problem, so
                                                a text that carries a changing detail, an error's tail or a count, is
                                                still the same problem and is not sent again as new)
@@ -45,9 +46,11 @@ _ = i18n.domain(__file__)
 
 SENT = hubconf.STATE / "alerts-sent.json"      # key -> {"problems": [...], "ids": [...] when given, "at": when last sent}
 FAILED = hubconf.STATE / "alerts-failed.json"  # key -> {"at": …, "text": first line of the one not sent}
+LOG = hubconf.STATE / "alerts-log.jsonl"       # one line per notice tried: {"at", "key", "state", "sent"}; never rewritten
 REMIND = datetime.timedelta(hours=24)
 API = "https://discord.com/api/v10"
 _LIVE = (SENT, FAILED)
+_LIVE_LOG = LOG
 _REAL = (subprocess.run, smtplib.SMTP, smtplib.SMTP_SSL)   # what reaches the outside: curl and osascript, and mail
 
 
@@ -178,10 +181,11 @@ def configured() -> list[str]:
     return [n for n, (_send, on) in (*CHANNELS.items(), *KEYED.items()) if on()]
 
 
-def send(text: str, notice: dict | None = None) -> bool:
+def send(text: str, notice: dict | None = None, plain: bool = True) -> bool:
     """Send on every channel set up; success only when all of them went out (one failing is recorded as a failure, and
     the status page turns red). None set up = False. notice: for the channels that need a key; without one they are
-    skipped."""
+    skipped. plain=False: only the keyed channels (a recovery: the assistant closes its item; nothing is pushed to the
+    owner's phone or inbox for it). With plain=False and no keyed channel set up, there is nothing to send: True."""
     if _held():
         return False
     results = []
@@ -189,9 +193,24 @@ def send(text: str, notice: dict | None = None) -> bool:
         if n in KEYED:
             if notice:
                 results.append(KEYED[n][0](notice))
-        else:
+        elif plain:
             results.append(CHANNELS[n][0](text))
+    if not plain and not results and configured():
+        return True
     return bool(results) and all(results)
+
+
+def _log(key: str, state: str, ok: bool) -> None:
+    """One line per notice tried, kept (how many reached the owner, of which kind, and when: what tells whether the
+    alerts got quieter). A log that can't be written changes nothing; a test never writes the live one."""
+    if "unittest" in sys.modules and LOG == _LIVE_LOG:
+        return
+    try:
+        with LOG.open("a") as f:
+            f.write(json.dumps({"at": datetime.datetime.now().isoformat(timespec="seconds"), "key": key, "state": state,
+                                "sent": ok}, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
 
 
 def probe() -> bool:
@@ -238,6 +257,12 @@ def failures() -> dict:
     return _load(FAILED) if configured() else {}
 
 
+def open_keys(prefix: str) -> list[str]:
+    """The keys under this prefix whose problems were last sent and not resolved since (a caller that splits one alert
+    into many finds the ones it must close)."""
+    return sorted(k for k, v in _load(SENT).items() if k.startswith(prefix) and isinstance(v, dict) and v.get("problems"))
+
+
 def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = None) -> None:
     if ids is not None and len(ids) != len(problems):
         raise ValueError(f"alert.once({key!r}): {len(ids)} ids for {len(problems)} problems")
@@ -279,7 +304,10 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
             notice["detail"] = "\n".join(problems)
     else:
         notice["text"] = ok_text
-    if send(text, notice):
+    # a recovery is news only to whoever keeps the item (the assistant closes it); it isn't pushed to the owner (11-18)
+    ok = send(text, notice, plain=bool(problems))
+    _log(key, "reminder" if ident == last_ident else notice["state"], ok)
+    if ok:
         sent[key] = {"problems": wanted, **({"ids": ident} if ids is not None else {}), "at": now.isoformat(timespec="seconds")}
         _save(SENT, sent)
         clear_failure(key)

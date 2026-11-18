@@ -211,15 +211,28 @@ def failing_problems(failing: dict, now: datetime.datetime) -> list[str]:
     return out
 
 
+JOB_KEY = "scheduler-job:"   # one alert per failing job: alert.once's key is this + the job's name
+
+
 def alert_failing() -> None:
     """10-27: contracts-check failed two nights running and nobody knew: a failed scheduled job used to show only as red
     on the status page. Now persistent failures raise an alert (alert.py: new problems at once, unresolved ones
-    reminded every 24 hours, recovery sent when fixed)."""
+    reminded every 24 hours, recovery sent when fixed).
+
+    One alert per job, the job's name its id (11-18): all of them under one key were sent again whenever any one
+    changed, and a job's line carries its log's name, which changes every day, so the same failure came back as new for
+    two weeks. A job that stops failing gets its own recovery; the old single key is closed once."""
     try:
         import alert
         failing = json.loads(FAILING_FILE.read_text()) if FAILING_FILE.exists() else {}
-        alert.once("scheduler-jobs", failing_problems(failing, datetime.datetime.now()),
-                   _("The scheduled jobs are all back to normal"))
+        now = datetime.datetime.now()
+        # failing_problems skips the ones not failing long enough: one job at a time, so a line keeps its job's name
+        lines = {name: line for name in sorted(failing) for line in failing_problems({name: failing[name]}, now)}
+        open_now = {k[len(JOB_KEY):] for k in alert.open_keys(JOB_KEY)}
+        for name in sorted(set(lines) | open_now):
+            alert.once(JOB_KEY + name, [lines[name]] if name in lines else [], _("Scheduled job {name} works again",
+                       name=name), ids=[name] if name in lines else [])
+        alert.once("scheduler-jobs", [], _("The scheduled jobs are all back to normal"))   # the key before 11-18
     except Exception as e:  # broken alerts don't affect scheduling
         log(_("The scheduled-job alert was not sent: {error!r}", error=e))
 

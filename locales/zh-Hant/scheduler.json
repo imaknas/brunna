@@ -9,5 +9,6 @@
  "job '{name}': the bus file was replaced (cursor {cursor}, head now {head}); starting from the head": "job '{name}':bus 檔換過了(游標 {cursor},現在最新 {head});從最新處開始",
  "scheduler: {root} is a linked worktree of the hub; the scheduler runs only from the main checkout ({main})": "scheduler:{root} 是 hub 的 linked worktree;排程只從主 checkout 跑({main})",
  "scheduler: {root} is a linked worktree of the hub; nothing recorded": "scheduler:{root} 是 hub 的 linked worktree;沒有記錄任何東西",
- "scheduler --record-run <job> <exit code>": "scheduler --record-run <job> <結束碼>"
+ "scheduler --record-run <job> <exit code>": "scheduler --record-run <job> <結束碼>",
+ "Scheduled job {name} works again": "排程 job {name} 恢復正常"
 }

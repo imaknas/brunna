@@ -511,7 +511,9 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   to expire, and alerts on problems; it also lists files whose names look like credentials but are not declared
   (reminder only). Neither this script nor `check-claude-login.py` prints values
 - **Alerts** (`bin/alert.py`; channels: Discord, ntfy, email, macOS notifications, configured in brunna.json `alerts`): a
-  new problem is sent at once, an unresolved one is re-sent every 24 hours, and a recovery is sent when it is resolved;
+  new problem is sent at once, an unresolved one is re-sent every 24 hours, and a recovery goes only to the assistant (it
+  closes its item; nothing is pushed to the owner); every notice tried is logged in `.state/alerts-log.jsonl`
+  (design `docs/design/alert-routing.md`);
   **an alert that cannot be sent is recorded in `.state/alerts-failed.json` and the status page shows red**. The
   secrets job first checks every day that the alert channels still work (without sending a message). The scheduler
   watchdog deliberately uses its own copy and does not depend on this script. The assistant's channel can't report its

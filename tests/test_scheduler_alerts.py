@@ -53,20 +53,43 @@ class FailingJobs(unittest.TestCase):
         self.assertIn("a/old", probs[0])
         self.assertEqual(probs, self.m.failing_problems(failing, now + datetime.timedelta(hours=3))[:1])
 
-    def test_alert_gets_the_list_and_survives_a_broken_alert(self):
+    def test_one_alert_per_job_a_changing_detail_is_not_new_and_each_recovers_alone(self):
+        """11-18: one key for every failing job sent the whole list again whenever one line changed (a job's line names
+        its log, a new file each day), so one failure came back as new for two weeks."""
+        import alert
+        tmp = self.m.FAILING_FILE.parent
+        for attr, name in (("SENT", "sent.json"), ("FAILED", "failed.json"), ("LOG", "log.jsonl")):
+            orig = getattr(alert, attr)
+            self.addCleanup(setattr, alert, attr, orig)
+            setattr(alert, attr, tmp / name)
         sent = []
+        orig_send = alert.send
+        self.addCleanup(setattr, alert, "send", orig_send)
+        alert.send = lambda text, notice=None, plain=True: sent.append((notice["key"], notice["state"], plain)) or True
+        old = "2020-01-01T00:00:00"
+        self.m.FAILING_FILE.write_text(json.dumps({"p/a": {"since": old, "detail": "log a-11-08"},
+                                                   "p/b": {"since": old, "detail": "log b-11-08"}}))
+        self.m.alert_failing()
+        self.assertEqual(sorted(k for k, _s, _p in sent), ["scheduler-job:p/a", "scheduler-job:p/b"])
+        sent.clear()
+        self.m.FAILING_FILE.write_text(json.dumps({"p/a": {"since": old, "detail": "log a-11-09"},
+                                                   "p/b": {"since": old, "detail": "log b-11-09"}}))
+        self.m.alert_failing()   # the next day: the same failures, new log names
+        self.assertEqual(sent, [])
+        self.m.FAILING_FILE.write_text(json.dumps({"p/b": {"since": old, "detail": "log b-11-09"}}))
+        self.m.alert_failing()   # p/a works again: its recovery only, kept off the plain channels
+        self.assertEqual(sent, [("scheduler-job:p/a", "resolved", False)])
+        self.assertEqual([json.loads(l)["key"] for l in (tmp / "log.jsonl").read_text().splitlines()],
+                         ["scheduler-job:p/a", "scheduler-job:p/b", "scheduler-job:p/a"])
+
+    def test_a_broken_alert_does_not_stop_the_scheduler(self):
         import alert
         orig = alert.once
         self.addCleanup(setattr, alert, "once", orig)
-        alert.once = lambda key, problems, ok: sent.append((key, problems))
+        alert.once = lambda *a, **k: (_ for _ in ()).throw(RuntimeError("discord down"))
         self.m.FAILING_FILE.write_text(json.dumps({"x/y": {"since": "2020-01-01T00:00:00", "detail": "exit 1"}}))
-        self.m.alert_failing()
-        self.assertEqual(sent[0][0], "scheduler-jobs")
-        self.assertEqual(len(sent[0][1]), 1)
-        alert.once = lambda *a: (_ for _ in ()).throw(RuntimeError("discord down"))
         self.m.log = lambda s: None
-        self.m.alert_failing()   # must not bring the scheduler down
-
+        self.m.alert_failing()
 
 if __name__ == "__main__":
     unittest.main()

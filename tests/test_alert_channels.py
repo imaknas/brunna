@@ -128,7 +128,10 @@ class AssistantChannel(unittest.TestCase):
         last = self.posts[-1][1]
         self.assertEqual((last["state"], last["text"]), ("resolved", "fine again"))
         self.assertNotIn("detail", last)
-        self.assertEqual(len(self.texts), len(self.posts), "the other channels went out each time too")
+        # the other channels went out each time too, but for the recovery (11-18: the assistant closes its item; nothing
+        # is pushed to the owner for it)
+        self.assertEqual(len(self.texts), len(self.posts) - 1)
+        self.assertFalse(any("fine again" in t for t in self.texts))
 
     def test_one_problem_is_said_as_it_is(self):
         self.m.once("k", ["one"], "fine again")
@@ -453,6 +456,23 @@ class RealChannelsUnderTest(unittest.TestCase):
             self.assertFalse(m.send("free text"))
         self.assertEqual(calls, [])
         self.assertIn("not sent", err.getvalue())
+
+
+class RecoveryNotPushed(unittest.TestCase):
+    """11-18: a recovery goes only to the keyed channels (the assistant closes its item). With none set up, nothing is
+    sent and it still counts as told (not a failed send that would turn the status page red)."""
+
+    def test_plain_only_recovery_sends_nothing_and_succeeds(self):
+        from unittest import mock
+        import alert
+        calls = []
+        chans = {"discord": (lambda text: calls.append(text) or True, lambda: True)}
+        with mock.patch.object(alert, "CHANNELS", chans), mock.patch.object(alert, "KEYED", {}), \
+                mock.patch.object(alert, "_held", lambda: False):
+            self.assertTrue(alert.send("✅ fine", {"key": "k", "state": "resolved"}, plain=False))
+            self.assertEqual(calls, [])
+            self.assertTrue(alert.send("⚠️ broken", {"key": "k", "state": "open"}))
+            self.assertEqual(calls, ["⚠️ broken"])
 
 
 if __name__ == "__main__":
