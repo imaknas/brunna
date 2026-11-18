@@ -891,8 +891,22 @@ def session_write(world) -> Outcome:
     tag = os.urandom(3).hex()
     if not _attempt(project, settings, own / f"canary-{tag}", "bash")[1]:
         return Outcome("fail", _("its own push request folder wasn't writable"))
-    return _verdict(*_canaries(project, settings, [(other / f"canary-{tag}", "bash",
-                                                    _("another project's push request folder"))]))
+    # Another project's folder is kept off by two things: it isn't among this session's writable places, and the
+    # rendered denies name it. Its positive control must lift both (written there as if it were the session's own
+    # folder, its denies left out), or it can never land and the check tests nothing (11-18: every version was held for
+    # it). _canaries' control only leaves denies out, which is enough where the place is writable anyway (a temp root).
+    target, name = other / f"canary-{tag}", _("another project's push request folder")
+    refused, wrote = _attempt(project, settings, target, "bash")
+    if wrote:
+        return Outcome("fail", _("{path} was written", path=name))
+    if not refused:
+        return Outcome("error", _("no refused attempt at {path}", path=name))
+    loose = _without(settings, target)
+    fs = loose.setdefault("sandbox", {}).setdefault("filesystem", {})
+    fs["allowWrite"] = [*fs.get("allowWrite", []), str(other)]
+    if not _attempt(project, loose, target, "bash")[1]:
+        return Outcome("error", _("tests nothing: {path} wasn't written with its rules left out", path=name))
+    return Outcome("pass", "")
 
 
 V_M6 = "a check through V-M6's pty driver (an interactive throwaway session; measured 11-09, not built as a check yet)"
