@@ -156,3 +156,21 @@ runs as you). One window stays: between the pin and the release, and after the r
 the repo can move the tag, since GitHub's release create has no compare-and-swap. Only someone who could publish a
 release directly can do that; a tag ruleset on the repo that restricts updating and deleting tags closes it.
 
+
+## brunna inside a Claude Code session
+
+`brunna surface --runtime <name> --session <id> --cwd <folder> --json` is what a surface adapter reads: what brunna
+shows and offers inside one coding agent session (contract `contracts/session-surface.v1.schema.json`,
+docs/design/agent-surface.md). You don't run it yourself; it is listed under `brunna help all`. It is read-only, and
+it answers only for a session whose hooks recorded it (`served: false` with a `why_not` otherwise).
+
+Its first adapter is the Claude Code mod in `integrations/claude-code/`. It draws a band above the prompt while
+something needs you, and a "needs you" pane. It adds `/inbox` and `/brunna`, which only fill the prompt box. To install
+it, type this once at the prompt of a Claude Code session in a terminal, with `<hub>` the folder brunna is installed in:
+
+```
+/plugin install brunna --marketplace <hub>
+```
+
+It is read from that folder, so after `brunna upgrade` a `/reload-plugins` picks up the new one. Nothing in brunna
+installs it for you, and nothing brunna guarantees depends on it (integrations/claude-code/README.md).

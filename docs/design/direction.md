@@ -274,8 +274,10 @@ Built: steps 0–2 and step 4, the waiting report. Left:
 
   Out of scope, recorded there: where a sensitive answer persists, and the context a question carries to the
   answering project.
-- **Agent surface** (`agent-surface.md`, design 11-18, r1 after a blind review with nothing blocking; not built; the
-  owner's four questions are open). The owner asked whether brunna's Claude Code hooks could become a Claude Code mod.
+- **Agent surface** (`agent-surface.md`, design 11-18, r1 after a blind review with nothing blocking; the owner took
+  all four recommendations on 11-18; **slice 1 built on a branch, not merged**: `brunna surface` and its contract,
+  glance's `prompt`/`command`, the display-only mod in `integrations/claude-code/`. Left from slice 1: the doctor row,
+  the `brunna init` line, and what only a live session can check, listed at the end of `agent-surface.md`). The owner asked whether brunna's Claude Code hooks could become a Claude Code mod.
   The inventory (45 points: 15 G, 25 C, 5 U) found nothing to move yet. The recommendation is a neutral
   display-and-commands layer: glance.v1 with two optional fields, plus a new session-scoped `brunna surface --json`
   keyed by the session's record. A display-only mod in `integrations/claude-code/` is its first adapter, installed from

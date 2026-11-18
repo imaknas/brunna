@@ -1,6 +1,7 @@
 # The agent surface: what brunna shows and offers inside a coding agent
 
-Status: design 11-18, not built; **r1 (11-18), after a blind review** that found nothing blocking. Its points are folded
+Status: design 11-18; **slice 1 built 11-18** (see "Slice 1 as built" at the end: what differs from the plan below,
+what was measured, what is still open); **r1 (11-18), after a blind review** that found nothing blocking. Its points are folded
 in below: new G rows and a recount, a session surface keyed by the session's record, the band trimmed to what needs the
 owner, a fixed command allowlist, install from the hub's own checkout. Three of its points are being fixed in code
 separately and are only recorded here: S1 (the platform renders a sandboxed worktree's settings itself), S6 (a
@@ -464,3 +465,63 @@ The owner took all four recommendations:
 4. Moving the idle-session waiter and the worktree hooks into the mod is decided after slice 1 has run a while and S1's
    fix has landed; a sandboxed project's worktree handling stays with the platform either way.
 Installing the mod is a user-level change: done only on the owner's own yes in a session, never by an agent alone.
+
+## Slice 1 as built (11-18)
+
+Built on the branch after the owner's decisions; nothing is merged yet.
+
+- **`brunna surface`** (`bin/surface.py`, contract `contracts/session-surface.v1.schema.json` in the platform's
+  `provides`, listed under `help all` only). It follows the draft above, with two additions to the contract:
+  - `labels`: the interface-language words an adapter draws around the data (the button, the pane's title, the empty
+    state, the kind names, copy, ask, read-only). The mod's only own wording is the mismatch line.
+  - `why_not: no_bus_access` is also given when the session records can't be read (they live under the secrets
+    directory, which every sandbox is denied). A missing bus is no letters, not a refusal.
+
+  `gated` keeps `project`, `owner`, `labels`, `lines` and a `commands` list without `inbox`. It carries no `mail`. Its
+  line counts the project's open requests and questions ("N letters wait for another session"). A held letter shows
+  in the band after half the hold's window (`TAKE_TIMEOUT_MIN // 2`, 30 minutes by default). The bus is read through
+  `hubbus.inbox`, `letter_state` and `hook_shows` on a read-only connection. The session lookup's failure log is
+  dropped, so the command writes nothing at all.
+- **glance's two fields** are written by the status page's tick (`gen-status-page.needs_you`). `command` comes from the
+  module that raised the item, out of its own record: `skills_sync.owner_commands` (the review reminder's key) and
+  `push_queue.owner_commands` (an open `emails`, `visibility` or `credential` to-do, which `brunna push setup` settles).
+  It is set only on an item filed under the platform's own project. A "branch" push to-do gets none, because its
+  record keeps no branch. Nothing raises a release to-do, so no writer names `brunna release`. Every other item gets a
+  `prompt` that names its kind, project and id, never its text.
+- **The mod** (`integrations/claude-code/`). The hooks module is `hooks/brunna.tsx`, a `.tsx` because it draws JSX.
+  The state it keeps is declared in `types/index.d.ts`, which `claude plugin validate` requires for `$.state` keys.
+  Its own tests are in `tests/brunna.test.tsx`, and the root `.claude-plugin/marketplace.json` points at
+  `./integrations/claude-code`. `plugin.json` carries **no version**: the mod is read from the checkout, and a version
+  there would need a release step to keep it from drifting off the tag. The contract majors are what the mod checks.
+  The commands are registered with the platform's `summary` after the first answer, and only the names it knows. Its
+  `command.run` hooks catch their own failures and always return `{}`.
+- **Not built in slice 1:**
+  - toasts: the owner's decision 1 lists the band, the pane and the two commands, without toasts;
+  - the doctor row (item 4): reading Claude Code's plugin install state is the adapter's business, and it was not
+    measured here;
+  - the line at the end of `brunna init` (item 5).
+
+  The install line is in `integrations/claude-code/README.md` and `docs/commands.md`, with `<hub>` for the folder.
+
+Measured while building (Claude Code 2.1.327):
+
+- A marketplace `source` pointing into a subfolder (`./integrations/claude-code`) passes `claude plugin validate`.
+- `claude plugin validate` reports both command hooks as "answers its own command" (not gates). The module calls only
+  `$.process.run`, `$.env.get(HOME)`, `$.session.{surfaces,cwd,id}`, `$.clock.every`, `$.command.register`,
+  `$.prompt.fill`, `$.ui.{open,copy,resolve}` and `$.state`.
+- `claude plugin test integrations/claude-code` passes 6 tests on the engine's test kit:
+  - argv and cwd;
+  - only the two commands are registered;
+  - the band on the terminal and the desktop;
+  - `/inbox` fills and returns no text;
+  - the pane: ask only for the session's own project, copy for a command, read-only under the assistant;
+  - the mismatch line.
+
+Still open (needs a live session or the owner):
+
+- whether `{}` from a command hook prints nothing in a real session;
+- whether a folder-marketplace install reads the folder live after `brunna upgrade`;
+- what `$.session.surfaces()` answers in the desktop app's local sessions;
+- whether the session's sandbox applies to `$.process.run` children;
+- whether a project's settings `env` reaches them;
+- `tsc -p` on the mod: TypeScript is not installed on the machine it was built on.

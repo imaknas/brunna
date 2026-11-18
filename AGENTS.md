@@ -468,9 +468,11 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   confused with `modules/`. Each is laid out as its app requires: herdr shares a folder like a herdr home, so
   `integrations/herdr/` holds `RECIPE.md` and `preview.png` with the mod in `integrations/herdr/mods/brunna/`
   (`main.js`, `mod.json`, its images; herdr finds it only one level down, so it stays exactly there), and the repo
-  carries herdr's topic `herdr-mod`. A client reads only the platform's neutral output (`brunna glance --json`, the
-  glance.v1 contract) and runs only the `brunna` command; it never reads the bus, the instance or a project directly.
-  `tests/test_mods.py` checks them
+  carries herdr's topic `herdr-mod`. `integrations/claude-code/` is a display-only Claude Code mod
+  (docs/design/agent-surface.md), and the repo root's `.claude-plugin/marketplace.json` makes the hub's checkout its
+  folder marketplace; only the owner installs it. A client reads only the platform's neutral output
+  (`brunna glance --json`, the glance.v1 contract; `brunna surface --json`, session-surface.v1) and runs only the `brunna`
+  command; it never reads the bus, the instance or a project directly. `tests/test_mods.py` checks them
 - `modules/`: **features that can stay off** (docs/design/new-user.md 3.2): `<name>.yaml` in the same
   jobs/services/secrets/consumes format as the registry (`type: module`, cwd always hub), adopted only with `brunna.json`
   `modules.<name>: true`; their jobs are called `<module>/<job>` in the schedule. Current: assistant
