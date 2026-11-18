@@ -275,20 +275,22 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   Out of scope, recorded there: where a sensitive answer persists, and the context a question carries to the
   answering project.
 - **Agent surface** (`agent-surface.md`, design 11-18, r1 after a blind review with nothing blocking; the owner took
-  all four recommendations on 11-18; **slice 1 built 11-18**: `brunna surface` and its contract,
-  glance's `prompt`/`command`, the display-only mod in `integrations/claude-code/`. Left from slice 1: the doctor row,
-  the `brunna init` line, and what only a live session can check, listed at the end of `agent-surface.md`). The owner asked whether brunna's Claude Code hooks could become a Claude Code mod.
-  The inventory (45 points: 15 G, 25 C, 5 U) found nothing to move yet. The recommendation is a neutral
-  display-and-commands layer: glance.v1 with two optional fields, plus a new session-scoped `brunna surface --json`
-  keyed by the session's record. A display-only mod in `integrations/claude-code/` is its first adapter, installed from
-  the hub's own checkout as a folder marketplace. Codex shows nothing until its UI is measured, and every agent keeps
-  working without an adapter. Slice 1 removes no hook. The waiter, and the worktree hooks of projects that aren't
-  sandboxed, are later candidates. Fixed or being fixed in code on their own:
-  - a plugin's manifest inside a skill (refused since `8b9c5ab6`);
-  - S1: `worktree-make` renders a sandboxed worktree's settings;
-  - S6: a conformance canary for plugins in platform runs;
-  - S7: the foreign-control check reports plugin manifests and the `enabledPlugins`, `extraKnownMarketplaces` and `env`
-    keys.
+  all four recommendations on 11-18; **slice 1 built 11-18**: `brunna surface` and its contract, glance's
+  `prompt`/`command`, the display-only mod in `integrations/claude-code/`). The owner asked whether brunna's Claude Code
+  hooks could become a Claude Code mod. The inventory (45 points: 15 G, 25 C, 5 U) found nothing to move yet. The
+  answer is a neutral display-and-commands layer, glance.v1 with two optional fields plus a session-scoped
+  `brunna surface --json` keyed by the session's record, whose first adapter is that mod, installed from the hub's own
+  checkout as a folder marketplace. Codex shows nothing until its UI is measured, and every agent keeps working without
+  an adapter. Slice 1 removes no hook. The waiter, and the worktree hooks of projects that aren't sandboxed, are later
+  candidates.
+  - Left from slice 1: the doctor row, the `brunna init` line, and what only a live session can check (listed at the
+    end of `agent-surface.md`).
+  - Fixed from the design's blind review (11-18): skills sync refuses a plugin's `.claude-plugin`/`hooks.json` in a
+    skill; the foreign-control check reports them and the plugin keys of a committed settings file; a sandboxed
+    project's worktree has its settings from the make; the conformance check `platform-run-plugins` holds that no
+    plugin loads in a `--restricted` platform run. The runs without it (leases, `librarian-index`, `agent-job`,
+    `login-check`) don't start while a skills folder they would read holds a plugin, or can't be looked through (the
+    owner's decision, 11-18; a lease says `folder_refused`). The user's own plugins stay theirs.
   - Follow-up from slice 1's blind review (11-19), not fixed: a project's settings `env` reaches what the session
     starts (measured for a mod's children on 2.1.327: `PYTHONPATH`, `PYTHONHOME`, `AGENT_HUB_*`/`BRUNNA_*`). The
     platform's own hooks (`hub-event`, `worktree-memory.sh`) inherit the same environment, and S7 only reports the
