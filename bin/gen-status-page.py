@@ -28,6 +28,7 @@ import names  # noqa: E402
 import i18n  # noqa: E402
 
 _ = i18n.domain(__file__)
+_c = i18n.domain(__file__, content=True)
 
 HUB = hubconf.ROOT
 SCHEDULE = hubconf.config_file("schedule.yaml")
@@ -908,16 +909,52 @@ td.next::before{content:attr(data-l) " ";color:var(--dim)}
 """
 
 
+def owner_commands() -> dict[str, list[str]]:
+    """{to-do key: argv} of the items the platform itself raised that only the owner's terminal settles, asked of the
+    module that raised each from its own record (skills_sync: a review; push_queue: a push setup). Nothing raises a
+    release to-do. A module whose record can't be read adds none: the item still shows, its text names the command."""
+    import importlib
+    out = {}
+    for name in ("skills_sync", "push_queue"):
+        try:
+            out.update(importlib.import_module(name).owner_commands())
+        except Exception:
+            pass
+    return out
+
+
+def item_prompt(kind: str, project: str, key: str) -> str:
+    """The platform's words for asking an agent in that project's session about the item, in the content language: its
+    kind, project and id, never its text (which a project wrote)."""
+    if kind == "question":
+        return _c("This project's question {id} waits for my answer: show it to me with its options, and once I have "
+                  "answered, act on it and close it as your rules say.", id=key)
+    return _c("About my open to-do {id} in {project}: tell me what it needs from me, and once I say it is done, report "
+              "it as your rules say.", id=key, project=project)
+
+
 def needs_you() -> tuple[list[dict], str]:
     """The owner's open items (owner.open_items, which folds them from the bus records: too slow for every glance,
-    cheap once a tick), in the glance.v1 form, and why they couldn't be read ('' when they could)."""
+    cheap once a tick), in the glance.v1 form, and why they couldn't be read ('' when they could). An item the platform
+    raised for the owner's terminal carries its command (only one filed under the platform's own project, by the key the
+    raising module recorded); every other item the prompt an agent is asked with."""
     try:
         import owner
-        return [{"kind": "todo" if x["kind"] == "task" else "question", "project": x["project"],
-                 "id": x.get("key") or x.get("id"), "text": x["text"], "since": x.get("since") or ""}
-                for x in owner.open_items()], ""
+        items = owner.open_items()
     except Exception as e:   # the page is written either way; glance says the items couldn't be read
         return [], repr(e)[:300]
+    commands = owner_commands() if items else {}
+    out = []
+    for x in items:
+        kind, key = "todo" if x["kind"] == "task" else "question", x.get("key") or x.get("id")
+        item = {"kind": kind, "project": x["project"], "id": key, "text": x["text"], "since": x.get("since") or ""}
+        cmd = commands.get(key) if kind == "todo" and x["project"] == hubconf.hub_project() else None
+        if cmd:
+            item["command"] = cmd
+        else:
+            item["prompt"] = item_prompt(kind, x["project"], key)
+        out.append(item)
+    return out, ""
 
 
 def write_glance(now: datetime.datetime, alerts: list, needs: tuple[list[dict], str] | None = None) -> None:

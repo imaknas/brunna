@@ -595,6 +595,23 @@ def raise_todo(project: str, cause: str, text: str, sha: str | None = None, log=
     return key
 
 
+# the causes `brunna push setup <project>` settles (git_remote.owner_text names it for them)
+SETUP_CAUSES = ("emails", "visibility", "credential")
+
+
+def owner_commands() -> dict[str, list[str]]:
+    """{to-do key: argv} for the open push to-dos this module raised that only the owner's terminal settles with one fixed
+    command (glance.v1's needs_you[].command, written by the status page's tick): read from this module's own record of
+    what it sent, never from the item. A "branch" to-do names the branch in its text, which this record doesn't keep."""
+    import names
+    out = {}
+    for project in sandboxed_projects():
+        for cause, t in _read_json(broker(project) / "todos.json", {}).items():
+            if cause in SETUP_CAUSES and isinstance(t, dict) and t.get("sent") and not t.get("closed") and t.get("key"):
+                out[t["key"]] = [names.current("cli"), "push", "setup", project]
+    return out
+
+
 def close_todos(project: str, landed=None, log=None, still=()) -> list[str]:
     """After a push of the project landed: every open to-do closes, except a "branch not allowed" one, which closes only
     when what landed contains its sha (landed(sha) → bool), and the causes in still, which this push didn't settle (a

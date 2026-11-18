@@ -9,14 +9,29 @@
    "project": "garden-app",
    "id": "m11030900-ab12",
    "text": "Which host for the demo?",
-   "since": "2026-11-03T09:00:00+08:00"
+   "since": "2026-11-03T09:00:00+08:00",
+   "prompt": "This project's question m11030900-ab12 waits for my answer: show it to me with its options, and once I have answered, act on it and close it as your rules say."
   },
   {
    "kind": "todo",
    "project": "garden-app",
    "id": "task-garden-app-0001",
    "text": "Renew the domain",
-   "since": "2026-11-01T01:00:00Z"
+   "since": "2026-11-01T01:00:00Z",
+   "prompt": "About my open to-do task-garden-app-0001 in garden-app: tell me what it needs from me, and once I say it is done, report it as your rules say."
+  },
+  {
+   "kind": "todo",
+   "project": "hub",
+   "id": "skills-garden-app-20261103090000000000",
+   "text": "garden-app: changes to its skills wait for your review (1 skill); run brunna skills sync garden-app",
+   "since": "2026-11-03T09:00:00+08:00",
+   "command": [
+    "brunna",
+    "skills",
+    "sync",
+    "garden-app"
+   ]
   }
  ],
  "mail": {

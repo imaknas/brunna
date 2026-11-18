@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "glance.v1",
   "title": "brunna glance --json",
-  "description": "What needs the owner and whether the platform is healthy, in one look (bin/glance.py, docs/design/herdr.md). For status bars and other clients, which read only this. needs_you and health come from the status page's last tick (health.as_of); mail, scheduler and jobs_failed are live. An instance that isn't set up is {v: 1, set_up: false} and nothing else. Texts: alerts in the interface language, needs_you texts in the content language they were written in.",
+  "description": "What needs the owner and whether the platform is healthy, in one look (bin/glance.py, docs/design/herdr.md). For status bars and other clients, which read only this. needs_you and health come from the status page's last tick (health.as_of); mail, scheduler and jobs_failed are live. An instance that isn't set up is {v: 1, set_up: false} and nothing else. Texts: alerts in the interface language, needs_you texts in the content language they were written in. A needs_you item may carry prompt (the platform's words for asking an agent about the item, in the content language; it never holds the item's text) and command (an argv whose first element is brunna, for an item only the owner's terminal settles); both are written only by the platform, never taken from what a project sent.",
   "type": "object",
   "required": [
     "v",
@@ -50,6 +50,17 @@
           },
           "since": {
             "type": "string"
+          },
+          "prompt": {
+            "type": "string"
+          },
+          "command": {
+            "type": "array",
+            "minItems": 2,
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
           }
         }
       }

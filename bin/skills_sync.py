@@ -921,6 +921,18 @@ def pending(project: str, ws) -> dict | None:
     return {"set": now, "changed": changed, "problems": len(snap.problems)}
 
 
+def owner_commands() -> dict[str, list[str]]:
+    """{to-do key: argv} for the review to-dos this module raised (glance.v1's needs_you[].command, written by the status
+    page's tick): read from each project's manifest, this module's own record of what it sent, never from the item."""
+    import names
+    out = {}
+    for project in sorted(hubconf.projects()):
+        rem = load(project).get("reminder") if manifest_path(project).exists() else None
+        if isinstance(rem, dict) and isinstance(rem.get("key"), str) and rem["key"]:
+            out[rem["key"]] = [names.current("cli"), "skills", "sync", project]
+    return out
+
+
 def key_for(project: str) -> str:
     """A new owner to-do's key: one per review period (a key closed once is never raised again: the same key and
     terms would be nothing new to the owner side)."""
