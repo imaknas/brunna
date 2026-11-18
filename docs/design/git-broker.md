@@ -1402,7 +1402,14 @@ section and the ones above disagree, this one holds.
     - `sparsePaths`.
 
     Those run only in the branch where its own git makes the worktree. A sandboxed project's worktree settings are
-    written by `render-project-settings --worktree` at session start (`worktree-memory.sh`), as before.
+    written by the platform when it makes the worktree (`session_worktree.make` → `render-project-settings`
+    `render_worktree`, as the platform, before the tool gets the path; a make whose settings can't be written is taken
+    back, 11-18), and again by `render-project-settings --worktree` at session start (`worktree-memory.sh`). Before
+    11-18 only the latter wrote them, a user-level hook the owner may not have installed and that goes on when it fails.
+    Measured 11-18 (2.1.327, `claude -p` only): a session in a linked worktree with no settings file of its own applies
+    the main checkout's `.claude/settings.local.json` (its hooks ran with the worktree as their folder, its `env`
+    reached them), for a worktree inside the main checkout and one outside it alike. Interactive and desktop sessions
+    are unmeasured.
 
 **To look for in the real Claude run** (Claude's debug log, `claude --debug` or `~/.claude/debug/`, and `git worktree
 list`):

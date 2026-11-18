@@ -31,5 +31,6 @@
  "the platform's session hooks ({runtime})": "平台的 session hook({runtime})",
  "usage: render-project-settings.py [--report] [--only <project>]\n       render-project-settings.py --worktree <folder>": "用法:render-project-settings.py [--report] [--only <專案>]\n      render-project-settings.py --worktree <資料夾>",
  "render-project-settings: {root} is a linked worktree of the hub; it writes projects' settings only from the main checkout ({main}); --report works here": "render-project-settings:{root} 是 hub 的 linked worktree;專案的設定只從主 checkout({main})寫;這裡可以用 --report",
- "{project}: its push request folder could not be made ({why})": "{project}:它的推送請求資料夾建不起來({why})"
+ "{project}: its push request folder could not be made ({why})": "{project}:它的推送請求資料夾建不起來({why})",
+ "{project} has no workspace on this machine": "{project} 在這台機器上沒有工作區"
 }

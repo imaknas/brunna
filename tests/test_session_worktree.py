@@ -142,6 +142,21 @@ class SessionWorktree(Base):
         p = mock.patch.object(session_worktree, "PENDING", self.tmp / "pending")
         p.start()
         self.addCleanup(p.stop)
+        # the settings render (RenderedOnMake tests the real one): a stand-in that writes the file, which the repo's
+        # exclude keeps out of git status, as sync-local-setup's ignores do
+        (self.ws / ".git" / "info").mkdir(exist_ok=True)
+        (self.ws / ".git" / "info" / "exclude").write_text(".claude/settings.local.json\n")
+        self.rendered = []
+        p = mock.patch.object(session_worktree, "render_settings", self.render)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def render(self, project, path):
+        self.rendered.append((project, path))
+        f = runtime_claude.settings_path(path)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("{}\n")
+        return f
 
     def wrap(self, project, cwd, argv, port=None):
         self.wrapped.append((project, list(argv)))
@@ -168,6 +183,7 @@ class SessionWorktree(Base):
         ops = [a for _p, a in self.wrapped]
         self.assertTrue(any("session-worktree" in a for a in ops), ops)
         self.assertTrue(all(p == "proj" for p, _a in self.wrapped))
+        self.assertEqual(self.rendered, [("proj", path)], "its settings rendered by the make itself")
         session_worktree.drop(self.ws, path, runtime_claude)
         self.assertFalse(path.exists())
 
@@ -212,8 +228,7 @@ class SessionWorktree(Base):
         roots = [{"name": ".claude", "writable": ["worktrees"]}]   # a worktree's own .claude is held too
         with mock.patch.object(policy, "protect", lambda: protect), mock.patch.object(policy, "protect_roots", lambda: roots):
             path, _s = session_worktree.make(self.ws, "w7", runtime_claude)
-            (path / ".claude").mkdir()
-            (path / ".claude" / "settings.local.json").write_text("{}\n")   # what render-project-settings writes
+            self.assertTrue((path / ".claude" / "settings.local.json").is_file(), "what the make's render wrote")
             (self.ws / "CLAUDE.local.md").write_text("rules\n")
             os.symlink(self.ws / "CLAUDE.local.md", path / "CLAUDE.local.md")   # worktree-memory.sh's link
             os.symlink(self.ws, path / ".agent-memory")
@@ -233,8 +248,7 @@ class SessionWorktree(Base):
         roots = [{"name": ".claude", "writable": ["worktrees"]}]
         with mock.patch.object(policy, "protect", lambda: protect), mock.patch.object(policy, "protect_roots", lambda: roots):
             path, _s = session_worktree.make(self.ws, "w8", runtime_claude)
-            (path / ".claude").mkdir()
-            (path / ".claude" / "settings.local.json").write_text("{}\n")   # not in platform_entries here: left
+            # the make's render wrote .claude/settings.local.json; not in platform_entries here: left
             with mock.patch.object(session_worktree, "platform_entries", lambda: []):
                 with self.assertRaises(session_worktree.Refused):
                     session_worktree.drop(self.ws, path, runtime_claude)
@@ -349,6 +363,93 @@ done
         self.assertEqual(list(outside.iterdir()), [])
         # the attacker goes after r0, r2 and r4 only: the others show makes go through while it runs (not vacuous)
         self.assertGreater(made, 0, "not vacuous: some makes went through while the attacker ran")
+
+
+class RenderedOnMake(Base):
+    """A sandboxed project's worktree has its sandbox settings from the moment it is made, before the tool gets its path
+    and so before any session hook runs there (review of the agent surface, S1: before, only the session start's
+    user-level hook wrote them, which the owner may not have installed and which goes on when it fails, so a worktree
+    could hold none until render-project-settings' next tick). The job as the project is a stand-in here (SessionWorktree
+    runs the real one under Seatbelt), so this runs wherever the tests do; the render is the real one."""
+
+    def setUp(self):
+        super().setUp()
+        import push_queue
+        import registry
+        import session_worktree
+        self.sw = session_worktree
+        self.docs = {"proj": {"name": "proj", "paths": {"workspace": str(self.ws)}, "enforce": {"sandbox": True}}}
+        (self.ws / ".agent-memory").mkdir()   # an onboarded project's memory folder, which a worktree reaches by a link
+        self.jobs = []
+        for p in (mock.patch.object(hubconf, "projects", lambda: self.docs),
+                  mock.patch.object(registry, "refresh", lambda: {"projects": self.docs}),
+                  mock.patch.object(push_queue, "ensure_folder", lambda name, log=None: None),
+                  mock.patch.object(session_worktree, "PENDING", self.tmp / "pending"),
+                  mock.patch.object(session_worktree.project_git, "data", lambda *a, **k: {"exists": False}),
+                  mock.patch.object(session_worktree.project_git, "job", self.job)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def job(self, project, cwd, op, *args, **kw):
+        """The checkout as the project: the folder made (the stand-in for what project-git-job does); the undo removes it."""
+        self.jobs.append(op)
+        path = pathlib.Path(args[1])
+        if op == "session-worktree":
+            (path / "src").mkdir(parents=True)
+            return subprocess.CompletedProcess([], 0, json.dumps({"path": str(path), "skipped": []}), "")
+        if op == "session-worktree-undo":
+            shutil.rmtree(path, ignore_errors=True)
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    def settings(self, path):
+        f = runtime_claude.settings_path(path)
+        return json.loads(f.read_text()) if f.is_file() and not f.is_symlink() else None
+
+    def test_the_settings_are_there_when_the_tool_gets_the_path(self):
+        path, _s = self.sw.make(self.ws, "w1", runtime_claude)
+        got = self.settings(path)
+        self.assertIsNotNone(got, "the worktree's settings file, written by the make")
+        self.assertTrue(got["sandbox"]["enabled"])
+        self.assertEqual(got["hooks"], runtime_claude.platform_hooks(), "the platform's hooks, the worktree hand-over too")
+        self.assertIn(str(self.ws / ".agent-memory"), got["permissions"].get("additionalDirectories", []),
+                      "its own .agent-memory as a working directory, as the session start's render gives it")
+        self.assertEqual(self.jobs, ["session-worktree"])
+        self.assertEqual(list((self.tmp / "pending").rglob("*.json")), [], "the make finished: no pending record")
+
+    def test_control_the_checkout_alone_writes_no_settings(self):
+        """The control: what make did before (the checkout as the project, nothing after it) leaves no settings file, so
+        the one above is the render's."""
+        path = runtime_claude.worktree_location(self.ws, "w2")[0]
+        self.job("proj", self.ws, "session-worktree", self.ws, path, "worktree-w2", "{}")
+        self.assertTrue(path.is_dir())
+        self.assertIsNone(self.settings(path))
+
+    def test_a_render_that_fails_takes_the_worktree_back(self):
+        def boom(project, path):
+            raise OSError("disk full")
+        with mock.patch.object(self.sw, "render_settings", boom), self.assertRaises(self.sw.Refused) as cm:
+            self.sw.make(self.ws, "w3", runtime_claude)
+        self.assertIn("disk full", str(cm.exception))
+        self.assertEqual(self.jobs, ["session-worktree", "session-worktree-undo"])
+        self.assertFalse((self.ws / ".claude" / "worktrees" / "w3").exists(), "no worktree without its settings")
+        self.assertEqual(list((self.tmp / "pending").rglob("*.json")), [])
+
+    def test_a_render_that_leaves_no_plain_file_fails_closed(self):
+        """Whatever the render says, the file must be there as a plain file afterwards (a link there isn't one)."""
+        def linked(project, path):
+            f = runtime_claude.settings_path(path)
+            f.parent.mkdir(parents=True)
+            f.symlink_to(self.tmp / "elsewhere.json")
+            return f
+        with mock.patch.object(self.sw, "render_settings", linked), self.assertRaises(self.sw.Refused):
+            self.sw.make(self.ws, "w4", runtime_claude)
+        self.assertEqual(self.jobs, ["session-worktree", "session-worktree-undo"])
+
+    def test_a_project_the_registry_doesnt_know_fails_closed(self):
+        import registry
+        with mock.patch.object(registry, "refresh", lambda: {"projects": {}}), self.assertRaises(self.sw.Refused):
+            self.sw.make(self.ws, "w5", runtime_claude)
+        self.assertEqual(self.jobs, ["session-worktree", "session-worktree-undo"])
 
 
 class Doctor(Base):

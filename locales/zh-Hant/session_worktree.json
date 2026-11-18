@@ -8,5 +8,7 @@
  "removing the worktree as {project} failed ({why})": "以 {project} 的身分移除 worktree 失敗({why})",
  "couldn't look at {project}'s branches ({why})": "看不了 {project} 的分支({why})",
  "couldn't clear what the platform wrote in {path} ({why}); nothing more was removed": "清不掉平台在 {path} 裡寫的東西({why});其他的都沒有移除",
- "couldn't make {path} ({why})": "建不了 {path}({why})"
+ "couldn't make {path} ({why})": "建不了 {path}({why})",
+ "{file} isn't there after it was written": "{file} 寫了之後卻不在",
+ "the worktree's sandbox settings couldn't be written ({why}); it was taken back, so no session starts there without them": "這個 worktree 的沙盒設定寫不進去({why});已經收回,不會有 session 在沒有設定的地方開始"
 }

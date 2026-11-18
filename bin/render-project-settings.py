@@ -28,7 +28,9 @@ Drift detection: the actual file differs from what it should be (a session chang
 edited it by hand) -> print it, exit 1 (platform job failed -> status page), and write it back right away.
 
 Usage: render-project-settings.py [--report] [--only <project>]
-       render-project-settings.py --worktree <folder>   (worktree-memory.sh: a sandboxed project's new worktree)
+       render-project-settings.py --worktree <folder>   (worktree-memory.sh: a sandboxed project's worktree at a session's
+                                                         start; session_worktree.make renders one it makes through
+                                                         render_worktree before the tool gets its path)
 Also an applier (appliers.py): plan()/apply(), used by `bin/hub config plan/apply`.
 """
 from __future__ import annotations
@@ -477,22 +479,34 @@ def apply(index: dict | None = None) -> list:
     return todo
 
 
+def render_worktree(name: str, folder) -> pathlib.Path:
+    """A sandboxed project's settings written into one of its session folders (a worktree), as a plain file the project
+    can't write there itself: what its main checkout gets (compose), with its own .agent-memory as a working directory.
+    Returns the file written; raises when it can't be (session_worktree.make then takes the worktree back: fail closed)."""
+    index = registry.refresh()
+    doc = index["projects"][name]
+    push_folder(name)
+    c = compose(name, doc, index)
+    if not c:
+        raise ValueError(_("{project} has no workspace on this machine", project=name))
+    ws = registry.dirs(doc)["workspace"]
+    # its own .agent-memory as a working directory, notes and STATE.md only (runtime_claude.worktree_memory): the
+    # worktree reaches it through a link, and every write there would ask. Never a folder that is a link
+    write_settings(doc, runtime_claude.worktree_memory(c[2], ws), pathlib.Path(folder))
+    return pathlib.Path(folder) / settings_path(doc).relative_to(ws)
+
+
 def worktree(folder: str) -> int:
     """At a worktree session's start (worktree-memory.sh, before anything runs as the project): the platform's settings
-    for a sandboxed project written into that worktree, as a plain file (the project can't write it there itself)."""
+    for a sandboxed project written into that worktree again. A worktree the platform made (session_worktree.make) has
+    had them since it was made; this covers one made any other way, and settings changed since."""
     import isolation
     import project_git
     found = project_git.project_at(folder)
     if not found or not isolation.sandboxed(found[1]):
         return 0
     try:
-        index = registry.refresh()
-        push_folder(found[0])
-        c = compose(found[0], index["projects"][found[0]], index)
-        ws = registry.dirs(found[1])["workspace"]
-        # its own .agent-memory as a working directory, notes and STATE.md only (runtime_claude.worktree_memory): the
-        # worktree reaches it through a link, and every write there would ask. Never a folder that is a link
-        write_settings(found[1], runtime_claude.worktree_memory(c[2], ws), pathlib.Path(folder))
+        render_worktree(found[0], folder)
     except Exception as e:   # said into the session (worktree-memory.sh prints it): no sandbox settings here
         print(_("⚠️ This worktree's sandbox settings could not be written ({why}); don't run commands in this session, "
                 "ask the owner to look at it", why=e))

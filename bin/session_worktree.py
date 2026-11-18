@@ -13,7 +13,10 @@ done, the worktree fails.
   make(cwd, name, rt) → (path, skipped)   the project the session's folder belongs to (sandboxed only), the worktree at
                                           the tool's place in its workspace (rt.worktree_location), its branch new from
                                           HEAD or the existing one; skipped: tracked paths its sandbox may not write
-                                          (control names), left out of the checkout and marked skip-worktree. A make
+                                          (control names), left out of the checkout and marked skip-worktree. Its
+                                          session settings are written before it returns (render_settings, as the
+                                          platform): one that can't be is taken back, so no session starts in a worktree
+                                          without them, whatever user-level hooks the owner installed. A make
                                           that didn't finish (failed, timed out, or its hook killed) is recorded in the
                                           platform's state until it is undone: the next make of that name undoes it
                                           first, so no worktree or branch it made is left behind
@@ -35,6 +38,7 @@ import json
 import os
 import pathlib
 import re
+import stat
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -164,8 +168,33 @@ def make(cwd, name: str, rt) -> tuple[pathlib.Path, list[str]]:
         rec_file.unlink(missing_ok=True)
         raise Refused(_("making the worktree as {project} failed ({why}); nothing was made as you", project=project,
                         why=(r.stderr.strip()[-300:] or f"exit {r.returncode}")))
+    # its sandbox settings before the tool gets its path, so no session ever starts there without them (the session
+    # start's render is a user-level hook the owner may not have installed, and it goes on when it fails)
+    try:
+        written = render_settings(project, path)
+        st = nofollow.lstat(ws, written.relative_to(ws))
+        if st is None or not stat.S_ISREG(st.st_mode):
+            raise OSError(_("{file} isn't there after it was written", file=written))
+    except Exception as e:
+        _undo(project, ws, rec)
+        rec_file.unlink(missing_ok=True)
+        raise Refused(_("the worktree's sandbox settings couldn't be written ({why}); it was taken back, so no session "
+                        "starts there without them", why=f"{type(e).__name__}: {e}")) from None
     rec_file.unlink(missing_ok=True)
     return path, project_git.strs(got.get("skipped"))
+
+
+def render_settings(project: str, path: pathlib.Path) -> pathlib.Path:
+    """The platform's session settings for the project written into the worktree it just made
+    (render-project-settings.render_worktree: the same file every session folder of a sandboxed project gets). The file
+    written; raises when it can't be."""
+    import importlib.machinery
+    import importlib.util
+    loader = importlib.machinery.SourceFileLoader("render_project_settings_sw",
+                                                  str(hubconf.ROOT / "bin" / "render-project-settings.py"))
+    mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
+    loader.exec_module(mod)
+    return mod.render_worktree(project, path)
 
 
 def drop(cwd, path, rt) -> None:
