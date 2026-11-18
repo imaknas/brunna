@@ -279,9 +279,12 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   nothing to move yet. The recommendation is a neutral display-and-commands layer: glance.v1, plus a new session-scoped
   `brunna surface --json`. A display-only mod in `integrations/claude-code/` is its first adapter. Codex shows nothing
   until its UI is measured, and every agent keeps working without an adapter. Slice 1 removes no hook. The waiter and
-  the worktree hooks are later candidates. A finding to check and fix on its own: per the plugin reference (unmeasured here), a
-  reviewed skill holding `.claude-plugin/` would load as a plugin that runs as the user, and `.claude-plugin` is not a
-  control name that skills sync refuses.
+  the worktree hooks are later candidates. Fixed from its blind review (11-18): skills sync refuses a plugin's
+  `.claude-plugin`/`hooks.json` in a skill, the foreign-control check reports them and the plugin keys of a committed
+  settings file, a sandboxed project's worktree has its settings from the make, and the conformance check
+  `platform-run-plugins` holds that no plugin loads in a `--restricted` platform run. Open, for the owner: leases and
+  the other runs without `--restricted` load the project's skills-folder plugins and the user's own (measured), and no
+  switch turns plugins off without dropping the rules file.
 - **Budgets:** per-project model budgets (today there is one platform-wide daily budget).
 - **Config pipeline:** an applier for `sync-local-setup` (`new-user.md` 1.5).
 - **Rename:** `brunna.v1.schema.json`, and step 4 (writers stop falling back to the old spellings).

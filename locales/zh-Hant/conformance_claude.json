@@ -58,5 +58,11 @@
  "tools_named doesn't read the rule back": "tools_named 讀不回這條規則",
  "the run called `security -i` (a Keychain write) with a stdio server attached": "掛上 stdio server 的執行呼叫了 `security -i`(寫入 Keychain)",
  "another project's push request folder": "別的專案的推送請求資料夾",
- "its own push request folder wasn't writable": "它自己的推送請求資料夾寫不進去"
+ "its own push request folder wasn't writable": "它自己的推送請求資料夾寫不進去",
+ "installing the canary from a marketplace failed (exit {code})": "從 marketplace 安裝金絲雀失敗(exit {code})",
+ "the {kind} run's argv has no --restricted": "{kind} 這種 run 的參數沒有 --restricted",
+ "{kind} {run} run: {why}": "{kind} 的 {run} run:{why}",
+ "tests nothing: {places} didn't load in a {kind} run without --restricted either": "什麼都沒測到:{places} 在沒有 --restricted 的 {kind} run 裡也沒載入",
+ "a platform run ({kind}) loaded these plugins, whose hooks run as you: {places}": "平台的 run({kind})載入了這些 plugin,它們的 hook 以你的身分執行:{places}",
+ "no plugin loaded in either run kind; each loaded without --restricted": "兩種 run 都沒載入任何 plugin;沒有 --restricted 時每個都會載入"
 }

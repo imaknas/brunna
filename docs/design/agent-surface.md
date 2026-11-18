@@ -99,7 +99,7 @@ worktree <what>` first (outside any sandbox), then the rest.
 | W5 | PostToolUse(Bash) (`nudge`) | mail and the reminder | C |
 | W6 | UserPromptSubmit (`prompt`) | mail | C |
 | W7 | Stop (`wait`, in the background) | the waiter, as A16 | C |
-| W8 | SessionStart, a sandboxed project's worktree | `render-project-settings.py --worktree`, then the rest run as the project (`project_git.py run-as`) | G |
+| W8 | SessionStart, a sandboxed project's worktree | `render-project-settings.py --worktree` (again: a worktree the platform made has its settings from the make, `session_worktree.make`, 11-18), then the rest run as the project (`project_git.py run-as`) | G |
 
 ### E. Codex
 
@@ -362,13 +362,16 @@ Can a project influence the user-level mod? It must not. What was found:
    own processes can't write `.claude/skills` (a control path in `runtime_claude.CONTROL`). But `brunna skills sync`
    installs reviewed skills there, and its refusal of "a control name inside a skill" (`skills_sync._control_tops`)
    covers only the names in the adapters' control lists, and `.claude-plugin` is not one. A reviewed skill folder holding
-   `.claude-plugin/plugin.json` and a hooks module would then load as a plugin that runs as the user. **Finding, not
-   fixed here**: measure that a skills-folder plugin needs that manifest, then add `.claude-plugin` to Claude Code's
-   control names, so skills sync refuses it and the foreign-control check reports one. For an unsandboxed project this
-   is no new boundary: it runs as the user already.
+   `.claude-plugin/plugin.json` and a hooks module would then load as a plugin that runs as the user. **Fixed 11-18**:
+   skills sync refuses `.claude-plugin` and `hooks.json` at any depth (`runtime_claude.SKILL_REFUSED`), and the
+   foreign-control check reports either under the skills folders, an installed skill not excused. Measured the same day
+   on 2.1.327: a folder in the project's `.claude/skills` holding both loads, its hooks list and its hooks module alike,
+   in a session of a trusted folder (`claude -p` included); which of the two names is enough wasn't separated, so both
+   stay refused. For an unsandboxed project this is no new boundary: it runs as the user already.
 2. **Project settings.** A project's `.claude/settings.json` can name `enabledPlugins` and `extraKnownMarketplaces`.
    For a sandboxed project the file is a control path its processes can't write, and the foreign-control check reports
-   one that appears. Whether that report treats the plugin keys specially is not checked.
+   one that appears. Since 11-18 that report names `enabledPlugins`, `extraKnownMarketplaces` and `env` when set
+   (`runtime_claude.COMMITTED_KEYS`), as it names hooks.
 3. **Other plugins in the same chain** can hook `process.run` (rewrite or deny the mod's call), `state.set` on the mod's
    keys, `ui.press` with `{plugin: '*'}`, and `AbovePromptList` (hide the band). At worst they hide or falsify the
    display, or fill a prompt the person sees before sending. Rules 2, 5 and 6 keep it at that. A plugin that can load
@@ -376,12 +379,29 @@ Can a project influence the user-level mod? It must not. What was found:
 4. **Environment.** `$.process.run` children get "the host process's own environment" plus what the call sets. Whether a
    project's settings `env` (a `PATH`) reaches the host process is unmeasured, hence rule 3's fixed place first.
 
-**Platform runs.** Whether a user-scope plugin loads in the platform's own `claude -p --restricted` runs is unmeasured
-(`--restricted` reads no settings files, but installed plugins live elsewhere). The mod does nothing there (rule 4), but
-platform runs are a G item (P1: a pinned tool list, no hooks). Their guarantee must not rest on a well-behaved mod. A
-conformance check (`conformance_claude.py`) belongs with it: a canary plugin installed at user scope in the check's
-throwaway home must not run in a platform run. If it does, the run turns hooks modules off (the reference names
-`--safe-mode` and a managed `disableAllHooks`; measure which applies to `-p`).
+**Platform runs.** Measured 11-18 on 2.1.327, and checked for every new version since by the conformance check
+`platform-run-plugins` (`conformance_claude.py`): a canary plugin (a hooks list's command and a hooks module, each
+writing a marker) in the project's `.claude/skills/<x>`, in the config dir's `skills/<x>`, and installed from a folder
+marketplace at user scope loads in none of the platform's `--restricted` runs, of either kind (a completion on the
+platform's config dir; a restricted agent point on the user's `~/.claude`, the world's home in the check). The control,
+the same run without `--restricted`, loads all six (the project's only once its folder is trusted, which a person's
+folders are). `--plugin-dir` loads under `--restricted` too; the platform never passes it. With `CLAUDE_CONFIG_DIR`
+naming a folder, `~/.claude/skills` isn't read. So P1 holds without anything turned off; the mod does nothing there
+either (rule 4).
+
+**Finding, not fixed (11-18): runs without `--restricted` load them.** A lease's runs (`lease-session`, `lease-work`,
+`lease-handover`: `--settings` and `--strict-mcp-config`, no `--restricted`) start in the project's workspace on the
+user's `~/.claude`. One run of the lease's shape was measured (its flags by hand, a throwaway config dir, plain `-p`):
+a skills-folder plugin of a trusted project ran its hooks list and its hooks module, as the user, outside the project's
+sandbox. The user's own plugins (skills folders, marketplace installs) load in such a run too (the control runs above),
+as the vercel plugin's SessionEnd hook already showed in a platform run (`runtime_claude._env`). The other points
+without it (`librarian-index`, `agent-job`, `login-check`) follow from their flags, not measured one by one; their
+folders are the platform's or a project the owner's settings already run. P3's guarantee (read-only tools) doesn't
+cover a plugin's hooks. No switch that turns plugins off and keeps the project's rules file was found (from
+`claude --help` and the binary's environment names, not run): `--restricted`, `--safe-mode` and `--bare` (which skips
+settings' and installed plugins' hooks) all drop CLAUDE.md too, and no environment variable turns plugins off. For the
+owner: a lease of a sandboxed project under `--restricted` (its rules file passed by the runner instead), or leases
+refused there while a skills folder holds a plugin (the foreign-control check already reports one).
 
 ### Open questions for the owner
 

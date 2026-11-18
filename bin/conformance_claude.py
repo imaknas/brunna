@@ -909,6 +909,139 @@ def session_write(world) -> Outcome:
     return Outcome("pass", "")
 
 
+# ---------- plugins in the platform's own runs (docs/design/agent-surface.md, "Platform runs"; review S6) ----------
+# Claude Code loads a plugin from a skills folder (the project's .claude/skills/<x>, the config dir's skills/<x>) and the
+# ones installed from a marketplace, and their hooks run as the user, outside every sandbox. Measured 11-18 on 2.1.327: in
+# a plain `claude -p` all three load (the project's only once its folder is trusted), both a hooks list and a hooks
+# module; with --restricted none does; --plugin-dir loads either way (the platform never passes it); a config dir's
+# skills are read from it alone (~/.claude/skills isn't, when CLAUDE_CONFIG_DIR names another).
+PLUGIN_PLACES = ("project-skills", "user-skills", "marketplace")
+
+
+def _canary_plugin(dest: pathlib.Path, name: str, marker: pathlib.Path, module: bool) -> None:
+    """A plugin that writes marker when a session starts: through a hooks list's command, or a hooks module's
+    session.start hook (its two ways to run code)."""
+    shutil.rmtree(dest, ignore_errors=True)
+    (dest / ".claude-plugin").mkdir(parents=True)
+    (dest / "hooks").mkdir()
+    (dest / ".claude-plugin" / "plugin.json").write_text(json.dumps({"name": name, "version": "0.1.0",
+                                                                      "description": "conformance canary"}))
+    if module:
+        (dest / "hooks" / "hooks.json").write_text(json.dumps({"modules": ["./register.ts"]}))
+        (dest / "hooks" / "register.ts").write_text(
+            "import type { Register } from 'claude-code'\nexport const register: Register = (on) => {\n"
+            f"  on('session.start', async ($, e, next) => {{ await $.fs.write({json.dumps(str(marker))}, 'ran'); "
+            "return next(e) })\n}\n")
+    else:
+        (dest / "hooks" / "hooks.json").write_text(json.dumps({"hooks": {"SessionStart": [{"hooks": [
+            {"type": "command", "command": f"echo ran >> '{marker}'"}]}]}}))
+
+
+def _plant_plugins(project: pathlib.Path, config: pathlib.Path, trust: pathlib.Path, marks: pathlib.Path, kind: str,
+                   env: dict) -> tuple[dict[str, pathlib.Path], str | None]:
+    """Canaries of both forms in each PLUGIN_PLACES for one run kind (config: its config dir; trust: the global config file
+    that records the project folder as trusted, as a person's would). ({place/form: marker}, why it couldn't be done)."""
+    marks.mkdir(parents=True, exist_ok=True)
+    config.mkdir(parents=True, exist_ok=True)
+    try:
+        doc = json.loads(trust.read_text()) if trust.is_file() else {}
+    except ValueError:
+        doc = {}
+    doc.setdefault("projects", {})[str(project.resolve())] = {"hasTrustDialogAccepted": True}
+    trust.write_text(json.dumps(doc))
+    out = {}
+    for module in (False, True):
+        form = "module" if module else "hooks"
+        for place in PLUGIN_PLACES:
+            name = f"canary-{kind}-{place}-{form}"
+            marker = marks / name
+            marker.unlink(missing_ok=True)
+            out[f"{place}/{form}"] = marker
+            if place == "project-skills":
+                _canary_plugin(project / ".claude" / "skills" / name, name, marker, module)
+            elif place == "user-skills":
+                _canary_plugin(config / "skills" / name, name, marker, module)
+            else:
+                market = marks.parent / f"market-{name}"
+                _canary_plugin(market / "plugin", name, marker, module)
+                (market / ".claude-plugin").mkdir(exist_ok=True)
+                (market / ".claude-plugin" / "marketplace.json").write_text(json.dumps(
+                    {"name": f"m-{name}", "owner": {"name": "conformance"},
+                     "plugins": [{"name": name, "source": "./plugin", "description": "conformance canary"}]}))
+                for args in (["plugin", "marketplace", "add", str(market)], ["plugin", "install", f"{name}@m-{name}"]):
+                    r = _claude(args, cwd=project, env=env, timeout=180)
+                    if r.returncode != 0:
+                        return out, _("installing the canary from a marketplace failed (exit {code})", code=r.returncode)
+    return out, None
+
+
+def _ran(markers: dict[str, pathlib.Path]) -> list[str]:
+    return sorted(k for k, m in markers.items() if m.exists())
+
+
+def platform_run_plugins(world) -> Outcome:
+    """No plugin of the folder's or the user's loads in a platform run: canaries in the project's skills folder, the
+    config dir's skills folder and installed from a marketplace (and for the own kind the home's ~/.claude/skills), for
+    both run kinds with their own argv (a completion:
+    the platform's config dir; a restricted agent point: the user's, as `shared`). The control is the same run without
+    --restricted, which must load every one (else that placement tests nothing). A model call each."""
+    import llm
+    from runtime_ports import Task
+    exe = rc.binary()
+    project, tmp = pathlib.Path(world.project), pathlib.Path(world.tmp)
+    shared_env = {k: v for k, v in os.environ.items() if k != "CLAUDE_CONFIG_DIR"}
+    home = pathlib.Path(shared_env.get("HOME") or world.home)
+    spec = llm.points()["points"]["mailbox-propose"]   # an agent point with restricted: true
+    kinds = (
+        ("own", dict(os.environ), pathlib.Path(world.tool), pathlib.Path(world.tool) / ".claude.json",
+         _completion_argv()),
+        ("shared", shared_env, home / ".claude", home / ".claude.json",
+         rc._command(Task(point="mailbox-propose", prompt=ASK, spec=spec, cwd=str(project), model=FAST,
+                          env=dict(shared_env)), exe)[1:]),
+    )
+    fails, errors = [], []
+    for kind, env, config, trust, argv in kinds:
+        if "--restricted" not in argv:
+            fails.append(_("the {kind} run's argv has no --restricted", kind=kind))
+            continue
+        markers, why = _plant_plugins(project, config, trust, tmp / f"plugins-{kind}" / "marks", kind, env)
+        if why:
+            errors.append(f"{kind}: {why}")
+            continue
+        # the own kind's config dir isn't the home's: canaries in the home's ~/.claude/skills too, which no run of that
+        # kind reads even without --restricted (measured 11-18), so they have no control and count against the guarded
+        # run only
+        extra = {}
+        if kind == "own":
+            for module in (False, True):
+                form = "module" if module else "hooks"
+                name = f"canary-own-home-skills-{form}"
+                extra[f"home-skills/{form}"] = tmp / f"plugins-{kind}" / "marks" / name
+                _canary_plugin(home / ".claude" / "skills" / name, name, extra[f"home-skills/{form}"], module)
+        loose = [a for a in argv if a != "--restricted"]
+        for name, args in (("control", loose), ("guarded", argv)):
+            for m in [*markers.values(), *extra.values()]:
+                m.unlink(missing_ok=True)
+            r = _claude(args, cwd=project, stdin=ASK, env=env, timeout=RUN_S)
+            got = _result(r) if "stream-json" not in args else next(
+                (o for o in reversed(_events(r)) if o.get("type") == "result"), None)
+            if got is None or got.get("is_error"):
+                errors.append(_("{kind} {run} run: {why}", kind=kind, run=name, why=_fail_reason(r, got)))
+                break
+            ran = _ran(markers)
+            if name == "control" and (missed := sorted(set(markers) - set(ran))):
+                errors.append(_("tests nothing: {places} didn't load in a {kind} run without --restricted either",
+                                places=", ".join(missed), kind=kind))
+                break
+            if name == "guarded" and (ran := _ran({**markers, **extra})):
+                fails.append(_("a platform run ({kind}) loaded these plugins, whose hooks run as you: {places}",
+                               kind=kind, places=", ".join(ran)))
+        shutil.rmtree(project / ".claude" / "skills", ignore_errors=True)
+        for d in extra:
+            shutil.rmtree(home / ".claude" / "skills" / f"canary-own-{d.replace('/', '-')}", ignore_errors=True)
+    return _verdict(fails, errors, _("no plugin loaded in either run kind; each loaded without --restricted"))
+
+
 V_M6 = "a check through V-M6's pty driver (an interactive throwaway session; measured 11-09, not built as a check yet)"
 CHECKS = [
     Check("distribution-integrity", "distribution", "function", distribution, timeout_s=120),
@@ -917,6 +1050,8 @@ CHECKS = [
     Check("completion-schemas", "completion", "function", completion_schemas, timeout_s=3000),
     Check("completion-no-tools", "completion", "safety", completion_no_tools),
     Check("confine-folder-git", "confine", "safety", confine_folder_git, timeout_s=900),
+    # canaries in three places x two forms, per run kind: 2 marketplace installs (2 commands each) + control + guarded
+    Check("platform-run-plugins", "confine", "safety", platform_run_plugins, timeout_s=2 * (4 * 180 + 2 * RUN_S) + 120),
     # each run up to RUN_S, asked twice when it shows nothing: confine-sandbox 2 canaries x (guarded + control),
     # control 9 canaries + 9 of other agents' control folders (2 each at the top, 1 each nested, 1 in a worktree, 1
     # staged and moved in, 1 long-s spelling), x 2, + the residual's 2

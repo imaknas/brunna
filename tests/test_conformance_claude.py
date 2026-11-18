@@ -32,6 +32,37 @@ if a[:2] == ["mcp", "list"]:
 if a[:2] == ["mcp", "add"]:
     f = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "servers"
     f.write_text((f.read_text() if f.exists() else "") + a[4] + "\n"); sys.exit(0)
+cfg = pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or pathlib.Path(os.environ["HOME"]) / ".claude")
+if a[:1] == ["plugin"]:   # a folder marketplace added, a plugin of it installed: recorded in the config dir
+    cfg.mkdir(parents=True, exist_ok=True)
+    f = cfg / "stand-in-plugins"
+    lines = f.read_text().splitlines() if f.exists() else []
+    if a[1:3] == ["marketplace", "add"]:
+        lines.append("M " + a[3])
+    elif a[1:2] == ["install"]:
+        name, market = a[2].split("@")
+        for m in [x[2:] for x in lines if x.startswith("M ")]:
+            doc = json.loads((pathlib.Path(m) / ".claude-plugin" / "marketplace.json").read_text())
+            if doc["name"] == market:
+                lines += ["P " + str(pathlib.Path(m) / p["source"]) for p in doc["plugins"] if p["name"] == name]
+    f.write_text("".join(x + "\n" for x in lines))
+    sys.exit(0)
+# plugins (the skills folders', the installed ones) run their session-start code, as the tool does without --restricted
+if mode != "plugins-none" and ("--restricted" not in a or mode == "plugins-leak"):
+    import re
+    f = cfg / "stand-in-plugins"
+    dirs = [*pathlib.Path.cwd().glob(".claude/skills/*"), *cfg.glob("skills/*"),
+            *[pathlib.Path(x[2:]) for x in (f.read_text().splitlines() if f.exists() else []) if x.startswith("P ")]]
+    for d in dirs:
+        h = d / "hooks" / "hooks.json"
+        if not (d / ".claude-plugin").is_dir() or not h.is_file():
+            continue
+        doc = json.loads(h.read_text())
+        for e in (doc.get("hooks") or {}).get("SessionStart") or []:
+            for x in e["hooks"]:
+                subprocess.run(x["command"], shell=True)
+        for mod in doc.get("modules") or []:
+            pathlib.Path(re.search(r'write\(("[^"]+")', (d / "hooks" / mod).read_text())[1].strip('"')).write_text("ran")
 prompt = sys.stdin.read()
 token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
 if "automated test of a sandbox" in prompt:   # control / confine-sandbox: one canary write per run
@@ -120,7 +151,7 @@ sid = "s-1"
 result = {"type": "result", "subtype": "success", "is_error": bad, "result": "Invalid API key · Please run /login" if bad
           else answer, "usage": {}, "permission_denials": [], "session_id": sid, "num_turns": 1, "total_cost_usd": 0}
 if "--no-session-persistence" not in a and not bad:
-    d = pathlib.Path(os.environ["CLAUDE_CONFIG_DIR"]) / "projects" / "-w"
+    d = cfg / "projects" / "-w"
     d.mkdir(parents=True, exist_ok=True)
     line = {"type": "user", "uuid": "u1", "sessionId": sid, "timestamp": "2026-11-14T00:00:00Z", "cwd": str(pathlib.Path.cwd()),
             "version": "2.1.400", "message": {"role": "user", "content": "go"}}
@@ -286,6 +317,21 @@ class Through(unittest.TestCase):
         self.assertEqual(loose["permissions"]["deny"], ["Edit(//w/p/**/.mcp.json)", "Bash(rm *)"])
         self.assertEqual(loose["sandbox"]["filesystem"], {"denyWrite": [], "denyRead": ["/w/other"]})
         self.assertTrue(conformance_claude._covered(settings, pathlib.Path("/w/p/.MCP.json")), "case-insensitive")
+
+    def test_platform_runs_load_no_plugin(self):
+        """platform-run-plugins (the agent-surface review, S6): a tool that runs plugins only without --restricted
+        passes; one that runs them in a platform run too fails; one that never runs them tests nothing (an error, never
+        a pass). Every canary of both run kinds is tried, and nothing is installed outside the world."""
+        got, world = self.child("platform-run-plugins", "good")
+        self.assertEqual(got["state"], "pass", got)
+        self.assertTrue((world.tool / "stand-in-plugins").is_file(), "the own kind's marketplace install, in its config dir")
+        self.assertTrue((world.home / ".claude" / "stand-in-plugins").is_file(), "the shared kind's, in the world's home")
+        self.assertFalse((world.project / ".claude" / "skills").exists(), "the project's canaries gone again")
+        got, _w = self.child("platform-run-plugins", "plugins-leak")
+        self.assertEqual(got["state"], "fail", got)
+        self.assertIn("project-skills/hooks", got["reason"])
+        got, _w = self.child("platform-run-plugins", "plugins-none")
+        self.assertEqual(got["state"], "error", got)
 
     def test_no_token_is_a_refusal_not_a_fail(self):
         with mock.patch.object(runtime_claude, "_token_file", lambda: self.tmp / "none"), self.assertRaises(RuntimeError):
