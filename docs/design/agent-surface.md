@@ -408,12 +408,15 @@ whole (a link to a folder, unreadable, over the entry cap): fail closed. The rea
 repository's top (a run in a subfolder) and, in a linked worktree, the main checkout (read from the `.git` pointers as
 files, `gitdirs`, no git run). Which of the last two Claude Code reads for a worktree or a subfolder, and whether it
 reads skills folders of the folders above the repository or nested below the run's folder, is unmeasured: the first two
-are looked at, the rest not (the folders above are the user's). `claude mcp list`, which an `agent-job` with connectors
-runs in the job's folder before its run (no `--restricted`, and it starts a plugin's tool servers), is refused the same
-way. The lease runner asks the runtime's optional `folder_refusal` before it opens a lease, resumes one for a message or
+are looked at, the rest not (the folders above are the user's). **Open:** a nested `<sub>/.claude/skills` is neither looked
+at here nor a control path (`CONTROL` names only the top one), so a sandboxed project could write a plugin there; whether
+Claude Code loads a nested skills folder's plugin is to measure. `claude mcp list`, which a job with connectors runs in
+the job's folder before its run (no `--restricted`, and it starts a plugin's tool servers), is refused the same way,
+whatever the point: so `agent-job-confined` and `agent-job-event` with connectors, whose own runs are `--restricted`,
+are refused there too. The lease runner asks the runtime's optional `folder_refusal` before it opens a lease, resumes one for a message or
 switches its mode, and answers `409 folder_refused` with the reason (lease-runner.v2: a new error code), so the assistant
 says why it didn't open; a lease's handover resume is refused by the adapter, and the runner's minimal handover follows.
-A `--restricted` run isn't looked at: it loads no plugin (`platform-run-plugins`).
+A `--restricted` run itself isn't looked at: it loads no plugin (`platform-run-plugins`).
 
 The points without `--restricted`, from `runtime_claude._flags` (neither `settings: platform` nor `restricted: true`;
 completions always carry it): `librarian-index`, `agent-job`, `login-check`, `lease-session`, `lease-work`,
