@@ -275,5 +275,79 @@ class PlatformWritesTheSettings(Base):
         self.assertEqual(sum(1 for d in drift if "settings.json" in d or ".mcp.json" in d), 2, drift)
 
 
+class ForeignPlugins(unittest.TestCase):
+    """What a project's own files make its Claude Code sessions load as plugins (the agent-surface review, S7): a plugin
+    in a skills folder (SKILL_REFUSED, any depth, any case), and the committed settings keys that turn plugins on, add a
+    marketplace or set the environment. Each case beside its control: the same folder without it reports nothing."""
+
+    def setUp(self):
+        self.ws = pathlib.Path(tempfile.mkdtemp()).resolve()
+        self.addCleanup(shutil.rmtree, self.ws, ignore_errors=True)
+        (self.ws / ".claude" / "skills" / "foo").mkdir(parents=True)
+        (self.ws / ".claude" / "skills" / "foo" / "SKILL.md").write_text("plain\n")
+
+    def found(self, owned=None):
+        return runtime_claude.foreign_controls(self.ws, owned)
+
+    def test_the_control_reports_nothing(self):
+        (self.ws / ".claude" / "skills" / "foo" / "hooks").mkdir()
+        (self.ws / ".claude" / "skills" / "foo" / "hooks" / "notes.md").write_text("plain\n")
+        (self.ws / ".claude" / "settings.json").write_text(json.dumps({"permissions": {"allow": ["Read"]},
+                                                                        "enabledPlugins": {}, "env": {}}))
+        self.assertEqual(self.found(), [], "plain skills, and empty plugin keys, are nothing")
+
+    def test_a_plugin_in_a_skills_folder_is_reported(self):
+        for rel in (".claude-plugin/plugin.json", "hooks/hooks.json", "deep/er/.Claude-Plugin/plugin.json",
+                    "HOOKS.JSON"):
+            with self.subTest(rel=rel):
+                f = self.ws / ".claude" / "skills" / "foo" / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text("{}")
+                got = self.found()
+                marker = pathlib.PurePosixPath(rel).parts[-2] if rel.endswith("plugin.json") else rel.split("/")[-1]
+                self.assertEqual(len(got), 1, got)
+                self.assertIn(marker, got[0])
+                shutil.rmtree(self.ws / ".claude" / "skills" / "foo")
+                (self.ws / ".claude" / "skills" / "foo").mkdir()
+                self.assertEqual(self.found(), [], "control: the same folder without it")
+
+    def test_an_installed_skill_doesnt_excuse_a_plugin(self):
+        """A skill skills sync installed is the platform's while exactly as installed, for its frontmatter hooks; a plugin
+        manifest in it is reported anyway (one installed before sync refused them could hold one)."""
+        (self.ws / ".claude" / "skills" / "foo" / ".claude-plugin").mkdir()
+        (self.ws / ".claude" / "skills" / "foo" / ".claude-plugin" / "plugin.json").write_text("{}")
+        self.assertEqual(len(self.found(owned=lambda rel: True)), 1)
+
+    def test_a_link_of_the_name_counts_and_a_linked_folder_is_said(self):
+        target = self.ws / "elsewhere"
+        (target / ".claude-plugin").mkdir(parents=True)
+        (self.ws / ".claude" / "skills" / "foo" / ".claude-plugin").symlink_to(target / ".claude-plugin")
+        self.assertEqual(len(self.found()), 1, "a link of the name: what it points to is what loads")
+        (self.ws / ".claude" / "skills" / "foo" / ".claude-plugin").unlink()
+        (self.ws / ".claude" / "skills" / "bar").symlink_to(target)
+        got = self.found()
+        self.assertEqual(len(got), 1, got)
+        self.assertIn(".claude/skills/bar", got[0], "a linked skill folder is said, never entered")
+        (self.ws / ".claude" / "skills" / "bar").unlink()
+        (self.ws / ".claude" / "skills" / "baz").symlink_to(target / "nothing-here")
+        self.assertEqual(self.found(), [], "control: a link to no folder is nothing to look through")
+        shutil.rmtree(self.ws / ".claude" / "skills")
+        (self.ws / ".claude" / "skills").symlink_to(target)
+        got = self.found()
+        self.assertEqual(len(got), 1, got)
+        self.assertIn(".claude/skills", got[0], "a skills folder that is a link is said, never walked")
+
+    def test_the_settings_keys_are_reported(self):
+        for key, value in (("enabledPlugins", {"x@y": True}), ("extraKnownMarketplaces", {"y": {"source": {}}}),
+                           ("env", {"PATH": "/tmp"})):
+            with self.subTest(key=key):
+                (self.ws / ".claude" / "settings.json").write_text(json.dumps({key: value}))
+                got = self.found()
+                self.assertEqual(len(got), 1, got)
+                self.assertIn(key, got[0])
+                (self.ws / ".claude" / "settings.json").write_text(json.dumps({"permissions": {}}))
+                self.assertEqual(self.found(), [], "control")
+
+
 if __name__ == "__main__":
     unittest.main()

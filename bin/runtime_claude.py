@@ -974,6 +974,9 @@ def _env(task, own: bool | None = None, entry=None, stub: bool | None = None) ->
     and the refusing `security` by run_kind. nvm's default-version bin after it: claude itself is called by its full
     path, but plugin hooks (e.g. vercel's SessionEnd `node …`) find node through PATH; under the scheduler PATH has no
     nvm and Homebrew's node is gone too (2026-10-24), so the librarian printed node: command not found every time.
+    (A --restricted run loads no plugin, measured 11-18 and checked per version by conformance_claude's
+    platform-run-plugins; the points without it, the librarian's index point and the leases among them, still load the
+    user's.)
     In a conformance check (check_binary) the check's world already set the config dir, the stub and the pin
     (conformance_claude.enter): only the binary's folder goes first. entry: the copy the run resolved (_run_copy), else
     resolved here; stub: the refusing `security` whatever the row (a call that needs no login). Raises NoCheckedCopy with no checked copy, and ValueError when a token run's refusing `security` or
@@ -2172,6 +2175,11 @@ def foreign_controls(workspace, owned=None) -> list[str]:
         doc = json.loads(raw) if raw else {}
         if isinstance(doc, dict) and doc.get("hooks"):
             out.append(_("{file} declares hooks", file=".claude/settings.json"))
+        # keys that make its sessions load plugins (a marketplace's, as the user, outside every sandbox) or change their
+        # environment (the agent-surface review, S7)
+        for key in COMMITTED_KEYS:
+            if isinstance(doc, dict) and doc.get(key):
+                out.append(_("{file} sets {key}", file=".claude/settings.json", key=key))
     except (OSError, ValueError) as e:
         out.append(_("{file} can't be read as a plain file ({why})", file=".claude/settings.json", why=e))
     if os.path.lexists(ws / ".mcp.json"):
@@ -2183,7 +2191,56 @@ def foreign_controls(workspace, owned=None) -> list[str]:
                 continue
             if not f.is_symlink() and "hooks" in frontmatter_keys(f.read_text(errors="replace")[:FRONTMATTER_MAX]):
                 out.append(_("{file} declares hooks", file=str(rel)))
+    # a plugin in a skills folder (SKILL_REFUSED, at any depth, any case): its sessions load it as code that runs as the
+    # user (measured 11-18 on 2.1.327: a project's .claude/skills/<x> plugin's hooks ran in a session of a trusted
+    # folder). Never excused as an installed skill: skills sync refuses these names, and one installed before it did
+    # could hold one
+    found, unwalked = plugin_markers(ws)
+    out += [_("{file} is a plugin's manifest in a skills folder: its sessions would load it as code that runs as you",
+              file=rel) for rel in found] + unwalked
     return out
+
+
+# What a project's committed .claude/settings.json may set that the owner must see: plugins it turns on or marketplaces
+# it adds (both load a plugin's hooks, which run as the user), and env (what every session and hook there starts with)
+COMMITTED_KEYS = ("enabledPlugins", "extraKnownMarketplaces", "env")
+PLUGIN_WALK_MAX = 20000   # entries looked at in the skills folders at most
+
+
+def plugin_markers(workspace) -> tuple[list[str], list[str]]:
+    """(every SKILL_REFUSED name under the folder's skills folders (SKILL_DIRS), in any case, as relative paths, sorted;
+    what couldn't be looked through, said). Walked without following a link: a link of the name counts too (what it
+    points to is what loads), and a link to a folder on the way (a skills folder or a skill that is one) is said, never
+    entered: what it holds loads all the same."""
+    import nofollow
+    import stat
+    ws, refused = pathlib.Path(workspace), {n.casefold() for n in SKILL_REFUSED}
+    found, unwalked, seen = [], [], 0
+    todo = [pathlib.PurePosixPath(d) for d in SKILL_DIRS]
+    while todo:
+        rel = todo.pop()
+        try:
+            st = nofollow.lstat(ws, rel)
+            if st is None:
+                continue
+            if stat.S_ISLNK(st.st_mode):
+                if os.path.isdir(ws / rel):
+                    unwalked.append(_("{folder} is a link to a folder, so it isn't looked through", folder=str(rel)))
+                continue
+            names = nofollow.entries(ws, rel) if stat.S_ISDIR(st.st_mode) else None
+        except OSError as e:
+            unwalked.append(_("{folder} can't be looked through ({why})", folder=str(rel), why=e))
+            continue
+        for name in sorted(names or []):
+            seen += 1
+            if seen > PLUGIN_WALK_MAX:
+                unwalked.append(_("{folder} has too many entries to look through", folder=str(rel)))
+                return sorted(found), unwalked
+            if name.casefold() in refused:
+                found.append(str(rel / name))
+            else:
+                todo.append(rel / name)
+    return sorted(found), sorted(unwalked)
 
 
 # What a skill's or agent's frontmatter may declare that the owner must see first: hooks (its sessions run them,
@@ -2217,8 +2274,9 @@ def frontmatter_keys(text: str) -> set[str]:
 # docs/design/skills-sync.md)
 SKILL_DIRS = (".claude/skills",)
 # Claude Code loads a plugin from a skills folder too ("a plugin auto-loaded from a skills folder", its plugin
-# reference), whose hooks run as the user outside every sandbox; the exact trigger is unmeasured, so both a manifest
-# folder and a hooks list count (11-18, the agent-surface inventory)
+# reference), whose hooks run as the user outside every sandbox. Measured 11-18 on 2.1.327: a folder holding both loads in
+# a session of a trusted folder, `claude -p` included, and in no --restricted run (conformance_claude's
+# platform-run-plugins); which one alone is enough wasn't separated, so both count (the agent-surface inventory)
 SKILL_REFUSED = (".claude-plugin", "hooks.json")
 
 
