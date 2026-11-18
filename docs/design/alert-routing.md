@@ -80,4 +80,10 @@ its recovery to the assistant, the letter taken back). A problem the owner was t
 owner's. Every step is in `alerts-log.jsonl` (`letter`, `letter-update`, `letter-resolved`, `open`, `reminder`,
 `resolved`).
 
+After its cold review: a list that keeps changing (a reason carrying a path or an error tail) is escalated a day on
+as well; a take-back that fails is tried again until it goes or the letter turns out closed already; the letter id is
+ASCII only (hubbus's id pattern). Left as is: a letter sent from a process inside an agent session (an owner typing
+`schedulectl run` in a brunna session) carries that session as its sender's, so that session isn't told it; clearing
+it would name one tool's variable in the core.
+
 Separate: the login check's two sources sending the same problem twice (`check-claude-login` ids).

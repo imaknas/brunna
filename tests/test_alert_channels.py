@@ -492,7 +492,7 @@ class Routing(unittest.TestCase):
         patches = [mock.patch.object(alert, "SENT", tmp / "sent.json"), mock.patch.object(alert, "FAILED", tmp / "f.json"),
                    mock.patch.object(alert, "LOG", tmp / "log.jsonl"), mock.patch.object(alert, "_held", lambda: False),
                    mock.patch.object(alert, "configured", lambda: ["discord", "assistant"]),
-                   mock.patch.object(alert, "_hubbus", lambda *a: self.letters.append(a) or self.letter_ok),
+                   mock.patch.object(alert, "_hubbus", self.hubbus),
                    mock.patch.object(alert, "send", lambda t, notice=None, plain=True: self.sent.append((t, notice["state"], plain)) or True),
                    mock.patch.object(alert.hubconf, "projects", lambda: {"garden": {}, "brunna": {"type": "platform"}}),
                    mock.patch.object(alert.hubconf, "hub_project", lambda: "brunna")]
@@ -500,8 +500,44 @@ class Routing(unittest.TestCase):
             pt.start()
             self.addCleanup(pt.stop)
 
+    def hubbus(self, *a, out=None):
+        self.letters.append(a)
+        ok = self.letter_ok(a) if callable(self.letter_ok) else self.letter_ok
+        if out is not None and not ok:
+            out.append(self.refusal)
+        return ok
+
+    refusal = "hubbus: x is not reachable"
+
     def once(self, key, problems, ids=None):
         self.a.once(key, problems, "fine", ids=ids)
+
+    def age(self, key):
+        rec = json.loads(self.a.SENT.read_text())
+        rec[key]["opened"] = "2020-01-01T00:00:00"
+        self.a.SENT.write_text(json.dumps(rec))
+
+    def test_a_list_that_keeps_changing_still_reaches_the_owner_after_a_day(self):
+        k = "completion-tools:claude:x"
+        self.once(k, ["why 1"])
+        self.once(k, ["why 2"])
+        self.assertEqual(self.sent, [])
+        self.age(k)
+        self.once(k, ["why 3"])
+        self.assertEqual([s[1] for s in self.sent], ["open"])
+
+    def test_a_take_back_that_fails_is_tried_again_one_already_closed_is_done(self):
+        k = "git-fence"
+        self.once(k, ["x"])
+        self.letter_ok = lambda a: a[0] != "done"
+        self.once(k, [])
+        self.once(k, [])
+        self.assertEqual([a[0] for a in self.letters], ["send", "done", "done"])
+        self.refusal = "hubbus: x is " + self.a.ALREADY_CLOSED
+        self.once(k, [])
+        self.once(k, [])   # settled: nothing more
+        self.assertEqual([a[0] for a in self.letters], ["send", "done", "done", "done"])
+        self.assertEqual(self.sent, [])
 
     def test_a_projects_job_goes_to_the_project_then_back_when_fixed(self):
         k = "scheduler-job:garden/nightly"
@@ -529,9 +565,7 @@ class Routing(unittest.TestCase):
     def test_a_day_unsettled_reaches_the_owner_once_then_closes_both(self):
         k = "runtime-held-claude"
         self.once(k, ["a"])
-        rec = json.loads(self.a.SENT.read_text())
-        rec[k]["opened"] = "2020-01-01T00:00:00"
-        self.a.SENT.write_text(json.dumps(rec))
+        self.age(k)
         self.once(k, ["a"])
         self.assertEqual(len(self.sent), 1)
         self.assertIn("brunna", self.sent[0][0])

@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import smtplib
 import subprocess
 import sys
@@ -287,15 +288,23 @@ def route(key: str) -> str:
     return "owner"
 
 
-def _hubbus(*args: str) -> bool:
-    """One mailbox call as the platform (from the hub's folder). A test never reaches the real bus."""
+ALREADY_CLOSED = "already closed"   # hubbus's refusal to take back a letter its recipient closed (run in English)
+
+
+def _hubbus(*args: str, out: list[str] | None = None) -> bool:
+    """One mailbox call as the platform (from the hub's folder, in English so a refusal can be read). A test never
+    reaches the real bus."""
     if _reaches_out(subprocess.run):
         return False
+    env = dict(os.environ)
+    names.env_set(env, "LANG_UI", "en")
     try:
         r = subprocess.run([sys.executable, str(hubconf.ROOT / "bin" / "hubbus"), *args], cwd=hubconf.ROOT,
-                           capture_output=True, text=True, timeout=60)
+                           capture_output=True, text=True, timeout=60, env=env)
     except (OSError, subprocess.SubprocessError):
         return False
+    if out is not None:
+        out.append(r.stdout + r.stderr)
     return r.returncode == 0
 
 
@@ -306,9 +315,13 @@ def _letter_text(to: str, problems: list[str]) -> str:
                 "the owner."))
 
 
-def _withdraw(letter: str | None) -> None:
-    if letter:
-        _hubbus("done", letter, "--withdraw", "--note", _("fixed: the platform no longer sees the problem"))
+def _withdraw(letter: str | None) -> bool:
+    """Take the letter back; True also when it is closed already (its recipient handled it: nothing to take back)."""
+    if not letter:
+        return True
+    out: list[str] = []
+    ok = _hubbus("done", letter, "--withdraw", "--note", _("fixed: the platform no longer sees the problem"), out=out)
+    return ok or ALREADY_CLOSED in "".join(out)
 
 
 def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last: dict | None, sent: dict,
@@ -327,23 +340,27 @@ def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last:
         return not (opened and now - datetime.datetime.fromisoformat(opened) >= ESCALATE)
     record = {"problems": sorted(problems), **({"ids": ident} if ids is not None else {}),
               "at": now.isoformat(timespec="seconds"), "to": to}
+    if problems and letter and last.get("opened") \
+            and now - datetime.datetime.fromisoformat(last["opened"]) >= ESCALATE:
+        return False   # a list that keeps changing is still unsettled: a day on, the owner
     if problems and letter:
         ok = _hubbus("send", "--from", hubconf.hub_project(), "--to", to, "--type", "info", "--reply-to", letter,
                      "--text", _letter_text(to, problems))
         state = "letter-update"
         record |= {"letter": letter, "opened": last.get("opened")}
     elif problems:
-        letter = f"alert-{''.join(c if c.isalnum() else '-' for c in key)[:60]}-{now:%Y%m%d%H%M%S}"
+        letter = f"alert-{''.join(c if c.isascii() and c.isalnum() else '-' for c in key)[:60]}-{now:%Y%m%d%H%M%S}"
         ok = _hubbus("send", "--from", hubconf.hub_project(), "--to", to, "--type", "request", "--id", letter,
                      "--text", _letter_text(to, problems))
         state = "letter"
         record |= {"letter": letter, "opened": record["at"]}
     else:
-        _withdraw(last.get("letter"))   # one its recipient already closed can't be taken back: gone either way
-        ok, state = True, "letter-resolved"
+        # taken back; one its recipient already closed can't be, and is gone either way. Any other failure: tried again
+        # next run (the record keeps its problems until it goes)
+        ok, state = _withdraw(last.get("letter")), "letter-resolved"
     _log(key, state, ok)
     if not ok:
-        return False
+        return state != "letter"   # a failed update or take-back is tried again; a letter that never went: the owner
     sent[key] = record
     _save(SENT, sent)
     clear_failure(key)
