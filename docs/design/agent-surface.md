@@ -453,3 +453,14 @@ Can a project influence the user-level mod? It must not. What was found:
 - How long a held letter waits before the band shows it (the threshold), against the hooks' own telling.
 - For the later waiter: a timer's `$.prompt.submit` waking an idle session, in the terminal and the desktop app.
 - For Codex: what a Codex plugin can carry, and whether a user-level skill is offered as a command.
+
+## The owner's decisions (11-18)
+
+The owner took all four recommendations:
+1. Build slice 1: `brunna surface` and its contract, glance's two optional fields, and the display-only Claude Code mod
+   (band, the "needs you" pane, `/inbox`, `/brunna`). No hook is removed.
+2. The pane shows approvals and the platform's command to copy; it acts on nothing.
+3. The mod is installed from the hub's own checkout, as a folder marketplace.
+4. Moving the idle-session waiter and the worktree hooks into the mod is decided after slice 1 has run a while and S1's
+   fix has landed; a sandboxed project's worktree handling stays with the platform either way.
+Installing the mod is a user-level change: done only on the owner's own yes in a session, never by an agent alone.
