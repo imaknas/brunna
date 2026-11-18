@@ -50,4 +50,24 @@ Checks before building (each can change the design):
 3. The mailbox caps (6 dispatches per project per day, 4 rounds per thread), and whether brunna can write to itself.
 4. Letters to a busy session wait (the dispatch fix is open in the mailbox lane): routing builds on it.
 
+Answers (11-18):
+1. `job.failed --to <project>` is a bus event, not a letter: project sessions don't see it. The letter is not a second
+   path.
+2. The headless triage leaves a request that needs a code change open, with a memory note, for the next session; it
+   doesn't ask the owner. So a letter doesn't come back to the owner as a question.
+3. The mailbox caps (6 runs, 12 wakes per project per day, 4 rounds per thread): one open request per alert key at a
+   time, closed when it's fixed; a job failing every tick must not spend a project's budget.
+4. Busy sessions: landed 11-15 in the mailbox lane (an idle session first; a busy one that hasn't acked holds a letter
+   10 minutes); "release when busy" was measured and left out. The alert letters are its first real traffic.
+
+The mailbox lane's further points, adopted:
+- What watches the mailbox itself (the scheduler watchdog, the dispatch service, a bus that can't be written, hubbus
+  broken, an alert that can't be sent) never goes through the mailbox: straight to the owner.
+- What only the owner can do (logins, credentials, a token to issue again) goes straight to the owner, not through
+  brunna for a day.
+- `update-runtimes` and `session_versions` keys go to brunna, a version failing a safety check included; after a day
+  without an answer, the owner.
+- With no brunna session open the triage can only write notes, so the one-day escalation is what makes the platform's
+  letters safe.
+
 Separate: the login check's two sources sending the same problem twice (`check-claude-login` ids).

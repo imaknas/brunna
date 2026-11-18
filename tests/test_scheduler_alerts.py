@@ -66,6 +66,9 @@ class FailingJobs(unittest.TestCase):
         orig_send = alert.send
         self.addCleanup(setattr, alert, "send", orig_send)
         alert.send = lambda text, notice=None, plain=True: sent.append((notice["key"], notice["state"], plain)) or True
+        orig_conf = alert.configured
+        self.addCleanup(setattr, alert, "configured", orig_conf)
+        alert.configured = lambda: ["discord"]   # a channel is set up (none: nothing is told, and nothing logged)
         old = "2020-01-01T00:00:00"
         self.m.FAILING_FILE.write_text(json.dumps({"p/a": {"since": old, "detail": "log a-11-08"},
                                                    "p/b": {"since": old, "detail": "log b-11-08"}}))

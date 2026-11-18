@@ -197,8 +197,8 @@ def mark_job(name: str, failed: bool, detail: str = "") -> None:
 
 
 def failing_problems(failing: dict, now: datetime.datetime) -> list[str]:
-    """Jobs failing for longer than ALERT_AFTER → the alert's problem list (alert.once dedupes by wording: a job's
-    wording must be stable)."""
+    """Jobs failing for longer than ALERT_AFTER → one line each (alert_failing sends each under its own key, the job's
+    name its id, so a line's changing detail is not a new problem)."""
     out = []
     for name, rec in sorted(failing.items()):
         try:

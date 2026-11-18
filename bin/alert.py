@@ -203,7 +203,7 @@ def send(text: str, notice: dict | None = None, plain: bool = True) -> bool:
 def _log(key: str, state: str, ok: bool) -> None:
     """One line per notice tried, kept (how many reached the owner, of which kind, and when: what tells whether the
     alerts got quieter). A log that can't be written changes nothing; a test never writes the live one."""
-    if "unittest" in sys.modules and LOG == _LIVE_LOG:
+    if ("unittest" in sys.modules and LOG == _LIVE_LOG) or not configured():   # no channel: retried every tick, nothing told
         return
     try:
         with LOG.open("a") as f:
