@@ -103,9 +103,9 @@ async function poll($: Engine, registered: Set<string>): Promise<void> {
   if (next?.kind !== 'surface') return
   for (const c of next.surface.commands) {
     if (registered.has(c.name) || !c.summary) continue
-    registered.add(c.name)
     if (c.name === 'inbox') await $.command.register({ name: 'inbox', description: c.summary })
     if (c.name === 'brunna') await $.command.register({ name: 'brunna', description: c.summary })
+    registered.add(c.name) // only once it took: a refused registration is tried again at the next poll
   }
 }
 
@@ -151,8 +151,9 @@ export const register: Register = on => {
     // still draws, so it isn't asked)
     if ((await $.session.surfaces()).length > 0) {
       const registered = new Set<string>()
-      void poll($, registered)
-      $.clock.every(POLL_MS, () => void poll($, registered))
+      const tick = () => void poll($, registered).catch(() => undefined) // a failed poll leaves the last view
+      tick()
+      $.clock.every(POLL_MS, tick)
     }
     return next(e)
   })
@@ -191,7 +192,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="row" gap={1}>
         <Text wrap="truncate-end">{s.lines.join('  ·  ')}</Text>
-        {wants && open ? <Button key="open" label={open} onPress={() => void openPane($)} /> : null}
+        {wants && open ? <Button key="open" label={open} onPress={() => void openPane($).catch(() => undefined)} /> : null}
       </Box>
     )
   })
@@ -208,7 +209,7 @@ export const register: Register = on => {
     const rows = n?.kind === 'items' ? n.items : []
     return (
       <Box flexDirection="column">
-        {L.refresh ? <Button key="refresh" label={L.refresh} onPress={() => void loadNeeds($)} /> : null}
+        {L.refresh ? <Button key="refresh" label={L.refresh} onPress={() => void loadNeeds($).catch(() => undefined)} /> : null}
         {readOnly && L.read_only ? <Text dimColor>{L.read_only}</Text> : null}
         {n?.kind === 'unreadable' && L.unreadable ? <Text dimColor>{L.unreadable}</Text> : null}
         {n?.kind === 'items' && rows.length === 0 && L.empty ? <Text dimColor>{L.empty}</Text> : null}
@@ -225,12 +226,12 @@ export const register: Register = on => {
                 <Box flexDirection="row" gap={1}>
                   <Text dimColor>{command}</Text>
                   {L.copy ? (
-                    <Button key={`copy:${key}`} label={L.copy} onPress={p => void $.ui.copy({ text: command, surface: p.surface })} />
+                    <Button key={`copy:${key}`} label={L.copy} onPress={p => void $.ui.copy({ text: command, surface: p.surface }).catch(() => undefined)} />
                   ) : null}
                 </Box>
               ) : null}
               {canAsk ? (
-                <Button key={`ask:${key}`} label={L.ask} onPress={() => void $.prompt.fill({ text: item.prompt ?? '' })} />
+                <Button key={`ask:${key}`} label={L.ask} onPress={() => void $.prompt.fill({ text: item.prompt ?? '' }).catch(() => undefined)} />
               ) : null}
             </Box>
           )

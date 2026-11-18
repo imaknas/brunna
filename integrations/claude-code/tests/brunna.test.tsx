@@ -94,7 +94,7 @@ test('it runs only brunna, from home, and registers only the commands it knows',
 test('the band shows the lines and opens the pane', async ($, on) => {
   engine(on)
   await started($, on)
-  for (const surface of ['terminal', 'desktop'] as const) {
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
     expect((await ui.find({ type: 'Text', text: /2 need you/ }))?.text).toBe('brunna · 2 need you')
     expect(await ui.find({ key: 'open' })).toBeDefined()
@@ -116,7 +116,7 @@ test('the pane: ask only for this project, copy a command, nothing for others', 
   await started($, on)
   const out = await $.command.run({ command: 'brunna' })
   expect(out.text).toBeUndefined()
-  for (const surface of ['terminal', 'desktop'] as const) {
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     expect(await ui.find({ key: 'ask:garden-app/task-1' })).toBeDefined()
     expect(await ui.find({ key: 'ask:seed-shop/m1' })).toBeUndefined()
