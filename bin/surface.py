@@ -195,7 +195,20 @@ def surface(runtime: str, native: str, cwd: str) -> dict:
             "commands": commands(inbox=True)}
 
 
+def languages_from_settings() -> None:
+    """A language variable the environment got wrong (a project's settings `env` reaches an adapter's call) gives way to
+    the settings' language instead of failing the answer: hubconf raises on one, for the platform's own runs."""
+    import names
+    for var, read in (("LANG_UI", hubconf.lang_ui), ("LANG_CONTENT", hubconf.lang_content)):
+        try:
+            read()
+        except ValueError:
+            for spelling in names.env_names(var):
+                os.environ.pop(spelling, None)
+
+
 def main(argv: list[str]) -> int:
+    languages_from_settings()
     if argv and argv[0] in ("-h", "--help"):
         print(_(__doc__).strip())
         return 0

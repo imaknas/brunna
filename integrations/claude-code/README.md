@@ -36,5 +36,18 @@ Only you install it: brunna and its agents never add a marketplace or a plugin t
 
 ## Checking it
 
-`claude plugin validate integrations/claude-code` (the mod) and `claude plugin validate .` at the repo root (the
-marketplace). `tests/test_mods.py` checks what the mod may run and register.
+`tests/test_mods.py` runs in brunna's own tests and checks what the mod may run, pass and register. The rest starts
+the real `claude`, which no test tier may do, so it is run by hand, with a scratch config folder so nothing reaches
+your own Claude Code settings:
+
+```
+CLAUDE_CONFIG_DIR="$(mktemp -d)" claude plugin validate integrations/claude-code   # the mod
+CLAUDE_CONFIG_DIR="$(mktemp -d)" claude plugin validate .                          # the marketplace, at the repo root
+CLAUDE_CONFIG_DIR="$(mktemp -d)" claude plugin test integrations/claude-code       # tests/brunna.test.tsx
+```
+
+`tsc -p` type-checks it once the engine has laid its types in `.claude-plugin/types/` (a `--plugin-dir` session it
+hot-reloads), or with the `tsconfig.json` in the header of the plugin-authoring skill's declaration file.
+
+The mod passes blank every variable the platform reads, and Python's and the loader's own: a project's settings `env`
+reaches the commands it runs (measured on Claude Code 2.1.327), and an empty value is no value to brunna.

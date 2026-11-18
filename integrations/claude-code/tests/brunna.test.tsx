@@ -37,8 +37,13 @@ const GLANCE = {
 const BAND = {
   plugin: 'brunna',
   component: 'AbovePrompt',
-  props: { hasSurvey: false, bodyColumns: 80 },
+  props: { hasSurvey: false, isCollapsed: false, isWorking: false, maxRows: 3, bodyColumns: 80,
+    scroll: { offset: 0, bodyRows: 3 }, view: {} },
 } as const
+
+// a slash command as the person runs it at the prompt
+const run = (command: string) => ({ command, args: '', origin: { kind: 'composer' as const },
+  presentation: { isFullscreen: false, columns: 100 } })
 
 const PANE = {
   plugin: 'brunna',
@@ -48,10 +53,10 @@ const PANE = {
     view: {} },
 } as const
 
-type Seen = { runs: string[][]; cwds: string[]; filled: string[]; registered: string[] }
+type Seen = { runs: string[][]; cwds: string[]; envs: Record<string, string>[]; filled: string[]; registered: string[] }
 
 function engine(on: any, surface: object = SURFACE): Seen {
-  const seen: Seen = { runs: [], cwds: [], filled: [], registered: [] }
+  const seen: Seen = { runs: [], cwds: [], envs: [], filled: [], registered: [] }
   on('env.get', () => ({ value: '/home/alex' }))
   on('session.surfaces', () => ({ value: ['terminal'] }))
   on('session.cwd', () => ({ value: '/home/alex/workspace/garden-app' }))
@@ -66,8 +71,9 @@ function engine(on: any, surface: object = SURFACE): Seen {
     seen.filled.push(e.text)
     return { isFilled: true }
   })
-  on('process.run', (_: unknown, e: { argv: string[]; init?: { cwd?: string } }) => {
+  on('process.run', (_: unknown, e: { argv: string[]; init?: { cwd?: string; env?: Record<string, string> } }) => {
     seen.runs.push([...e.argv])
+    seen.envs.push({ ...(e.init?.env ?? {}) })
     seen.cwds.push(e.init?.cwd ?? '')
     const out = e.argv[1] === 'surface' ? surface : GLANCE
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false,
@@ -88,6 +94,9 @@ test('it runs only brunna, from home, and registers only the commands it knows',
   expect(seen.runs[0]).toEqual(['/home/alex/.local/bin/brunna', 'surface', '--json', '--runtime', 'claude', '--session',
     'abc', '--cwd', '/home/alex/workspace/garden-app'])
   expect(seen.cwds[0]).toBe('/home/alex')
+  // a project's settings env reaches the child: the platform's and Python's variables go blank
+  for (const name of ['PYTHONPATH', 'PYTHONHOME', 'AGENT_HUB_HOME', 'BRUNNA_CONFIG', 'AGENT_HUB_ROOT', 'AGENTHUB_PROJECT',
+    'HUB_LLM_POINT']) expect(seen.envs[0]?.[name]).toBe('')
   expect(seen.registered.sort()).toEqual(['brunna', 'inbox'])
 })
 
@@ -105,7 +114,7 @@ test('the band shows the lines and opens the pane', async ($, on) => {
 test('/inbox fills the platform prompt and returns no text', async ($, on) => {
   const seen = engine(on)
   await started($, on)
-  const out = await $.command.run({ command: 'inbox' })
+  const out = await $.command.run(run('inbox'))
   expect(out.text).toBeUndefined()
   expect(out.context).toBeUndefined()
   expect(seen.filled).toEqual(['Run `brunna inbox`.'])
@@ -114,7 +123,7 @@ test('/inbox fills the platform prompt and returns no text', async ($, on) => {
 test('the pane: ask only for this project, copy a command, nothing for others', async ($, on) => {
   const seen = engine(on)
   await started($, on)
-  const out = await $.command.run({ command: 'brunna' })
+  const out = await $.command.run(run('brunna'))
   expect(out.text).toBeUndefined()
   for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
@@ -131,7 +140,7 @@ test('the pane: ask only for this project, copy a command, nothing for others', 
 test('the pane is read-only when the owner side is the assistant', async ($, on) => {
   engine(on, { ...SURFACE, owner: { ...SURFACE.owner, side: 'assistant' } })
   await started($, on)
-  await $.command.run({ command: 'brunna' })
+  await $.command.run(run('brunna'))
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'ask:garden-app/task-1' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Shown here only/ })).toBeDefined()

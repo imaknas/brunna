@@ -20,9 +20,27 @@ const GLANCE_V = 1
 const MISMATCH = "brunna and its Claude Code mod don't match"
 // The commands it may register: the platform lists what it offers, this mod registers only these names.
 const ALLOWED = ['inbox', 'brunna'] as const
-// The platform's root and Python variables, passed blank (a child's variables can only be set): the `brunna` found
-// runs the hub it was installed from, whatever the session's environment says.
-const BLANK = { AGENT_HUB_ROOT: '', BRUNNA_ROOT: '', AGENT_HUB_PYTHON: '', BRUNNA_PYTHON: '' }
+// Variables passed blank (a child's variables can only be set, and the platform reads an empty one as unset): a
+// project's settings `env` reaches this process's children (measured on 2.1.327), so the `brunna` found must not take
+// its instance, root or Python from there, nor load code through Python's or the loader's own variables.
+// PLATFORM_VARS: every variable the platform reads (bin/names.py: AGENT_HUB_<X>, AGENTHUB_<X>, BRUNNA_<X>).
+const PLATFORM_VARS = ['ROOT', 'PYTHON', 'HOME', 'CONFIG', 'DATA', 'SECRETS', 'STATE', 'EVALS', 'LANG_UI', 'LANG_CONTENT',
+  'PROJECT', 'CONFINED', 'JOB', 'JOB_CHAIN', 'JOB_DEPTH', 'EVENTS', 'TIER_CACHE', 'CONNECT_ROOTS', 'GIT_BIN',
+  'GIT_SOCKET', 'MEMLOCK_WAIT', 'PRIVATE_NAMES', 'RESTORE_CRASH_AFTER', 'TEST_CALLER', 'TEST_GUARD', 'TEST_RUNNER',
+  'TEST_WRAPPED']
+const OTHER_VARS = ['HUB_LLM_POINT', 'HUBBUS_LEASE', 'HUB_AS_PROJECT', 'HUB_MEMORY_OF', 'HUB_THROWAWAY_COPY',
+  'PYTHONPATH', 'PYTHONHOME', 'PYTHONSTARTUP', 'PYTHONINSPECT', 'PYTHONUSERBASE', 'PYTHONPLATLIBDIR',
+  'PYTHONEXECUTABLE', 'PYTHONBREAKPOINT', 'PYTHONWARNINGS', 'PYTHONPYCACHEPREFIX', 'PYTHONIOENCODING', 'PYTHONUTF8',
+  'PYTHONOPTIMIZE', 'PYTHONDEBUG', 'PYTHONVERBOSE', 'PYTHONMALLOC', 'PYTHONDEVMODE', 'PYTHONSAFEPATH',
+  'PYTHONNOUSERSITE', 'PYTHONPROFILEIMPORTTIME', 'PYTHONTRACEMALLOC', 'PYTHON_FROZEN_MODULES', 'PYTHON_GIL',
+  'BASH_ENV', 'ENV', 'DYLD_INSERT_LIBRARIES', 'DYLD_LIBRARY_PATH', 'DYLD_FRAMEWORK_PATH', 'LD_PRELOAD',
+  'LD_LIBRARY_PATH']
+const BLANK: Record<string, string> = Object.fromEntries([
+  ...PLATFORM_VARS.flatMap(x => ['AGENT_HUB_', 'AGENTHUB_', 'BRUNNA_'].map(p => p + x)),
+  ...OTHER_VARS,
+].map(name => [name, '']))
+// A command element the pane shows and copies: a plain word, so what is pasted is what is shown.
+const PLAIN = /^[A-Za-z0-9._\/:=-]+$/
 
 type Command = BrunnaCommand
 type Surface = BrunnaSurface
@@ -91,13 +109,12 @@ function surfaceOf(out: Record<string, unknown>): Surface | null {
 async function poll($: Engine, registered: Set<string>): Promise<void> {
   const [cwd, id] = await Promise.all([$.session.cwd(), $.session.id()]) // read each time: a /clear changes the id
   const out = await brunna($, ['surface', '--json', '--runtime', 'claude', '--session', id, '--cwd', cwd])
+  if (!isObj(out)) return // it couldn't run or answered nothing readable: the last view stays
   let next: View = null
-  if (isObj(out)) {
-    if (out.v !== SURFACE_V) next = { kind: 'mismatch' }
-    else {
-      const s = surfaceOf(out)
-      next = s ? { kind: 'surface', surface: s } : null
-    }
+  if (out.v !== SURFACE_V) next = { kind: 'mismatch' }
+  else {
+    const s = surfaceOf(out)
+    next = s ? { kind: 'surface', surface: s } : null
   }
   await update($, view, () => next)
   if (next?.kind !== 'surface') return
@@ -126,7 +143,7 @@ async function loadNeeds($: Engine): Promise<void> {
           text: str(x.text),
           since: str(x.since),
           ...(typeof x.prompt === 'string' ? { prompt: x.prompt } : {}),
-          ...(command.length >= 2 && command[0] === 'brunna' ? { command } : {}),
+          ...(command.length >= 2 && command[0] === 'brunna' && command.every(w => PLAIN.test(w)) ? { command } : {}),
         })
       }
       items.sort((a, b) => (a.since < b.since ? 1 : a.since > b.since ? -1 : 0)) // newest first
@@ -231,7 +248,7 @@ export const register: Register = on => {
                 </Box>
               ) : null}
               {canAsk ? (
-                <Button key={`ask:${key}`} label={L.ask} onPress={() => void $.prompt.fill({ text: item.prompt ?? '' }).catch(() => undefined)} />
+                <Button key={`ask:${key}`} label={L.ask} onPress={() => void $.prompt.fill({ text: item.prompt ?? '', mode: 'append' }).catch(() => undefined)} />
               ) : null}
             </Box>
           )

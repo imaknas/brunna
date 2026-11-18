@@ -9,6 +9,7 @@ so a sandboxed project's session sees no other project's text in them.
 import json
 import os
 import pathlib
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -22,6 +23,26 @@ import contracts  # noqa: E402
 import names  # noqa: E402
 
 SCHEMA = ROOT / "contracts" / "session-surface.v1.schema.json"
+MOD = ROOT / "integrations" / "claude-code" / "hooks" / "brunna.tsx"
+
+
+def mod_blank() -> set[str]:
+    """The variables the Claude Code mod passes blank, read from its source (PLATFORM_VARS in each spelling, OTHER_VARS)."""
+    src = MOD.read_text()
+
+    def listed(name):
+        return re.findall(r"'([A-Z_]+)'", re.search(rf"const {name} = \[(.*?)\]", src, re.S).group(1))
+    return {p + x for x in listed("PLATFORM_VARS") for p in ("AGENT_HUB_", "AGENTHUB_", "BRUNNA_")} | set(listed("OTHER_VARS"))
+
+
+def tree(*roots) -> dict:
+    """Every file and folder under these, with its size and modification time."""
+    out = {}
+    for root in roots:
+        for p in sorted(pathlib.Path(root).rglob("*")) if pathlib.Path(root).exists() else []:
+            st = p.lstat()
+            out[str(p)] = (st.st_size if p.is_file() else None, st.st_mtime_ns)
+    return out
 SESSION = "11111111-2222-3333-4444-555555555555"
 OTHER = "99999999-2222-3333-4444-555555555555"
 
@@ -184,9 +205,17 @@ class Surface(unittest.TestCase):
         self.assertIn("brunna inbox", out["commands"][0]["prompt"])
         self.assertEqual(out["lines"], [], "nothing needs the owner: the band stays empty")
         self.tell(first)
-        before = self.bus_state()
+        before = self.bus_state()   # the test's own read is before the snapshot and after the second one
+        files = tree(self.tmp, ROOT / ".logs", ROOT / ".state")
         out = self.surface()
+        after = tree(self.tmp, ROOT / ".logs", ROOT / ".state")
         self.assertEqual(self.bus_state(), before, "read-only: no event, no presence")
+        # a reader of a WAL database (glance's too) may leave SQLite's companion files -wal and -shm beside it, which
+        # the platform's own connections keep there anyway; the database and everything else stay as they were
+        sqlite_own = (str(self.tmp / "bus"), "bus.db-wal", "bus.db-shm")
+        self.assertEqual(sorted(k for k in {*files, *after} if files.get(k) != after.get(k)
+                                and not (k == sqlite_own[0] or k.endswith(sqlite_own[1:]))), [],
+                         "nothing written: the instance's state, data, secrets, bus and the hub's logs as they were")
         self.assertEqual([(h["id"], h["from"], h["type"]) for h in out["mail"]["held"]], [(first, "box", "request")])
         self.assertEqual(out["mail"]["waiting"], 1, "the second is still to be told")
         self.assertEqual(out["lines"], ["brunna · 1 letter held here for over 30 min, not handled yet"])
@@ -247,14 +276,77 @@ class Surface(unittest.TestCase):
         self.record(project="app", version="2.0.0")
         self.assertTrue(self.surface()["served"], "the gate is for sandboxed projects only")
 
-    def test_blank_root_and_python_variables_are_as_absent(self):
-        """The mod passes the platform's root and Python variables blank (it can only set, not unset, a child's)."""
+    def blanked(self) -> tuple[dict, dict]:
+        """(bare, blank): the test instance named by the current spellings alone, and the same with every variable the
+        Claude Code mod passes blank (its PLATFORM_VARS in every spelling, its OTHER_VARS) set to "", but for the
+        current spellings that name the instance (they stand for the instance a real session's brunna finds itself)."""
+        bare = {k: v for k, v in self.env.items() if not k.startswith(("AGENT_HUB_", "AGENTHUB_", "BRUNNA_"))}
+        for k, v in self.env.items():
+            if k.startswith("AGENT_HUB_"):
+                bare["BRUNNA_" + k[len("AGENT_HUB_"):]] = v
+        blank = {**bare, **{name: "" for name in mod_blank() if name not in bare}}
+        return bare, blank
+
+    def test_the_mods_blank_variables_are_as_absent(self):
+        """The mod passes blank every variable the platform reads, and Python's and the loader's own: a project's
+        settings `env` reaches its children (it can only set, not unset, theirs). Blank reads as unset everywhere."""
         self.set_up()
         self.record()
         self.send("box", "app", "request", "first")
-        bare = {k: v for k, v in self.env.items() if not k.endswith(("_ROOT", "_PYTHON"))}
-        blank = {**bare, **{f"{p}{x}": "" for p in ("AGENT_HUB_", "BRUNNA_") for x in ("ROOT", "PYTHON")}}
-        self.assertEqual(self.surface(env=blank), self.surface(env=bare))
+        bare, blank = self.blanked()
+        self.assertIn("AGENT_HUB_HOME", blank)
+        self.assertIn("PYTHONPATH", blank)
+        out = self.surface(env=blank)
+        self.assertTrue(out["served"], out)
+        self.assertEqual(out, self.surface(env=bare))
+
+    def test_the_mod_blanks_every_variable_the_platform_reads(self):
+        names_read = set()
+        for f in [*(ROOT / "bin").glob("*.py"), *(ROOT / "bin").glob("hub*"), ROOT / "bin" / "agenthub"]:
+            if f.is_file():
+                names_read |= set(re.findall(r'names\.env\("([A-Z_]+)"', f.read_text(errors="replace")))
+        import event_jobs  # its variables are named by constants
+        names_read |= {event_jobs.CHAIN_VAR, event_jobs.DEPTH_VAR, event_jobs.JOB_VAR, event_jobs.EVENTS_VAR}
+        blank = mod_blank()
+        for x in sorted(names_read):
+            for spelling in names.env_names(x):
+                self.assertIn(spelling, blank, f"the mod doesn't blank {spelling}")
+
+    def test_a_sitecustomize_on_pythonpath_doesnt_run(self):
+        """Through the whole chain the mod starts (the brunna command, bin/py, the CLI, surface.py): PYTHONPATH as a
+        project's settings would set it runs a sitecustomize; blank, as the mod passes it, nothing runs."""
+        self.set_up()
+        self.record()
+        pp = self.tmp / "pp"
+        pp.mkdir()
+        marker = self.tmp / "sitecustomize-ran"
+        (pp / "sitecustomize.py").write_text(f"open({str(marker)!r}, 'a').write('x')\n")
+        py = self.tmp / "home" / ".local" / "share" / names.current("share_dir") / "python" / "bin" / "python3"
+        py.parent.mkdir(parents=True)
+        py.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')   # the platform's Python, where bin/py looks
+        py.chmod(0o755)
+        bare, blank = self.blanked()
+
+        def run(env):
+            r = subprocess.run([str(ROOT / "bin" / "brunna"), "surface", "--json", "--runtime", "claude", "--session",
+                                SESSION, "--cwd", str(self.tmp / "ws" / "app")], env=env, cwd=self.tmp / "home",
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            return json.loads(r.stdout)
+
+        run({**bare, "PYTHONPATH": str(pp)})
+        self.assertTrue(marker.exists(), "the probe works: a PYTHONPATH sitecustomize runs")
+        marker.unlink()
+        out = run({**blank, "PYTHONPATH": ""})
+        self.assertFalse(marker.exists(), "blank, it doesn't")
+        self.assertTrue(out["served"])
+
+    def test_a_wrong_language_variable_gives_way_to_the_settings(self):
+        self.set_up()
+        self.record()
+        self.tick([{"kind": "todo", "project": "box", "id": "task-box-1", "text": "x", "since": ""}])
+        out = self.surface(env={**self.env, "AGENT_HUB_LANG_UI": "klingon", "AGENT_HUB_LANG_CONTENT": "xx"})
+        self.assertEqual(out["lines"], ["brunna · 1 needs you"])
 
     def test_lines_in_the_interface_language(self):
         """The words come from the catalog of the instance's interface language (their goldens:

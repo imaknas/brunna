@@ -83,6 +83,10 @@ class Table(unittest.TestCase):
         self.assertEqual(names.env("ROOT", environ={"BRUNNA_ROOT": "n"}), "n")
         self.assertEqual(names.env("ROOT", environ={"BRUNNA_ROOT": "n", "AGENT_HUB_ROOT": "o"}), "o",
                          "an old spelling is an explicit override")
+        self.assertEqual(names.env("ROOT", environ={"AGENT_HUB_ROOT": "", "BRUNNA_ROOT": "n"}), "n",
+                         "an empty value is no value (a child given it blank: the Claude Code mod's brunna call)")
+        self.assertIsNone(names.env("ROOT", environ={"AGENT_HUB_ROOT": "", "BRUNNA_ROOT": ""}))
+        self.assertEqual(names.env("ROOT", "d", environ={"BRUNNA_ROOT": ""}), "d")
         e = {"BRUNNA_STATE": "stale"}
         names.env_set(e, "STATE", "x")
         self.assertEqual(e, {"BRUNNA_STATE": "x"}, "the current spelling written, the other removed")

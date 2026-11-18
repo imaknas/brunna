@@ -523,5 +523,22 @@ Still open (needs a live session or the owner):
 - whether a folder-marketplace install reads the folder live after `brunna upgrade`;
 - what `$.session.surfaces()` answers in the desktop app's local sessions;
 - whether the session's sandbox applies to `$.process.run` children;
-- whether a project's settings `env` reaches them;
-- `tsc -p` on the mod: TypeScript is not installed on the machine it was built on.
+- `tsc -p` on the mod runs by hand only (no tier has TypeScript); it passed on 11-19, after the review's fixes.
+
+**After the blind review (11-19).** Measured on 2.1.327 (`claude -p`): a project's settings `env` reaches the mod's
+`$.process.run` children. `PYTHONPATH`, `PYTHONHOME`, `AGENT_HUB_HOME`/`STATE`/`ROOT` and `BRUNNA_CONFIG` all
+arrived; `HOME` and `PATH` didn't. Through that, a `sitecustomize.py` on `PYTHONPATH` ran in the platform's Python, and
+`AGENT_HUB_*` pointed `brunna` at another instance. Fixed for the mod:
+- it passes blank every variable the platform reads, in each spelling (`PLATFORM_VARS`), plus `PYTHON*`, the
+  platform's own unprefixed ones (`HUB_LLM_POINT`, ...), `BASH_ENV`/`ENV` and the loader's (`OTHER_VARS`);
+- `names.env` now reads an empty value as no value everywhere;
+- `brunna surface` falls back to the settings' language on a wrong language variable instead of failing;
+- tests check that the blank set covers every `names.env` name in `bin/`, that the answer equals the unset one, and that a
+  `PYTHONPATH` `sitecustomize` doesn't run through the whole `brunna` chain.
+
+Also from the review: a failed poll keeps the last view; a command element outside `[A-Za-z0-9._/:=-]` is not shown
+(and glance's schema pins `argv[0]` with `prefixItems`, which `minischema` now checks); the pane's ask appends to the
+draft.
+
+The same reach is wider than the mod: the platform's own hooks run in the session's environment too. That is a
+follow-up in `direction.md`, not fixed here.

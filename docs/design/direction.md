@@ -289,6 +289,11 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   - S6: a conformance canary for plugins in platform runs;
   - S7: the foreign-control check reports plugin manifests and the `enabledPlugins`, `extraKnownMarketplaces` and `env`
     keys.
+  - Follow-up from slice 1's blind review (11-19), not fixed: a project's settings `env` reaches what the session
+    starts (measured for a mod's children on 2.1.327: `PYTHONPATH`, `PYTHONHOME`, `AGENT_HUB_*`/`BRUNNA_*`). The
+    platform's own hooks (`hub-event`, `worktree-memory.sh`) inherit the same environment, and S7 only reports the
+    `env` key. The mod now blanks them. The hooks need the same, or the platform's Python started isolated, and a
+    sandboxed project's `env` checked against a list.
 - **Budgets:** per-project model budgets (today there is one platform-wide daily budget).
 - **Config pipeline:** an applier for `sync-local-setup` (`new-user.md` 1.5).
 - **Rename:** `brunna.v1.schema.json`, and step 4 (writers stop falling back to the old spellings).

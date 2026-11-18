@@ -107,8 +107,7 @@ class ClaudeCodeMod(unittest.TestCase):
         self.assertEqual({re.match(r"\s*'([a-z]+)'", c).group(1) for c in calls}, {"surface", "glance"})
         self.assertTrue(all("'--json'" in c for c in calls))
         self.assertIn("cwd: home", self.src, "a neutral folder, never the session's")
-        for name in ("AGENT_HUB_ROOT", "BRUNNA_ROOT", "AGENT_HUB_PYTHON", "BRUNNA_PYTHON"):
-            self.assertIn(f"{name}: ''", self.src)
+        self.assertIn("env: BLANK", self.src, "every variable tests/test_surface.py checks, blank")
 
     def test_nothing_into_the_models_context(self):
         events = set(re.findall(r"\bon\('([a-z.]+)'", self.src))
@@ -133,7 +132,8 @@ class ClaudeCodeMod(unittest.TestCase):
         fills = re.findall(r"\$\.prompt\.fill\(\{([^}]*)\}\)", self.src)
         self.assertEqual(len(fills), 2)
         for f in fills:
-            self.assertRegex(f.strip(), r"^text: (prompt|item\.prompt \?\? '')$", "only the platform's words, never the text")
+            self.assertRegex(f.strip(), r"^text: (prompt|item\.prompt \?\? ''(, mode: 'append')?)$",
+                             "only the platform's words, never the text")
         self.assertIn("item.project === s.project", self.src, "a press only for the session's own project")
         self.assertIn("readOnly = s?.owner.side === 'assistant'", self.src)
         self.assertIn("command[0] === 'brunna'", self.src)

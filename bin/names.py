@@ -158,12 +158,12 @@ def env_names(x: str) -> tuple[str, str]:
 
 
 def env(x: str, default: str | None = None, environ=None) -> str | None:
-    """The old spelling when set (an explicit override from outside the platform), else the new one."""
+    """The old spelling when set (an explicit override from outside the platform), else the new one. An empty value is
+    no value: a child given a variable blank (it can only be set, not unset: the Claude Code mod's `brunna` call) reads
+    as one without it."""
     environ = os.environ if environ is None else environ
     o, n = env_names(x)
-    if o in environ:
-        return environ[o]
-    return environ.get(n, default)
+    return environ.get(o) or environ.get(n) or default
 
 
 def env_set(environ, x: str, value: str):
