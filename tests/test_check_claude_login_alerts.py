@@ -59,7 +59,7 @@ class AlertIds(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         self.sent = []
-        self.a.send = lambda text, notice=None: self.sent.append(text) or True
+        self.a.send = lambda text, notice=None, plain=True: self.sent.append(text) or True
 
     def test_same_id_new_wording_is_not_sent_again(self):
         self.a.once("k", ["login broken: exit 1: x"], "fine", ids=["subscription:login"])
@@ -110,7 +110,7 @@ class Check(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
         self.sent = []
-        p = mock.patch.object(self.m.alert, "send", lambda text, notice=None: self.sent.append(text) or True)
+        p = mock.patch.object(self.m.alert, "send", lambda text, notice=None, plain=True: self.sent.append(text) or True)
         p.start()
         self.addCleanup(p.stop)
         self.jobs = ["proj/job"]
