@@ -9,12 +9,18 @@ tool moved would otherwise pass as "refused"); the sandboxed run is then watched
 show. Ordinary work still runs under the same profiles. Landlock's side is its own (no mount, no topology change for a
 landlocked process): the Linux conformance probe.
 
+Every call that attaches, mounts or reads what is attached has a time limit, and over it its whole process group is
+killed (11-21: an `hdiutil create` here hung in newfs_hfs for 12 hours, its image attached); the class's cleanup runs even
+when setUpClass fails, and detaches what is under this test's own folder, stopping an hdiutil or newfs_hfs still on it.
+bin/testguard.py catches what still gets out.
+
     bin/py -m unittest tests.test_no_mounts
 """
 import os
 import pathlib
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -26,11 +32,13 @@ sys.path.insert(0, str(BIN))
 import isolation  # noqa: E402
 import landlock  # noqa: E402
 import seatbelt  # noqa: E402
+import testguard  # noqa: E402
 
 MAC = sys.platform == "darwin" and seatbelt.can_sandbox() is None
 HDIUTIL, DISKUTIL, MOUNT, UMOUNT = "/usr/bin/hdiutil", "/usr/sbin/diskutil", "/sbin/mount", "/sbin/umount"
 OPEN_ALL = "(version 1)\n(allow default)\n"   # the positive control: the same route with nothing denied
 CONTROL_S = 60   # how long a control may take to show (DiskImageMounter starting, an attach verifying the image)
+CALL_S = 120   # how long one call may take (a create, an attach verifying the image, a sandboxed route) before it is killed
 # Opening the image through LaunchServices really mounts it with DiskImageMounter, and Finder opens a window on the
 # owner's desktop: those two controls run only when asked (the routes' refusals run always, and mount nothing). Run
 # them by hand, with no Finder window in the way, when the mount rules change: BRUNNA_DESKTOP_TESTS=1.
@@ -50,6 +58,26 @@ cs.LSOpenCFURLRef.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
 p = sys.argv[1].encode()
 print("LSOpenCFURLRef", cs.LSOpenCFURLRef(cf.CFURLCreateFromFileSystemRepresentation(None, p, len(p), False), None))
 """
+
+
+def run(cmd: list[str], timeout: float = CALL_S, check: bool = False, **kw) -> subprocess.CompletedProcess:
+    """cmd in a process group of its own, with a time limit: over it the whole group is killed (an hdiutil, or the sh a
+    route runs it through, and what it started) and TimeoutExpired raised."""
+    p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                         start_new_session=True, **kw)
+    try:
+        out, err = p.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        p.communicate()
+        raise
+    r = subprocess.CompletedProcess(cmd, p.returncode, out, err)
+    if check:
+        r.check_returncode()
+    return r
 
 
 def pol_for(ws: pathlib.Path, deny_read=()) -> dict:
@@ -94,66 +122,61 @@ class Routes(unittest.TestCase):
     def setUpClass(cls):
         cls.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         cls.ws = cls.tmp / "ws"
+        cls.img = cls.ws / "x.dmg"   # bytes the sandboxed process could have written itself
+        cls.vol = f"{testguard.NOMOUNT_VOLUME}{os.getpid()}"   # the guard's sweep stops a tool on it once this is gone
+        # the mount point DiskArbitration gives the volume at /Volumes (with " 1" and so on on a clash), exactly
+        cls.at_volumes = re.compile(rf" on /Volumes/{re.escape(cls.vol)}( \d+)? \(")
+        cls.ram0 = None   # ram disks counted as this test's: only those new across one of its own ram routes
+        # before anything is made: a setUpClass that fails (a create over its time limit) still detaches and removes
+        cls.addClassCleanup(shutil.rmtree, cls.tmp, ignore_errors=True)
+        cls.addClassCleanup(cls.clean)   # last in, first run: detached before the folder goes
         (cls.ws / "mnt").mkdir(parents=True)
         cls.owner = cls.tmp / "owner"   # a folder of the owner's, outside the workspace
         cls.owner.mkdir()
-        cls.vol = f"brunna-nomount-{os.getpid()}"
-        # the mount point DiskArbitration gives the volume at /Volumes (with " 1" and so on on a clash), exactly
-        cls.at_volumes = re.compile(rf" on /Volumes/{re.escape(cls.vol)}( \d+)? \(")
         src = cls.tmp / "src"
         (src / ".git").mkdir(parents=True)   # what the hole planted: a .git with a config of its choosing
         (src / ".git" / "config").write_text(f"[core]\n\t{MARK}\n")
-        cls.img = cls.ws / "x.dmg"   # bytes the sandboxed process could have written itself
-        subprocess.run([HDIUTIL, "create", "-quiet", "-srcfolder", str(src), "-fs", "HFS+", "-volname", cls.vol,
-                        str(cls.img)], check=True, capture_output=True)
+        run([HDIUTIL, "create", "-quiet", "-srcfolder", str(src), "-fs", "HFS+", "-volname", cls.vol, str(cls.img)],
+            check=True)
         (cls.ws / "lsopen.py").write_text(LSOPEN)
-        cls.ram0 = None   # ram disks counted as this test's: only those new across one of its own ram routes
         cls.profiles = profiles(cls.ws)
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.clean()
-        shutil.rmtree(cls.tmp, ignore_errors=True)
 
     @staticmethod
     def attached(match) -> set[str]:
-        """The devices of the attached images whose image-path line matches."""
-        info = subprocess.run([HDIUTIL, "info"], capture_output=True, text=True).stdout
-        devs, ours = set(), False
-        for line in info.splitlines():
-            if "image-path" in line:
-                ours = match(line)
-            elif ours and re.match(r"^/dev/disk\d+\s", line):
-                devs.add(line.split()[0])
-                ours = False
-        return devs
+        """The devices (whole disks) of the attached images whose image-path matches."""
+        return {im["dev"] for im in testguard.attached() if im["dev"] and match(im["path"])}
 
     @classmethod
     def seen(cls) -> tuple[set[str], list[str]]:
         """From outside, only what is this test's (other tests and the owner may attach at the same time, and nothing
-        of theirs is counted or detached): the devices of this image, ram disks new across this test's own ram
-        route, and the mounts under this test's folder or of this volume at /Volumes (matched exactly)."""
-        devs = cls.attached(lambda line: str(cls.img) in line)
+        of theirs is counted or detached): the devices of images under this test's folder, ram disks new across this
+        test's own ram route, and the mounts under this test's folder or of this volume at /Volumes (matched exactly)."""
+        devs = cls.attached(lambda path: testguard.under(path, [cls.tmp]))
         if cls.ram0 is not None:
-            devs |= cls.attached(lambda line: "ram://" in line) - cls.ram0
-        table = subprocess.run([MOUNT], capture_output=True, text=True).stdout
+            devs |= cls.attached(lambda path: path.startswith("ram://")) - cls.ram0
+        table = run([MOUNT], timeout=30).stdout
         return devs, [x for x in table.splitlines() if str(cls.tmp) in x or cls.at_volumes.search(x)]
 
     @classmethod
     def clean(cls):
-        for _ in range(3):
+        """Unmount and detach what is this test's, several rounds (an image still attaching shows up late), stopping an
+        hdiutil or newfs_hfs still working on its folder's images or on its volume (by its exact name)."""
+        for i in range(5):
             devs, mounts = cls.seen()
-            if not devs and not mounts:
+            if not devs and not mounts and not testguard.stuck([cls.tmp], names=[cls.vol]):
                 return
-            for x in mounts:
-                subprocess.run([UMOUNT, "-f", x.split(" on ")[1].rsplit(" (", 1)[0]], capture_output=True)
-            for d in devs:
-                subprocess.run([HDIUTIL, "detach", "-quiet", "-force", d], capture_output=True)
-            time.sleep(0.5)
+            try:
+                for x in mounts:
+                    run([UMOUNT, "-f", x.split(" on ")[1].rsplit(" (", 1)[0]], timeout=30)
+                for d in devs - cls.attached(lambda path: testguard.under(path, [cls.tmp])):   # this route's ram disks
+                    run([HDIUTIL, "detach", "-quiet", "-force", d], timeout=30)
+                testguard.release([cls.tmp], names=[cls.vol], rounds=1)
+            except (subprocess.TimeoutExpired, OSError):
+                pass   # the next round tries again; what is left at the end, testguard reports
+            time.sleep(0.5 * (i + 1))
 
     def run_under(self, profile: str, cmd: str):
-        return subprocess.run(["/usr/bin/sandbox-exec", "-p", profile, "/bin/sh", "-c", cmd], cwd=self.ws,
-                              capture_output=True, text=True, timeout=120)
+        return run(["/usr/bin/sandbox-exec", "-p", profile, "/bin/sh", "-c", cmd], cwd=self.ws)
 
     def sandboxed(self, kind: str, cmd: str):
         return self.run_under(self.profiles[kind], cmd)
@@ -184,14 +207,13 @@ class Routes(unittest.TestCase):
 
     def attach_device(self) -> str:
         """Attach this image from outside without mounting it (the owner's, or a stick): its HFS partition."""
-        out = subprocess.run([HDIUTIL, "attach", "-nomount", str(self.img)], capture_output=True, text=True,
-                             timeout=120).stdout
+        out = run([HDIUTIL, "attach", "-nomount", str(self.img)]).stdout
         return re.findall(r"^(/dev/disk\d+s\d+)\s+Apple_HFS", out, re.M)[0]
 
     def mount_owner(self) -> str:
         """Attach and mount this image over the owner's folder from outside: its HFS partition."""
-        out = subprocess.run([HDIUTIL, "attach", "-nobrowse", "-noautoopen", "-mountpoint", str(self.owner),
-                              str(self.img)], check=True, capture_output=True, text=True, timeout=120).stdout
+        out = run([HDIUTIL, "attach", "-nobrowse", "-noautoopen", "-mountpoint", str(self.owner), str(self.img)],
+                  check=True).stdout
         return re.findall(r"^(/dev/disk\d+s\d+)\s+Apple_HFS", out, re.M)[0]
 
     def owner_mounted(self) -> bool:
@@ -199,8 +221,8 @@ class Routes(unittest.TestCase):
 
     def test_the_observation_sees_a_mount_unsandboxed(self):
         try:
-            subprocess.run([HDIUTIL, "attach", "-quiet", "-nobrowse", "-noautoopen", "-mountpoint",
-                            str(self.ws / "mnt"), str(self.img)], check=True, capture_output=True, timeout=120)
+            run([HDIUTIL, "attach", "-quiet", "-nobrowse", "-noautoopen", "-mountpoint", str(self.ws / "mnt"),
+                 str(self.img)], check=True)
             devs, mounts = self.seen()
             self.assertTrue(devs and mounts, (devs, mounts))
             self.assertTrue((self.ws / "mnt" / ".git" / "config").exists())

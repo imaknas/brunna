@@ -11,7 +11,8 @@ its tests (the floor becomes the slowest single test). The E1 goldens' second pa
 (tests/test_i18n_golden_en.py) becomes one more item per golden module (I18N_GOLDEN_LANG=en), so it is spread over the
 pool too instead of being one long item.
 
-The run's HOME, secrets and temp folder are its own and removed afterwards (bin/testguard.py); what a test left in them fails the run.
+The run's HOME, secrets and temp folder are its own and removed afterwards (bin/testguard.py), on an interrupt (SIGINT, SIGTERM)
+too; what a test left in them fails the run, a disk image still attached from under them included (it is detached).
 
 The output ends like unittest's own (people and agents read it): `Ran <n> tests in <s>s`, then `OK` / `OK (skipped=k)` or
 `FAILED (failures=…, errors=…, skipped=…)`; before it, the full output of every module that failed (its `FAIL:` /
@@ -93,11 +94,25 @@ def test_ids(item: tuple[str, str | None], tests: pathlib.Path) -> list[str]:
     return ids if all(i.startswith(item[0] + ".") for i in ids) else []
 
 
+RUNNING: set[subprocess.Popen] = set()   # the modules running now: an interrupted run stops them
+RUNNING_LOCK = threading.Lock()
+STOPPING = threading.Event()
+
+
 def run_one(item: tuple[str, str | None], tests: pathlib.Path) -> tuple[int, str, float]:
     t0 = time.monotonic()
-    r = subprocess.run([sys.executable, "-m", "unittest", item[0]], env=env_for(tests, item[1]),
-                       stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    return r.returncode, r.stdout, time.monotonic() - t0
+    with subprocess.Popen([sys.executable, "-m", "unittest", item[0]], env=env_for(tests, item[1]),
+                          stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p:
+        with RUNNING_LOCK:
+            RUNNING.add(p)
+            if STOPPING.is_set():
+                p.terminate()
+        try:
+            out, _err = p.communicate()
+        finally:
+            with RUNNING_LOCK:
+                RUNNING.discard(p)
+    return p.returncode, out, time.monotonic() - t0
 
 
 def threading_map(fn, xs: list, n: int) -> list:
@@ -170,7 +185,7 @@ def main(argv: list[str]) -> int:
     lock = threading.Lock()
 
     def worker():
-        while True:
+        while not STOPPING.is_set():
             try:
                 it = todo.get_nowait()
             except queue.Empty:
@@ -237,5 +252,28 @@ def main(argv: list[str]) -> int:
     return 0
 
 
+def stop_running():
+    """An interrupted run: the modules still running stopped (a TERM to the whole group already did), before their disk
+    images are detached and their folders removed."""
+    with RUNNING_LOCK:
+        STOPPING.set()
+        procs = list(RUNNING)
+    for p in procs:
+        p.terminate()
+    for p in procs:
+        try:
+            p.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            p.kill()
+
+
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    testguard.on_term()   # a tier's time limit TERMs the group: the finally below still runs
+    try:
+        sys.exit(main(sys.argv[1:]))
+    except KeyboardInterrupt:
+        stop_running()
+        print("run-tests: interrupted", file=sys.stderr, flush=True)
+        sys.exit(130)
+    finally:
+        G.remove()   # once: a finished run already did, after counting what was left (an image still attached among it)
