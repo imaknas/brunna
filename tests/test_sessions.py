@@ -416,6 +416,15 @@ class VersionsAndSkips(Temp):
                          "line isn't counted")
         self.assertEqual([t.id for t in sessions_claude.records(f)], ["g1", "g2"], "the tally is optional")
 
+    def test_the_data_flow_ledger_is_passed_over(self):
+        f = self.tmp / "x.jsonl"
+        a = {**pin.human(pin.at(1, 9), "S", "g1", pin.ALPHA), "version": "2.1.330"}
+        ledger = {"type": "data-flow-records", "v": 1, "sessionId": "S", "records": []}   # 2.1.330, no version on it
+        f.write_text("".join(json.dumps(x) + "\n" for x in (a, ledger)))
+        tally = {}
+        self.assertEqual([t.id for t in sessions_claude.records(f, tally)], ["g1"])
+        self.assertEqual(tally, {"2.1.330": [2, 0]}, "the ledger carries no turn and is not counted as skipped")
+
     def test_codex_version_from_the_session_meta(self):
         codex_home(self.home)
         f = next((self.home / ".codex" / "sessions").rglob("*-c1.jsonl"))

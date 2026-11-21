@@ -121,11 +121,12 @@ def _parse_ts(ts: str) -> datetime.datetime:
 _KNOWN = {"user", "assistant", "system", "summary", "attachment", "progress", "queue-operation", "file-history-snapshot"}
 # Entries Claude Code writes beside the turns, which carry none (request records, titles, modes, links, ledgers): read and
 # passed over on purpose, not skipped. A type in neither set counts as skipped, so a version that adds or renames one is
-# seen in `brunna runtimes` (seen in a week of transcripts, 2.1.295 to 2.1.322, 11-13)
+# seen in `brunna runtimes` (seen in a week of transcripts, 2.1.295 to 2.1.322, 11-13; data-flow-records, a ledger
+# 2.1.330 writes beside each request, 11-22)
 _IGNORED = {"api-request-blob", "api-request", "api-request-shape", "last-prompt", "atis-latch", "custom-title",
             "agent-name", "bridge-session", "mode", "frame-link", "pr-link", "worktree-state", "relocated",
             "session-owner", "file-history-delta", "cost-state", "artifact-autoreact-ledger", "tools-used",
-            "artifact-comment-monitor"}
+            "artifact-comment-monitor", "data-flow-records"}
 
 
 def _turn(o: dict, fallback_sid: str) -> Turn | None:
