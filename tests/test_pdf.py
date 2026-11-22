@@ -92,6 +92,8 @@ class Checks(Temp):
         outside.write_text("s")
         (self.ws / "link.html").symlink_to(outside)
         (self.ws / "dir.html").mkdir()
+        (self.ws / "notes.txt").write_text("n")
+        (self.ws / "named.html").symlink_to("notes.txt")
         cases = {
             "not declared": dict(caps=("gpu",), kind="pdf", html="docs/page.html", pdf="a.pdf"),
             "absolute input": dict(kind="pdf", html=str(self.ws / "docs" / "page.html"), pdf="a.pdf"),
@@ -99,6 +101,7 @@ class Checks(Temp):
             "input through a link out": dict(kind="pdf", html="link.html", pdf="a.pdf"),
             "input not a page": dict(kind="pdf", html="docs/page.txt", pdf="a.pdf"),
             "input a folder": dict(kind="pdf", html="dir.html", pdf="a.pdf"),
+            "input a page's name on a text file": dict(kind="pdf", html="named.html", pdf="a.pdf"),
             "input missing": dict(kind="pdf", html="docs/none.html", pdf="a.pdf"),
             "output outside": dict(kind="pdf", html="docs/page.html", pdf="../a.pdf"),
             "output not a pdf": dict(kind="pdf", html="docs/page.html", pdf="a.html"),
@@ -118,6 +121,12 @@ class Checks(Temp):
 
     def test_pdf_never_runs_a_command(self):
         why, clean = self.check(cap="pdf", argv=["/bin/sh", "-c", "id"], cwd=".")
+        self.assertIn("pdf", why)
+        self.assertEqual(clean, {})
+
+    def test_pdf_never_runs_a_command_whatever_the_catalog_says(self):
+        with mock.patch.object(hubconf, "kind_only", lambda name, entry=None: False):
+            why, clean = self.check(cap="pdf", argv=["/bin/sh", "-c", "id"], cwd=".")
         self.assertIn("pdf", why)
         self.assertEqual(clean, {})
 
@@ -182,7 +191,10 @@ class Renderer(Temp):
         exe.parent.mkdir(parents=True)
         exe.write_text("#!/bin/sh\n")
         exe.chmod(0o755)
-        (self.tmp / "tools" / "current.json").write_text(json.dumps({"version": version, "platform": "mac-arm64"}))
+        import datetime
+        (self.tmp / "tools" / "current.json").write_text(json.dumps(
+            {"version": version, "platform": "mac-arm64",
+             "checked": datetime.datetime.now().astimezone().isoformat()}))
         return exe
 
     def test_refused_with_no_copy(self):
@@ -196,6 +208,16 @@ class Renderer(Temp):
         rec = json.loads((self.tmp / "tools" / "current.json").read_text())
         for days, refused in ((3, False), (pdf_renderer.STALE_DAYS + 1, True)):
             rec["behind_since"] = (now - datetime.timedelta(days=days)).isoformat()
+            (self.tmp / "tools" / "current.json").write_text(json.dumps(rec))
+            self.assertEqual(bool(pdf_renderer.refusal(now)), refused, days)
+
+    def test_refused_when_not_checked_for_too_long(self):
+        self.fake_copy()
+        import datetime
+        now = datetime.datetime.now().astimezone()
+        rec = json.loads((self.tmp / "tools" / "current.json").read_text())
+        for days, refused in ((1, False), (pdf_renderer.STALE_DAYS + 1, True)):
+            rec["checked"] = (now - datetime.timedelta(days=days)).isoformat()
             (self.tmp / "tools" / "current.json").write_text(json.dumps(rec))
             self.assertEqual(bool(pdf_renderer.refusal(now)), refused, days)
 
@@ -268,6 +290,32 @@ class Install(Temp):
         self.assertIn("behind_since", rec)
         self.assertEqual(rec["refused"], {new: "no pdf"})
 
+    def test_the_clock_starts_even_when_the_download_fails(self):
+        pdf_renderer.install(self.fetch(self.archive()))
+
+        def broken(url, limit, dest=None):
+            if url == pdf_renderer.INDEX:
+                return json.dumps(index(version="159.0.1.2")).encode()
+            raise OSError("down")
+        with self.assertRaises(OSError):
+            pdf_renderer.install(broken)
+        self.assertIn("behind_since", pdf_renderer.record())
+
+    def test_an_entry_under_a_link_is_refused_before_anything_is_written(self):
+        import zipfile
+        z = self.tmp / "evil.zip"
+        with zipfile.ZipFile(z, "w") as f:
+            link = zipfile.ZipInfo("chrome-headless-shell-mac-arm64/out")
+            link.external_attr = (0o120777 << 16)
+            f.writestr(link, str(self.tmp / "escape"))
+            f.writestr("chrome-headless-shell-mac-arm64/out/x", "x")
+        dest = self.tmp / "dest"
+        dest.mkdir()
+        with self.assertRaises(RuntimeError):
+            pdf_renderer.unpack(z, dest)
+        self.assertEqual(list(dest.iterdir()), [])
+        self.assertFalse((self.tmp / "escape").exists())
+
     def test_nothing_without_a_declaring_project(self):
         with mock.patch.object(pdf_renderer, "declared", lambda: []):
             self.assertEqual(pdf_renderer.install(lambda *a: self.fail("fetched")), 0)
@@ -297,28 +345,52 @@ class RunnerRuns(Temp):
                    (pdf_renderer, "refusal", lambda now=None: ""), (pdf_renderer, "current", lambda: (folder, exe)),
                    (pdf_renderer, "sweep", lambda keep=(): 0), (seatbelt, "pdf_profile", lambda *a: allow)]
         import policy
-        patches.append((policy, "for_project", lambda name: {}))
+        patches.append((policy, "for_project", lambda name: {"workspace": str(self.ws)}))
         for obj, target, value in patches:
             p = mock.patch.object(obj, target, value)
             p.start()
             self.addCleanup(p.stop)
         self.runner = cr.Runner()
 
-    def test_prints_and_cleans_its_scratch(self):
-        d = self.ws / ".hub-run" / "requests"
-        d.mkdir(parents=True)
-        (d / "j1.json").write_text(json.dumps({"v": 1, "id": "j1", "kind": "pdf", "html": "page.html", "pdf": "o.pdf"}))
+    def run_request(self, ws, job_id="j1"):
+        d = ws / ".hub-run" / "requests"
+        d.mkdir(parents=True, exist_ok=True)
+        (d / f"{job_id}.json").write_text(json.dumps({"v": 1, "id": job_id, "kind": "pdf", "html": "page.html",
+                                                      "pdf": "o.pdf"}))
         t0 = time.time()
         st = None
         while time.time() - t0 < 15:
             self.runner.tick()
             try:
-                st = json.loads((self.ws / ".hub-run" / "jobs" / "j1" / "state.json").read_text())
+                st = json.loads((ws / ".hub-run" / "jobs" / job_id / "state.json").read_text())
             except OSError:
                 st = None
             if st and st["state"] in cr.TERMINAL:
-                break
+                return st
             time.sleep(0.1)
+        return st
+
+    def test_a_failed_start_closes_its_files_and_removes_nothing_it_didnt_make(self):
+        fds = len(os.listdir("/dev/fd"))
+        theirs = self.tmp / "state" / "p" / "j1.d"
+        theirs.mkdir(parents=True)
+        (theirs / "keep").write_text("k")
+        st = self.run_request(self.ws)
+        self.assertEqual(st.get("state"), "rejected", st)
+        self.assertEqual(len(os.listdir("/dev/fd")), fds)
+        self.assertTrue((theirs / "keep").exists(), "a scratch folder this job didn't make is left alone")
+
+    def test_a_request_from_another_folder_doesnt_print(self):
+        other = self.tmp / "runtime"
+        other.mkdir()
+        (other / "page.html").write_text("<p>x</p>")
+        self.projects["p"]["dirs"].append(other)
+        st = self.run_request(other)
+        self.assertEqual(st.get("state"), "rejected", st)
+        self.assertFalse((other / "o.pdf").exists())
+
+    def test_prints_and_cleans_its_scratch(self):
+        st = self.run_request(self.ws)
         self.assertEqual((st or {}).get("state"), "done", st)
         self.assertEqual(st.get("exit"), 0)
         self.assertEqual((self.ws / "o.pdf").read_bytes(), b"%PDF-")
@@ -326,6 +398,43 @@ class RunnerRuns(Temp):
         scratch = self.tmp / "state" / "p" / "j1.d"
         self.assertIn(f"home={scratch}", out, "HOME is the platform's scratch, not the project's folder")
         self.assertFalse(scratch.exists(), "the scratch goes when the job ends")
+
+
+@unittest.skipUnless(sys.platform == "darwin" and shutil.which("cc"), "proc_pidpath is macOS's; needs a C compiler")
+class Sweep(Temp):
+    """Strays are found by the program the kernel runs, not by what they call themselves; the installer's fixture and
+    running jobs are left alone."""
+
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(pdf_renderer, "root", lambda: self.tmp / "tools")
+        p.start()
+        self.addCleanup(p.stop)
+        (self.tmp / "tools").mkdir()
+        # a program of its own in the folder (a copy of a system binary is killed at start on macOS)
+        src = self.tmp / "sleeper.c"
+        src.write_text("#include <unistd.h>\nint main(void){for(;;)pause();}\n")
+        self.exe = self.tmp / "tools" / "sleeper"
+        subprocess.run([shutil.which("cc"), "-o", str(self.exe), str(src)], check=True, capture_output=True)
+
+    def start(self, argv0=None):
+        p = subprocess.Popen([str(argv0 or self.exe)], executable=str(self.exe), start_new_session=True)
+        self.addCleanup(lambda: (p.kill(), p.wait()))
+        time.sleep(0.3)
+        return p
+
+    def test_a_stray_is_killed_even_under_another_name(self):
+        p = self.start(argv0="/usr/bin/innocent")
+        self.assertEqual(pdf_renderer.exe_path(p.pid), str(self.exe))
+        self.assertEqual(pdf_renderer.sweep(), 1)
+        self.assertEqual(p.wait(timeout=5), -9)
+
+    def test_a_running_jobs_group_and_the_fixture_are_kept(self):
+        job, fixture = self.start(), self.start()
+        (self.tmp / "tools" / "fixture.json").write_text(json.dumps({"pgid": fixture.pid}))
+        self.assertEqual(pdf_renderer.sweep({job.pid}), 0)
+        self.assertIsNone(job.poll())
+        self.assertIsNone(fixture.poll())
 
 
 @unittest.skipUnless(MAC and os.environ.get("BRUNNA_PDF_RENDERER"),

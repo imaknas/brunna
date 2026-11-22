@@ -768,3 +768,14 @@ Two blocking findings, both taken; the should-fix ones too. Where r1 differs fro
 - **Paths.** The runner passes the paths as resolved at the check and touches neither again by path.
 - **Open, not blocking:** whether macOS resolves names through another service (no packet capture here; what could
   leave is no more than the session already reads).
+
+### The code's blind review (11-23)
+
+No blocking finding. Fixed from it: the sweep finds strays by the kernel's program path (`proc_pidpath`, not argv[0])
+under both spellings of the folder, and leaves the installer's fixture alone (its group in `fixture.json`); a start that
+fails closes the job's output files, and removes a scratch folder only if this job made it; a print is refused when the
+renderer hasn't been checked for `STALE_DAYS`, and `behind_since` is saved before the download; the archive's entries
+are checked before `ditto` writes anything (a name or link leaving it, an entry under a link); `cap: pdf` is refused
+whatever the live catalog says; the page's own name after its links must be a page; a request found in the runtime
+folder doesn't print. Left as they are: the runner resolves project paths outside a sandbox (as cap-run's `cwd` check
+does; an automount through `/net` not measured), and Mach and IOKit under `(allow default)`.

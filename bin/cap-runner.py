@@ -250,7 +250,7 @@ def check(req, stem: str, ws: pathlib.Path, caps: list[str], models: dict | None
     if kind is not None:
         return _("Unknown request kind {kind!r}", kind=kind), {}
     cap = req.get("cap")
-    if isinstance(cap, str) and hubconf.kind_only(cap):
+    if isinstance(cap, str) and (cap in hubconf.KIND_CAPABILITIES or hubconf.kind_only(cap)):
         return _("The capability {cap} admits only its own request (brunna {cap}), never a command", cap=cap), {}
     if cap not in caps:
         return _("This project has not declared the capability {cap!r} (its registry entry's enforce.capabilities: "
@@ -301,7 +301,7 @@ def check_pdf(req: dict, ws: pathlib.Path, caps: list[str]) -> tuple[str, dict]:
     real = html.resolve()
     if real != ws and ws not in real.parents:
         return _("html {rel} is not inside the project folder", rel=req.get("html")), {}
-    if not real.is_file():
+    if not real.is_file() or not real.name.lower().endswith((".html", ".htm")):
         return _("html {rel} is not a file", rel=req.get("html")), {}
     why, out = _inside(ws, req.get("pdf"), (".pdf",), "pdf")
     if why:
@@ -582,6 +582,7 @@ class Runner:
 
     def start(self, job: Job) -> None:
         r = job.req
+        out = err = None
         try:
             flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
             out = os.open("stdout", flags, 0o644, dir_fd=job.fd)
@@ -618,11 +619,16 @@ class Runner:
                 if got is None:
                     raise RuntimeError(pdf_renderer.refusal() or "no PDF renderer")
                 folder, exe = got
-                job.scratch = DIR / job.project / f"{job.id}.d"
-                job.scratch.parent.mkdir(parents=True, exist_ok=True)
-                job.scratch.mkdir(mode=0o700)
+                pol = policy.for_project(job.project)
+                home = pathlib.Path(pol["workspace"]).resolve()
+                if r["html"] != home and home not in r["html"].parents:   # a request found in its runtime folder
+                    raise RuntimeError(_("a page prints only from the project's workspace folder"))
+                scratch = DIR / job.project / f"{job.id}.d"
+                scratch.parent.mkdir(parents=True, exist_ok=True)
+                scratch.mkdir(mode=0o700)
+                job.scratch = scratch   # only once this job made it: end_pdf removes it
                 profile = DIR / job.project / f"{job.id}.sb"
-                profile.write_text(seatbelt.pdf_profile(policy.for_project(job.project), folder, job.scratch))
+                profile.write_text(seatbelt.pdf_profile(pol, folder, job.scratch))
                 argv = [seatbelt.SANDBOX_EXEC, "-f", str(profile),
                         *pdf_renderer.argv(exe, job.scratch, r["html"], r["pdf"])]
                 env, cwd = pdf_renderer.env(job.scratch), job.scratch
@@ -634,11 +640,18 @@ class Runner:
                                             env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=err,
                                             start_new_session=True)
             finally:
-                os.close(out)
-                os.close(err)
+                fds, out, err = (out, err), None, None
+                for fd in fds:
+                    os.close(fd)
         # every failure must be answered, or the client keeps waiting on "queued" (seen on 10-25: stuck when
         # modules were inconsistent)
         except Exception as e:
+            for fd in (out, err):   # opened, and failed before the run took them
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
             log(project=job.project, id=job.id, event="start_failed", detail=str(e)[:300])
             self.finish(job, 0, state="rejected", reason=_("Failed to start: {err!r}", err=e)[:500])
             return

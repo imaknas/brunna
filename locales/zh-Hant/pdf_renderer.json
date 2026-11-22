@@ -19,5 +19,6 @@
  "PDF renderer: {v} (checked {at})": "PDF 產生器:{v}({at} 檢查)",
  "  a print would be refused: {why}": "  現在印會被拒絕:{why}",
  "  prints are served": "  可以印",
- "✗ the PDF renderer could not be installed: {err}": "✗ PDF 產生器裝不起來:{err}"
+ "✗ the PDF renderer could not be installed: {err}": "✗ PDF 產生器裝不起來:{err}",
+ "the PDF renderer hasn't been checked against Chrome's releases for more than {days} days; it is refused until the platform job brunna/pdf-renderer checks it": "PDF 產生器超過 {days} 天沒跟 Chrome 的版本對過;平台工作 brunna/pdf-renderer 對過之前一律拒絕"
 }

@@ -97,13 +97,22 @@ def refusal(now: datetime.datetime | None = None) -> str:
         return _("printing to PDF needs macOS: the platform's runner confines it with Seatbelt")
     if current() is None:
         return _("the platform has no PDF renderer yet (the platform job brunna/pdf-renderer installs it)")
-    behind = record().get("behind_since")
+    rec = record()
+    now = now or datetime.datetime.now().astimezone()
+    last = rec.get("checked") or rec.get("installed")
+    try:
+        unchecked = not isinstance(last, str) or (now - datetime.datetime.fromisoformat(last)).days > STALE_DAYS
+    except (TypeError, ValueError):
+        unchecked = True
+    if unchecked:
+        return _("the PDF renderer hasn't been checked against Chrome's releases for more than {days} days; it is "
+                 "refused until the platform job brunna/pdf-renderer checks it", days=STALE_DAYS)
+    behind = rec.get("behind_since")
     if isinstance(behind, str):
         try:
             since = datetime.datetime.fromisoformat(behind)
         except ValueError:
             return _("the PDF renderer's record is unreadable; the platform job brunna/pdf-renderer rewrites it")
-        now = now or datetime.datetime.now().astimezone()
         if (now - since).days > STALE_DAYS:
             return _("the PDF renderer is more than {days} days behind Chrome's stable release; it is refused until the "
                      "platform job brunna/pdf-renderer installs the new one", days=STALE_DAYS)
@@ -124,21 +133,45 @@ def env(scratch: pathlib.Path) -> dict[str, str]:
 
 # ---------- processes left behind ----------
 
-def sweep(keep_groups=()) -> int:
-    """Kill every process whose program is in the renderer's folder and whose group isn't a running job's (a renderer
-    that left its group); the number killed."""
-    base = str(root().resolve()) + "/"
+def exe_path(pid: int) -> str | None:
+    """The program a process runs, as the kernel has it (proc_pidpath; not argv[0], which a process sets itself)."""
+    import ctypes
     try:
-        out = subprocess.run(["ps", "-axo", "pid=,pgid=,comm="], capture_output=True, text=True, timeout=30).stdout
+        lib = ctypes.CDLL("/usr/lib/libproc.dylib", use_errno=True)
+    except OSError:
+        return None
+    buf = ctypes.create_string_buffer(4096)
+    n = lib.proc_pidpath(ctypes.c_int(pid), buf, ctypes.c_uint32(len(buf)))
+    return buf.raw[:n].decode(errors="replace") if n > 0 else None
+
+
+def fixture_group() -> int | None:
+    """The installer's fixture print, while it runs (its group, in the renderer's folder, which no sandbox writes)."""
+    try:
+        return int(json.loads((root() / "fixture.json").read_text())["pgid"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def sweep(keep_groups=()) -> int:
+    """Kill every process whose program is in the renderer's folder and whose group isn't a running job's or the
+    installer's fixture (a renderer that left its group); the number killed."""
+    bases = tuple(dict.fromkeys(str(x) + "/" for x in (root(), root().resolve())))
+    keep = {*keep_groups, *([g] if (g := fixture_group()) else [])}
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,pgid="], capture_output=True, text=True, timeout=30).stdout
     except (OSError, subprocess.SubprocessError):
         return 0
     n = 0
     for line in out.splitlines():
-        parts = line.split(None, 2)
-        if len(parts) != 3 or not parts[0].isdigit() or not parts[1].isdigit():
+        parts = line.split()
+        if len(parts) != 2 or not parts[0].isdigit() or not parts[1].isdigit():
             continue
-        pid, pgid, comm = int(parts[0]), int(parts[1]), parts[2]
-        if comm.startswith(base) and pgid not in keep_groups and pid != os.getpid():
+        pid, pgid = int(parts[0]), int(parts[1])
+        if pgid in keep or pid == os.getpid():
+            continue
+        exe = exe_path(pid)
+        if exe and exe.startswith(bases):
             try:
                 os.kill(pid, signal.SIGKILL)
                 n += 1
@@ -190,8 +223,34 @@ def pick(index: dict, plat: str) -> tuple[str, str]:
     return version, want
 
 
+def _entries_stay_inside(archive: pathlib.Path) -> None:
+    """Before anything is written: every entry's name is relative and stays inside, every link's target too, and no
+    entry sits below a link (where extracting it would follow the link)."""
+    import posixpath
+    import stat as st
+    import zipfile
+    with zipfile.ZipFile(archive) as z:
+        links = []
+        for info in z.infolist():
+            name = info.filename
+            norm = posixpath.normpath(name)
+            if name.startswith("/") or norm == ".." or norm.startswith("../"):
+                raise RuntimeError(_("the archive holds a link that leaves it: {p}", p=name))
+            if st.S_ISLNK(info.external_attr >> 16):
+                target = z.read(info).decode(errors="replace")
+                if target.startswith("/") or posixpath.normpath(posixpath.join(posixpath.dirname(norm), target)
+                                                                ).startswith(("../", "..")):
+                    raise RuntimeError(_("the archive holds a link that leaves it: {p}", p=name))
+                links.append(norm + "/")
+        for info in z.infolist():
+            if posixpath.normpath(info.filename).startswith(tuple(links)):
+                raise RuntimeError(_("the archive holds a link that leaves it: {p}", p=info.filename))
+
+
 def unpack(archive: pathlib.Path, dest: pathlib.Path) -> None:
-    """ditto into dest (new, empty); a link in it that is absolute or leaves dest refuses the version."""
+    """ditto into dest (new, empty), after the entries are checked; a link in it that is absolute or leaves dest
+    refuses the version (checked again on disk)."""
+    _entries_stay_inside(archive)
     subprocess.run(["/usr/bin/ditto", "-x", "-k", str(archive), str(dest)], check=True, capture_output=True, timeout=600)
     top = dest.resolve()
     for d, dirs, files in os.walk(dest):
@@ -235,6 +294,10 @@ def fixture_prints(folder: pathlib.Path, exe: pathlib.Path) -> str:
         p = subprocess.Popen([seatbelt.SANDBOX_EXEC, "-f", str(prof), *argv(exe, scratch, ws / "page.html", out)],
                              cwd=ws, env=env(scratch), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
+        try:   # the runner's sweep leaves this group alone (it would otherwise be a stray to it)
+            hubconf.write_atomic(root() / "fixture.json", json.dumps({"pgid": p.pid}))
+        except OSError:
+            pass
         try:
             p.wait(timeout=TIMEOUT_S)
         except subprocess.TimeoutExpired:
@@ -245,6 +308,7 @@ def fixture_prints(folder: pathlib.Path, exe: pathlib.Path) -> str:
             except (ProcessLookupError, PermissionError):
                 pass
             p.wait()
+            (root() / "fixture.json").unlink(missing_ok=True)
         try:
             ok = out.read_bytes()[:5] == b"%PDF-"
         except OSError:
@@ -289,6 +353,7 @@ def install(fetch=_get) -> int:
         return 0
     if rec.get("version") and not rec.get("behind_since"):
         rec["behind_since"] = _now()
+    _save(rec)   # the clock starts now, whatever happens to the download or the fixture
     root().mkdir(parents=True, exist_ok=True)
     folder = root() / version
     staging = pathlib.Path(tempfile.mkdtemp(prefix=f"pdf-renderer-{version}-", dir=hubconf.private_tmp()))
