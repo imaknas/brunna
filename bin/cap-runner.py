@@ -240,11 +240,18 @@ def check(req, stem: str, ws: pathlib.Path, caps: list[str], models: dict | None
         return _("Malformed request (must be a JSON object with v: 1)"), {}
     if req.get("id") != stem:
         return _("id does not match the file name"), {}
-    if req.get("kind") == "complete":
+    kind = req.get("kind")
+    if kind == "complete":
         return check_complete(req, models or {})
-    if req.get("kind") == "agent":
+    if kind == "agent":
         return check_agent(req, agents or {}, ws)
+    if kind == "pdf":
+        return check_pdf(req, ws, caps)
+    if kind is not None:
+        return _("Unknown request kind {kind!r}", kind=kind), {}
     cap = req.get("cap")
+    if isinstance(cap, str) and hubconf.kind_only(cap):
+        return _("The capability {cap} admits only its own request (brunna {cap}), never a command", cap=cap), {}
     if cap not in caps:
         return _("This project has not declared the capability {cap!r} (its registry entry's enforce.capabilities: "
                  "{caps})", cap=cap,
@@ -264,6 +271,44 @@ def check(req, stem: str, ws: pathlib.Path, caps: list[str], models: dict | None
     if not isinstance(t, int) or isinstance(t, bool) or not 0 < t <= conf("max_timeout_s", 1800):
         return _("timeout_s must be an integer from 1 to {max}", max=conf("max_timeout_s", 1800)), {}
     return "", {"cap": cap, "argv": argv, "cwd": real, "timeout_s": t}
+
+
+def _inside(ws: pathlib.Path, rel, suffixes: tuple[str, ...], what: str) -> tuple[str, pathlib.Path | None]:
+    """('', the path resolved) for a relative path whose folder resolves inside ws and whose name ends in one of
+    suffixes; else (why, None)."""
+    if not isinstance(rel, str) or not rel or "\0" in rel or len(rel) > 4096 or os.path.isabs(rel):
+        return _("{what} must be a path relative to the project folder", what=what), None
+    path = ws / rel
+    name = path.name
+    if not name.lower().endswith(suffixes):
+        return _("{what} must end in {suffixes}", what=what, suffixes=" or ".join(suffixes)), None
+    folder = path.parent.resolve()
+    if folder != ws and ws not in folder.parents:
+        return _("{what} {rel} is not inside the project folder", what=what, rel=rel), None
+    return "", folder / name
+
+
+def check_pdf(req: dict, ws: pathlib.Path, caps: list[str]) -> tuple[str, dict]:
+    """A page printed to PDF (brunna pdf; docs/design/capabilities.md, "pdf" and its r1): the project declares pdf, the
+    input is a page inside its folder, the output a .pdf inside it; the runner builds the whole command."""
+    import pdf_renderer
+    if "pdf" not in caps or not hubconf.kind_only("pdf"):
+        return _("This project has not declared the capability 'pdf' (its registry entry's enforce.capabilities: "
+                 "{caps})", caps=", ".join(caps) or _("none")), {}
+    why, html = _inside(ws, req.get("html"), (".html", ".htm"), "html")
+    if why:
+        return why, {}
+    real = html.resolve()
+    if real != ws and ws not in real.parents:
+        return _("html {rel} is not inside the project folder", rel=req.get("html")), {}
+    if not real.is_file():
+        return _("html {rel} is not a file", rel=req.get("html")), {}
+    why, out = _inside(ws, req.get("pdf"), (".pdf",), "pdf")
+    if why:
+        return why, {}
+    if (why := pdf_renderer.refusal()):
+        return why, {}
+    return "", {"kind": "pdf", "html": real, "pdf": out, "timeout_s": pdf_renderer.TIMEOUT_S}
 
 
 def check_complete(req: dict, models: dict) -> tuple[str, dict]:
@@ -408,6 +453,7 @@ class Job:
         self.killed_at = 0.0
         self.started = 0.0
         self.queued = time.time()
+        self.scratch: pathlib.Path | None = None   # a pdf job's platform-owned scratch folder
 
     @property
     def pool(self) -> str:
@@ -562,6 +608,24 @@ class Runner:
                         "--request", str(inp), "--cwd", str(r["cwd"])]
                 env.update({k: v for k, v in os.environ.items() if k.startswith(("AGENT_HUB_", names.ENV_NEW))})
                 cwd = DIR
+            elif r.get("kind") == "pdf":
+                # the platform's renderer under the PDF profile; the job's scratch (HOME, TMPDIR, the browser's
+                # profile) is platform state, which no project writes, removed when the job ends
+                import pdf_renderer
+                import policy
+                import seatbelt
+                got = pdf_renderer.current()
+                if got is None:
+                    raise RuntimeError(pdf_renderer.refusal() or "no PDF renderer")
+                folder, exe = got
+                job.scratch = DIR / job.project / f"{job.id}.d"
+                job.scratch.parent.mkdir(parents=True, exist_ok=True)
+                job.scratch.mkdir(mode=0o700)
+                profile = DIR / job.project / f"{job.id}.sb"
+                profile.write_text(seatbelt.pdf_profile(policy.for_project(job.project), folder, job.scratch))
+                argv = [seatbelt.SANDBOX_EXEC, "-f", str(profile),
+                        *pdf_renderer.argv(exe, job.scratch, r["html"], r["pdf"])]
+                env, cwd = pdf_renderer.env(job.scratch), job.scratch
             else:
                 profile = make_profile(job.project, r["cap"], job.id)
                 argv, cwd = ["/usr/bin/sandbox-exec", "-f", str(profile), *r["argv"]], r["cwd"]
@@ -583,8 +647,8 @@ class Runner:
         try:
             if r.get("kind") == "agent":
                 write_state(job.fd, state="running", pid=job.proc.pid, kind="agent")
-            elif r.get("kind") == "complete":
-                write_state(job.fd, state="running", pid=job.proc.pid, kind="complete")
+            elif r.get("kind") in ("complete", "pdf"):
+                write_state(job.fd, state="running", pid=job.proc.pid, kind=r["kind"])
             else:
                 write_state(job.fd, state="running", pid=job.proc.pid, cap=r["cap"])
         except OSError as e:
@@ -597,6 +661,8 @@ class Runner:
             log(project=job.project, id=job.id, event="started", kind="agent", name=r["name"], pid=job.proc.pid)
         elif r.get("kind") == "complete":
             log(project=job.project, id=job.id, event="started", kind="complete", point=r["point"], pid=job.proc.pid)
+        elif r.get("kind") == "pdf":
+            log(project=job.project, id=job.id, event="started", kind="pdf", pid=job.proc.pid)
         else:
             log(project=job.project, id=job.id, event="started", cap=r["cap"], argv=r["argv"][:20],
                 cwd=str(r["cwd"]), pid=job.proc.pid)
@@ -617,6 +683,18 @@ class Runner:
             pass
         if job.pool == "agent":
             self.minutes.settle(job.req.get("ledger", ""), seconds)
+        if job.req.get("kind") == "pdf":
+            self.end_pdf(job)
+
+    def end_pdf(self, job: Job) -> None:
+        """After a print: its scratch removed (rmtree walks with fds, never following a link the renderer left), and
+        any renderer process outside a running job's group killed (one that left its group)."""
+        import pdf_renderer
+        if job.scratch is not None:
+            shutil.rmtree(job.scratch, ignore_errors=True)
+        n = pdf_renderer.sweep({j.proc.pid for j in self.running if j.proc is not None and j is not job})
+        if n:
+            log(project=job.project, id=job.id, event="pdf_strays_killed", n=n)
 
     def poll(self) -> None:
         t = time.time()
@@ -672,6 +750,15 @@ class Runner:
                 continue
             if (began := process_started(pgid)) is not None and abs(began - at) < 3:
                 self.kill(pgid, signal.SIGKILL)
+        # prints the last runner left: no job runs yet, so every renderer process and every scratch folder is a stray
+        try:
+            import pdf_renderer
+            pdf_renderer.sweep()
+        except Exception as e:   # the renderer's module is optional to the rest of the runner
+            log(event="pdf_sweep_error", detail=repr(e)[:300])
+        for d in DIR.glob("*/*.d"):
+            if d.is_dir() and not d.is_symlink():
+                shutil.rmtree(d, ignore_errors=True)
         for project, job_id, _jobs_fd, job_fd in self.each_job():
             st = job_state_at(job_fd)
             if not isinstance(st, dict) or st.get("state") not in ("queued", "running"):

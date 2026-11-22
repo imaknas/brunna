@@ -114,6 +114,8 @@ for project sessions (these are what the rules files name; the permission rules 
                                                        its registry models:, run by the platform)
   brunna agent <name> [--schema F] < prompt         = bin/hub-run --agent (a confined agent call the project declares
                                                        in its registry agents:, run by the platform in its folder)
+  brunna pdf <page.html> <out.pdf>                 = bin/hub-run --pdf (the platform prints a page in the project to
+                                                       a PDF in it; registry enforce.capabilities: pdf)
   brunna push [<branch>] [--no-wait | --wait <s>]  = bin/git_remote.py in a sandboxed project's folder: the platform
                                                        checks and pushes the branch (docs/design/platform-push.md)
   brunna install-cli [--dir <folder>]   put brunna's forwarding script in <folder> (default ~/.local/bin; must be on PATH)
@@ -2432,7 +2434,7 @@ def cmd_push_setup(argv: list[str]) -> int:
 SESSION_COMMANDS = {**{c: ("hubbus", c) for c in ("send", "inbox", "show", "ack", "pass", "done", "thread", "open-questions")},
                     "merge-branch": ("merge-branch", None), "test": ("test-runner.py", None),
                     "cap-run": ("hub-run", None),
-                    "complete": ("hub-run", "--complete"), "agent": ("hub-run", "--agent")}
+                    "complete": ("hub-run", "--complete"), "agent": ("hub-run", "--agent"), "pdf": ("hub-run", "--pdf")}
 
 
 def session_command(name: str):

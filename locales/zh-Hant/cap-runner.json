@@ -22,5 +22,13 @@
  "{project} has {spent} of its {cap} agent minutes today, and this call reserves {want}": "{project} 今天的 agent 分鐘數 {cap} 已經用了 {spent},這次呼叫要預留 {want}",
  "agent calls have {spent} of the platform's {cap} minutes today, and this call reserves {want}": "平台今天 agent 呼叫的 {cap} 分鐘已經用了 {spent},這次呼叫要預留 {want}",
  "{project} already has an agent call queued or running; one at a time": "{project} 已經有一個 agent 呼叫在排隊或在跑;一次一個",
- "Waited in the queue longer than its timeout": "排隊等得比它的時限還久"
+ "Waited in the queue longer than its timeout": "排隊等得比它的時限還久",
+ "Unknown request kind {kind!r}": "不認得的請求種類 {kind!r}",
+ "The capability {cap} admits only its own request (brunna {cap}), never a command": "能力 {cap} 只收它自己的請求(brunna {cap}),不代跑任何指令",
+ "{what} must be a path relative to the project folder": "{what} 必須是相對於專案資料夾的路徑",
+ "{what} must end in {suffixes}": "{what} 的檔名必須以 {suffixes} 結尾",
+ "{what} {rel} is not inside the project folder": "{what} {rel} 不在專案資料夾裡",
+ "This project has not declared the capability 'pdf' (its registry entry's enforce.capabilities: {caps})": "這個專案沒有宣告能力 'pdf'(它登錄的 enforce.capabilities:{caps})",
+ "html {rel} is not inside the project folder": "html {rel} 不在專案資料夾裡",
+ "html {rel} is not a file": "html {rel} 不是檔案"
 }

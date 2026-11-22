@@ -1031,11 +1031,33 @@ def workspace(name: str) -> pathlib.Path | None:
     return path(ws) if ws else None
 
 
+# capabilities that admit one request kind of the runner's and nothing else (no fragment, never a cap-run command;
+# docs/design/capabilities.md, "pdf", r1 B1)
+KIND_CAPABILITIES = ("pdf",)
+
+
 def capabilities() -> dict[str, dict]:
     """The capabilities the platform has (docs/design/capabilities.md): hub.json's capabilities whose
-    capabilities/<name>.sb exists."""
+    capabilities/<name>.sb exists, and those whose `kind` is one of KIND_CAPABILITIES (named as the entry: a request
+    kind, with no fragment)."""
     cat = {k: v for k, v in (get("capabilities") or {}).items() if not k.startswith("_") and isinstance(v, dict)}
-    return {k: v for k, v in cat.items() if (ROOT / "capabilities" / f"{k}.sb").is_file()}
+    return {k: v for k, v in cat.items()
+            if kind_only(k, v) or (not v.get("kind") and (ROOT / "capabilities" / f"{k}.sb").is_file())}
+
+
+def kind_only(name: str, entry: dict | None = None) -> bool:
+    """Whether the capability admits only its request kind (never a command run under a profile)."""
+    entry = entry if entry is not None else (get("capabilities") or {}).get(name)
+    return name in KIND_CAPABILITIES and isinstance(entry, dict) and entry.get("kind") == name
+
+
+def tools_dir() -> pathlib.Path:
+    """The platform's own helper programs (the PDF renderer, bin/pdf_renderer.py): <instance>/tools, in no sandbox's
+    writes; on an old layout the hub's .state/tools; a throwaway state (a test's) keeps its own."""
+    if STATE != MAIN / ".state":
+        return STATE / "tools"
+    home = instance_home()
+    return home / "tools" if home else STATE / "tools"
 
 
 def code_stamp() -> float:

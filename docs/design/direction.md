@@ -266,6 +266,10 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   built: the nightly signal list, the sessions' rules text and the letter after an upgrade; pushing from an upgraded
   sandboxed project is designed in `platform-push.md` (11-15), ahead of the rest of the git broker.
 - **Mail handler:** one that may change code (`mailbox-routing.md` step 4).
+- **`pdf`** (`capabilities.md` "pdf", built 11-23 after a blind review of its design): a sandboxed project prints a
+  page in its folder with `brunna pdf`; the platform's chrome-headless-shell under a profile of its own (no network,
+  reads only the folder and the renderer, no other program). Left: Mach and IOKit denied by default with a measured
+  allowlist, and whether names resolve through another system service.
 - **Who to ask** (`who-to-ask.md`, design 11-17, not built; the owner's three questions are open). A session with a
   question that spans projects knows how to send but not whom to send to. Recommended:
   - per-project cards, each written by its own project's agent on a platform request and held by the platform;

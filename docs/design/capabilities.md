@@ -668,7 +668,7 @@ kinds, and dropping the raw-device deny fails the raw read under both.
 
 ## `pdf`: print a project's HTML to PDF (11-23)
 
-**Status:** design 11-23, not built. The owner asked for it on 11-23 ("Yes, build it"): only printing a page to a
+**Status:** built 11-23 (r1 below holds where it differs). The owner asked for it on 11-23 ("Yes, build it"): only printing a page to a
 PDF, not a general browser capability. Granting it to a project is a separate yes (`enforce.capabilities` is a
 security field).
 

@@ -82,7 +82,9 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
   the user's. New code always goes through these and never builds paths itself (the ratchet blocks it)
 - **The platform's CLI is `brunna`** (`bin/hub` is the old name and forwards to it). `brunna install-cli` puts it on
   PATH; project sessions use `brunna send/inbox/done/…`, `brunna merge-branch`, `brunna cap-run`, `brunna complete`,
-  `brunna agent` (a project's declared confined agent call, docs/design/project-agent-calls.md), `brunna push` (a
+  `brunna agent` (a project's declared confined agent call, docs/design/project-agent-calls.md), `brunna pdf` (a
+  sandboxed project's page printed to PDF by the platform's headless browser, capability `pdf`, `bin/pdf_renderer.py`,
+  docs/design/capabilities.md "pdf"), `brunna push` (a
   sandboxed project's push, which the platform checks and makes with its own per-repo key: `bin/git_remote.py`,
   `bin/push_checks.py`, `bin/push_queue.py`, `bin/git_push_grant.py`, docs/design/platform-push.md; the owner's own is
   `brunna push <project>` from any folder that isn't a sandboxed project's, `--owner` anywhere, and a GitHub release

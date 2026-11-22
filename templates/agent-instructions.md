@@ -162,6 +162,9 @@ program the sandbox blocks (e.g. Blender, which needs the GPU) runs with
 (it can write only the project folder and has no network), and the output and exit code come back as they are; if your
 command is interrupted the work keeps running, and `brunna cap-run --wait <id>` picks it up again. A capability that is
 not declared is refused; for a new one, write to brunna.
+A project that declares `pdf` prints a page in its folder to a PDF with `brunna pdf <page.html> <out.pdf>` (the
+platform's headless browser, no network: fonts and images the page uses must be in the project folder). `pdf` runs
+nothing else: `brunna cap-run --cap pdf` is refused.
 
 ## Long-running programs and ports (the platform runs them as services)
 

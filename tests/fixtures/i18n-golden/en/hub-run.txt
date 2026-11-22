@@ -2,7 +2,7 @@
 exit 0
 --- stdout
 usage: hub-run [-h] [--cap CAP] [--timeout TIMEOUT] [--wait ID] [--complete POINT] [--agent NAME]
-               [--schema FILE]
+               [--pdf PAGE OUT] [--schema FILE]
                ...
 
 Run a program that needs a capability under the platform's profile
@@ -19,6 +19,8 @@ options:
                      result on stdout
   --agent NAME       a confined agent call this project declares (registry agents:): prompt on
                      stdin, JSON result on stdout
+  --pdf PAGE OUT     print a page in this project to a PDF in it (registry enforce.capabilities:
+                     pdf)
   --schema FILE      with --complete or --agent: JSON schema the answer must match
 --- stderr
 === not in a project

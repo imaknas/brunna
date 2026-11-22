@@ -853,7 +853,10 @@ class SystemTempIsNoPlaceForIt(unittest.TestCase):
             "bin/git_fence.py",
             # brunna push names the temp areas only to refuse a local origin there (git-broker.md, "Owner-run push");
             # its own bundle goes in private_tmp
-            "bin/git_remote.py"}
+            "bin/git_remote.py",
+            # a print's TMPDIR is its job's scratch folder in platform state, never a temp area (capabilities.md, "pdf"
+            # r1); its download stages in private_tmp
+            "bin/pdf_renderer.py"}
     USE = __import__("re").compile(r"tempfile[.](?:mkdtemp|TemporaryDirectory|NamedTemporaryFile|mkstemp|gettempdir|TemporaryFile)[(]"
                                    r"|[$][(]mktemp|[\"' ]/tmp[/\"' ]|/private/tmp|/var/folders|TMPDIR")
     MOVED = __import__("re").compile(r"dir=(?:hubconf[.])?(?:private_tmp[(][)]|STATE\b)")   # both denied to every sandbox

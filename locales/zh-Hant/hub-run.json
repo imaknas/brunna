@@ -18,5 +18,6 @@
  "a confined agent call this project declares (registry agents:): prompt on stdin, JSON result on stdout": "這個專案宣告的受限 agent 呼叫(登錄的 agents:):prompt 從 stdin 給,JSON 結果在 stdout",
  "with --complete or --agent: JSON schema the answer must match": "跟 --complete 或 --agent 一起用:回答必須符合的 JSON schema",
  "the agent call ran past its deadline (its declared timeout plus a minute) and was stopped; the registry's agents.<name>.timeout sets it": "agent 呼叫超過期限(宣告的時限再加一分鐘),已經停掉;時限由登錄的 agents.<name>.timeout 決定",
- "job {job_id} (agent {name}); if this call is interrupted, the agent keeps running: reattach with `{cli} cap-run --wait {job_id}`": "工作 {job_id}(agent {name});這個呼叫被中斷的話,agent 會繼續跑:用 `{cli} cap-run --wait {job_id}` 接回來"
+ "job {job_id} (agent {name}); if this call is interrupted, the agent keeps running: reattach with `{cli} cap-run --wait {job_id}`": "工作 {job_id}(agent {name});這個呼叫被中斷的話,agent 會繼續跑:用 `{cli} cap-run --wait {job_id}` 接回來",
+ "print a page in this project to a PDF in it (registry enforce.capabilities: pdf)": "把這個專案裡的頁面印成專案裡的 PDF(登錄 enforce.capabilities 要有 pdf)"
 }

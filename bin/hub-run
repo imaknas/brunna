@@ -14,6 +14,10 @@
                                job id comes first on stderr; stdout = the JSON result, exit 1 = the run refused or
                                failed (llm_error says why), 124 = stopped at its deadline (the declared timeout plus a
                                minute). docs/design/project-agent-calls.md A
+  hub-run --pdf <page.html> <out.pdf>
+                               the page printed to PDF by the platform's renderer (brunna pdf; the registry's
+                               enforce.capabilities has pdf): both inside the project folder, no network, nothing
+                               outside the folder read. docs/design/capabilities.md, "pdf"
 
 Run in the project folder (or below it). This only writes the request into its own project's `.hub-run/requests/`; the
 platform's run service (cap-runner.py, not in the sandbox) checks it before running it, writes the output and exit code
@@ -77,6 +81,20 @@ def submit(ws: pathlib.Path, cap: str, argv: list[str], timeout: int | None) -> 
     d = ws / ".hub-run" / "requests"
     d.mkdir(parents=True, exist_ok=True)
     tmp = d / f".{job_id}.tmp"  # write a temp file, then rename: the service never reads a half-written request
+    tmp.write_text(json.dumps(req, ensure_ascii=False))
+    tmp.rename(d / f"{job_id}.json")
+    return job_id
+
+
+def submit_pdf(ws: pathlib.Path, html: str, pdf: str) -> str:
+    """A print of a page (kind pdf): the two paths, relative to the project folder; the runner builds the command."""
+    here = pathlib.Path.cwd()
+    job_id = f"{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
+    req = {"v": 1, "id": job_id, "kind": "pdf", "html": os.path.relpath(here / html, ws),
+           "pdf": os.path.relpath(here / pdf, ws)}
+    d = ws / ".hub-run" / "requests"
+    d.mkdir(parents=True, exist_ok=True)
+    tmp = d / f".{job_id}.tmp"
     tmp.write_text(json.dumps(req, ensure_ascii=False))
     tmp.rename(d / f"{job_id}.json")
     return job_id
@@ -173,6 +191,8 @@ def main() -> int:
     ap.add_argument("--agent", metavar="NAME",
                     help=_("a confined agent call this project declares (registry agents:): prompt on stdin, JSON result "
                            "on stdout"))
+    ap.add_argument("--pdf", nargs=2, metavar=("PAGE", "OUT"),
+                    help=_("print a page in this project to a PDF in it (registry enforce.capabilities: pdf)"))
     ap.add_argument("--schema", metavar="FILE", help=_("with --complete or --agent: JSON schema the answer must match"))
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
     a = ap.parse_args()
@@ -183,6 +203,8 @@ def main() -> int:
         return 2
     if a.wait:
         return follow(ws, a.wait, pickup=False)
+    if a.pdf:
+        return follow(ws, submit_pdf(ws, *a.pdf), pickup=True)
     if a.complete or a.agent:
         try:
             schema = json.loads(pathlib.Path(a.schema).read_text()) if a.schema else None

@@ -165,6 +165,15 @@ jobs:
   background: true
   cwd: hub
   run: bin/py bin/update-runtimes.py
+# the PDF renderer that prints sandboxed projects' pages (docs/design/capabilities.md, "pdf"): the newest Stable
+# chrome-headless-shell, made current only after a fixture page prints under its profile; a print is refused once it is
+# more than 14 days behind. Downloads nothing while no sandboxed project declares pdf
+- name: pdf-renderer
+  at: "04:20"
+  max_attempts_per_day: 2
+  background: true
+  cwd: hub
+  run: bin/py bin/pdf_renderer.py install
 # each version of a coding agent the user's sessions run, checked when first seen (docs/design/runtime-versions.md
 # section 6): installed into the store from the vendor and its session-side checks run; a sandboxed project's sessions
 # of a version that failed a safety check get no letters or wakes. Long only when there is a new version to check

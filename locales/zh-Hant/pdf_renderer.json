@@ -1,0 +1,23 @@
+{
+ "printing to PDF needs macOS: the platform's runner confines it with Seatbelt": "印成 PDF 需要 macOS:平台的代跑用 Seatbelt 把它關起來",
+ "the platform has no PDF renderer yet (the platform job brunna/pdf-renderer installs it)": "平台還沒有 PDF 產生器(平台工作 brunna/pdf-renderer 會裝)",
+ "the PDF renderer's record is unreadable; the platform job brunna/pdf-renderer rewrites it": "PDF 產生器的紀錄讀不懂;平台工作 brunna/pdf-renderer 會重寫",
+ "the PDF renderer is more than {days} days behind Chrome's stable release; it is refused until the platform job brunna/pdf-renderer installs the new one": "PDF 產生器落後 Chrome 的穩定版超過 {days} 天;平台工作 brunna/pdf-renderer 裝好新版之前一律拒絕",
+ "no certificate authorities could be loaded: the download can't be verified": "載入不到任何憑證機構:下載的東西無法驗證",
+ "{url} is larger than {n} bytes": "{url} 超過 {n} bytes",
+ "Chrome for Testing's index has no Stable headless shell": "Chrome for Testing 的索引裡沒有 Stable 的 headless shell",
+ "Chrome for Testing's index names an odd version: {v!r}": "Chrome for Testing 的索引給了一個不像版本號的版本:{v!r}",
+ "Chrome for Testing's index gives no download at {want}": "Chrome for Testing 的索引沒有給 {want} 這個下載位置",
+ "the archive holds a link that leaves it: {p}": "壓縮檔裡有指到外面的連結:{p}",
+ "the fixture page didn't print in {s} s": "測試頁 {s} 秒內沒印出來",
+ "the fixture page didn't print (exit {code})": "測試頁沒印出來(exit {code})",
+ "no sandboxed project declares pdf: nothing to install": "沒有開沙箱的專案宣告 pdf:不用裝",
+ "the PDF renderer is current: {v}": "PDF 產生器是最新的:{v}",
+ "the archive has no chrome-headless-shell for {plat}": "壓縮檔裡沒有 {plat} 的 chrome-headless-shell",
+ "✗ the PDF renderer {v} was kept aside: {why}": "✗ PDF 產生器 {v} 先放一邊沒採用:{why}",
+ "✓ the PDF renderer is now {v}": "✓ PDF 產生器現在是 {v}",
+ "PDF renderer: {v} (checked {at})": "PDF 產生器:{v}({at} 檢查)",
+ "  a print would be refused: {why}": "  現在印會被拒絕:{why}",
+ "  prints are served": "  可以印",
+ "✗ the PDF renderer could not be installed: {err}": "✗ PDF 產生器裝不起來:{err}"
+}
