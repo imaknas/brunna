@@ -665,3 +665,72 @@ kinds, and dropping the raw-device deny fails the raw read under both.
   measured: whether a process under these profiles can get launchd to run a job outside the sandbox through its API
   rather than the `launchctl` binary. The probe was not run in this session. If launchd would run such a job, every
   guarantee here is moot, not only this one.
+
+## `pdf`: print a project's HTML to PDF (11-23)
+
+**Status:** design 11-23, not built. The owner asked for it on 11-23 ("Yes, build it"): only printing a page to a
+PDF, not a general browser capability. Granting it to a project is a separate yes (`enforce.capabilities` is a
+security field).
+
+### Why
+
+A sandboxed project builds a document as HTML and prints it with headless Chrome, whose layout another renderer does
+not match. In the session's sandbox Chrome does not start (it binds a socket for its process singleton, and its own
+sandbox can't start inside another), so today the owner runs it in a terminal each time.
+
+### Measured (11-22 and 11-23, scratch folders, removed)
+
+1. **Chrome itself can't run in the platform's runner, and we don't make it.** Under the cap-run profile it stops at
+   `ProcessSingleton`: `bind()` of a Unix socket in the user temp area (`/var/folders/…/T/`, from the system's temp
+   directory call, not `TMPDIR`), denied by `network-bind`. Opening that is not an option: the same kind of socket in
+   the same area is the owner's running Chrome's singleton, and connecting to it hands that Chrome a command line
+   (open a URL in the owner's signed-in browser).
+2. **`chrome-headless-shell`** (Chrome for Testing's headless build, the same Blink) has no process singleton. Under
+   the cap-run profile it fails only on its own sandbox (`sandbox initialization failed`); with `--no-sandbox
+   --disable-gpu` it prints the PDF.
+3. **A PDF-only profile** (below), in the real location (a scratch folder under `workspace_root`, the deny/allow
+   overlap of test 4 above), with `HOME` and `TMPDIR` in the job's folder: reading the folder's file works; reading
+   `~/.zshrc`, the owner's Chrome profile and `/private/tmp` is refused; `curl` to a font server fails; a write next to
+   the folder is refused; the headless shell prints the PDF and leaves no process.
+4. **JavaScript stays on.** `--blink-settings=scriptEnabled=false` makes `--print-to-pdf` exit 0 with no file. Nothing
+   in the boundary depends on scripts being off: a script reaches no more than the profile lets the process reach.
+5. **No publisher signature.** The macOS build is signed ad hoc (`TeamIdentifier=not set`), and Chrome for Testing
+   publishes no digests. The trust anchor is HTTPS from Google's download host.
+
+### Design
+
+1. **A request kind, not a command.** `brunna pdf <in.html> <out.pdf>` (client `bin/hub-run --pdf`) writes
+   `{"v": 1, "id", "kind": "pdf", "html": <relative>, "pdf": <relative>}` into the project's `.hub-run/requests/`, like
+   `complete` and `agent`. The runner builds the whole command line; nothing from the request reaches it but the two
+   paths, as a `file://` URI (`Path.as_uri`, which escapes `#`, `?`, `%`) and a `--print-to-pdf=` path.
+2. **Who may.** The project declares `pdf` in `enforce.capabilities` (the owner's yes; `brunna.json` `capabilities.pdf`,
+   risk low, no `default_for`). `pdf` admits only this kind: a cap-run request naming `pdf` is refused, so declaring it
+   never grants running other programs.
+3. **The request's checks**, on top of the runner's existing ones (folder not a link, file size, age, id): both paths
+   relative, no NUL, at most 4096 characters; the input resolves inside the project folder, is a regular file and ends
+   in `.html` or `.htm`; the output's folder resolves inside the project folder and the name ends in `.pdf`. The runner
+   writes nothing itself: the renderer, inside the profile, writes the output, so a path swapped to a link after the
+   check still lands only where the profile allows.
+4. **The profile** (`seatbelt.pdf_profile`): `(allow default)`; `(deny network*)`; the shared isolation with
+   `temp=False` (writes only to the project folder; reads of other projects, credentials, platform state, Keychain,
+   raw disks; mounts, `lsopen`, Apple Events, `NO_EXEC`, signals and process info outside the sandbox); then reads of
+   the owner's home, `/Users`, `/Volumes`, `/private/tmp` and `/private/var/folders` refused; then reads allowed again
+   for the project folder and the renderer's own folder, and metadata for the folders above them. No capability
+   fragment is appended.
+5. **The run.** `HOME` and `TMPDIR` are the job's folder (`.hub-run/jobs/<id>/`, made by the runner with `O_NOFOLLOW`
+   fds, which only this project and the platform write); `--user-data-dir` under it. The command: the renderer,
+   `--no-sandbox --disable-gpu --no-first-run --no-pdf-header-footer --user-data-dir=… --print-to-pdf=<out>
+   <file URI>`. Timeout 120 s, process group killed, as for every job. The job folder goes with the runner's 7-day
+   cleanup.
+6. **The renderer** lives in `<instance>/tools/chrome-headless-shell/<version>/` (in no sandbox's writes; readable only
+   through the profile's allow). `bin/pdf_renderer.py install` downloads the newest Stable for the machine's platform
+   from Chrome for Testing's index over HTTPS, unpacks it with `ditto` into a new version folder, records its sha256,
+   and makes it current only after a fixture page prints under `pdf_profile`; a version that doesn't print is kept
+   aside and said. A weekly platform job `brunna/pdf-renderer` runs it, and only when some project declares `pdf`;
+   with none, nothing is downloaded. A `pdf` request with no current renderer is refused with the reason, never
+   served by another browser.
+7. **Linux and the rest:** the runner is macOS-only (Seatbelt), so `pdf` is too; elsewhere `brunna pdf` says it is not
+   supported. No network, so a page's remote fonts and images don't load: the project vendors them (the asking project
+   is moving its font into its folder).
+8. **The owner's surface:** no new command for the owner. The project's agent runs `brunna pdf`; the rules file names
+   it beside `cap-run`; `SESSION_SUBCOMMANDS` gains `pdf`.
