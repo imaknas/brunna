@@ -734,3 +734,37 @@ sandbox can't start inside another), so today the owner runs it in a terminal ea
    is moving its font into its folder).
 8. **The owner's surface:** no new command for the owner. The project's agent runs `brunna pdf`; the rules file names
    it beside `cap-run`; `SESSION_SUBCOMMANDS` gains `pdf`.
+
+### r1 after a blind review (11-23)
+
+Two blocking findings, both taken; the should-fix ones too. Where r1 differs from the design above, r1 holds.
+
+- **B1, a capability with no fragment.** `hubconf.capabilities()` listed only names with a `.sb`, and a `pdf.sb` would
+  have let `cap: pdf` run any argv. Now a catalog entry with `kind` (`capabilities.pdf: {kind: pdf, …}`) is a
+  capability with no fragment, admitting only that request kind: the cap branch refuses it by name, and the runner
+  dispatches on `kind` explicitly (`complete`, `agent`, `pdf`, or none for cap-run) and refuses any other. The
+  timeout is the runner's (120 s); nothing in the request sets it.
+- **B2, a renderer bug with Chrome's sandbox off.** The profile now ends with `exec_guard` naming only the renderer's
+  version folder (measured: `cat` and `sh` refused, the renderer prints in 0.4 s), denies `user-preference-write`,
+  and denies the pasteboard (`com.apple.pasteboard*`) and the DNS services (`com.apple.dnssd.service`,
+  `com.apple.mDNSResponder`) by name. A compromised renderer keeps the rest of `(allow default)`: Mach and IOKit are
+  not denied by default (not measured against the headless shell; a later step).
+- **The renderer's age.** The job runs daily (not weekly). A `pdf` request is refused, with the reason, once the index
+  has had a newer Stable for more than 14 days that the platform hasn't made current (`behind_since` in the
+  renderer's record).
+- **The download.** The index is fetched with verified TLS (the system's CA file, refused when it loads none); a
+  version must match `^\d+(\.\d+){3}$` and a URL be `https://storage.googleapis.com/chrome-for-testing-public/…`
+  for that version and platform. Unpacked with `ditto` into a fresh folder; any link in it that is absolute or leaves
+  the folder refuses the version. The recorded sha256 is trust on first use, said as such. The fixture print uses a
+  scratch folder and a synthetic policy (no project's).
+- **The git fence stays** in `pdf_profile` (it isn't stripped as the git writer's profiles do), and a test says so.
+- **Processes.** After each `pdf` job and in `recover()`, any process whose executable is in the renderer's folder and
+  isn't in a running job's group is killed (a renderer that called `setsid`). Measured: a page that never finishes
+  leaves 5 processes; killing the group ends all of them.
+- **The job's scratch is the platform's.** `HOME`, `TMPDIR` and `--user-data-dir` are a new folder per job under
+  `.state/cap-runner/<project>/<id>.d/` (no project writes `.state`), allowed in the profile for reading and writing,
+  removed after the job (`shutil.rmtree`, which on macOS walks with fds and doesn't follow links). The project's job
+  folder keeps only state, stdout and stderr.
+- **Paths.** The runner passes the paths as resolved at the check and touches neither again by path.
+- **Open, not blocking:** whether macOS resolves names through another service (no packet capture here; what could
+  leave is no more than the session already reads).
