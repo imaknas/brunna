@@ -17,6 +17,7 @@ import unittest
 
 import yaml
 
+os.environ["AGENT_HUB_LANG_UI"] = os.environ["BRUNNA_LANG_UI"] = "en"   # the messages these tests read are the English ones
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 BIN = ROOT / "bin"
 sys.path.insert(0, str(BIN))
@@ -46,7 +47,8 @@ class Instance(unittest.TestCase):
                        or k in ("AGENT_HUB_PYTHON", "BRUNNA_PYTHON")},
                     "HOME": str(t / "home"), "AGENT_HUB_CONFIG": str(t / "config"), "AGENT_HUB_DATA": str(t / "data"),
                     "AGENT_HUB_SECRETS": str(t / "secrets"), "AGENT_HUB_STATE": str(t / "state"),
-                    "AGENT_HUB_LANG_UI": "en", "AGENT_HUB_LANG_CONTENT": "en", "GIT_CONFIG_GLOBAL": "/dev/null"}
+                    "AGENT_HUB_LANG_UI": "en", "BRUNNA_LANG_UI": "en", "AGENT_HUB_LANG_CONTENT": "en",
+                    "BRUNNA_LANG_CONTENT": "en", "GIT_CONFIG_GLOBAL": "/dev/null"}
         self.env.pop("CLAUDE_CODE_SESSION_ID", None)
 
     @property
@@ -109,6 +111,124 @@ class WholeEntry(Instance):
         reply = self.update(yaml.safe_dump({**ENTRY, "enforce": {"sandbox": False}}))
         self.assertIn("security field", reply)
         self.assertEqual(self.entry_file.read_text(), before)
+
+
+class PartOfTheEntry(Instance):
+    """A letter without v is the part that changes: merged into the entry, the rest kept."""
+
+    def test_a_part_changes_only_what_it_names(self):
+        tests = [{"tier": "unit", "run": "uv run pytest -q", "when": ["merge"]}]
+        reply = self.update(yaml.safe_dump({"tests": tests, "code": ["src/**"]}))
+        self.assertIn("applied", reply)
+        self.assertEqual(self.entry(), {**ENTRY, "tests": tests, "code": ["src/**"]})
+        self.assertIn("uv run pytest -q", reply, "the reply says what the changed fields now are")
+        self.assertIn("src/**", reply)
+
+    def test_null_removes_a_field(self):
+        reply = self.update("tests: null\n")
+        self.assertIn("Removed: tests", reply)
+        self.assertNotIn("tests", self.entry())
+
+    def test_a_mapping_merges_key_by_key(self):
+        self.write_entry({**ENTRY, "mailbox": {"escalate": True, "wake": False}})
+        reply = self.update("mailbox:\n  escalate: false\n")
+        self.assertIn("applied", reply)
+        self.assertEqual(self.entry()["mailbox"], {"escalate": False, "wake": False}, "wake stays the owner's")
+
+    def test_a_part_that_changes_nothing_writes_nothing(self):
+        before = self.entry_file.read_text()
+        reply = self.update(yaml.safe_dump({"tests": ENTRY["tests"]}))
+        self.assertIn("changed nothing", reply)
+        self.assertEqual(self.entry_file.read_text(), before)
+
+    def test_a_v1_entry_takes_v2_fields(self):
+        self.write_entry({k: v for k, v in ENTRY.items() if k != "tests"} | {"v": 1})
+        reply = self.update(yaml.safe_dump({"tests": ENTRY["tests"]}))
+        self.assertIn("applied", reply)
+        self.assertEqual(self.entry(), ENTRY)
+
+    def test_the_reply_shows_only_the_keys_sent(self):
+        self.write_entry({**ENTRY, "mailbox": {"escalate": True, "wake": False}})
+        reply = self.update("mailbox:\n  escalate: false\n")
+        self.assertIn("escalate: false", reply)
+        self.assertNotIn("wake", reply, "the owner's key beside it isn't echoed")
+
+    def test_an_alias_is_returned_and_the_next_letter_still_applies(self):
+        reply = self.update("models: &m {a: *m}\n")
+        self.assertIn("not applied", reply)
+        self.assertIn("alias", reply)
+        reply = self.update("commits: conventional\n")
+        self.assertIn("applied", reply)
+        self.assertEqual(self.entry()["commits"], "conventional")
+
+    def test_an_unreadable_entry_returns_the_letter(self):
+        self.entry_file.write_text("name: open\n  bad: [\n")
+        reply = self.update("commits: conventional\n")
+        self.assertIn("not applied", reply)
+
+    def test_an_invalid_result_changes_nothing(self):
+        before = self.entry_file.read_text()
+        reply = self.update(yaml.safe_dump({"tests": [{"tier": "unit", "when": ["merge"]}]}))
+        self.assertIn("not applied", reply)
+        self.assertEqual(self.entry_file.read_text(), before)
+
+
+class PartsCantDoMore(unittest.TestCase):
+    """A part is checked as the whole entry it makes: whatever a whole entry may not change, a part may not either
+    (registry.manifest_update, no bus)."""
+
+    CUR = {**ENTRY, "enforce": {"sandbox": True, "capabilities": ["pdf"]}, "privacy": {"reflection": "exclude"},
+           "mailbox": {"escalate": True, "wake": False},
+           "jobs": [{"name": "brief", "kind": "agent", "at": "07:00", "prompt": "jobs/brief.md", "connectors": True,
+                     "allow": ["Read"], "legacy_name": "old-brief"}]}
+
+    def refused(self, part: dict, cur: dict | None = None, sender: str = "open") -> list[str]:
+        import registry
+        _new, errs = registry.manifest_update(part, sender, self.CUR if cur is None else cur)
+        return errs
+
+    def test_security_fields(self):
+        for part in ({"enforce": {"sandbox": False}}, {"enforce": None}, {"enforce": {"capabilities": ["pdf", "gpu"]}},
+                     {"paths": {"workspace": "~"}}, {"paths": None}, {"privacy": None}, {"privacy": {"reflection": "include"}},
+                     {"network": ["example.com"]}, {"allow_write": ["~"]}, {"metered_models": True}, {"type": "idea"},
+                     {"mailbox": {"wake": True}}, {"mailbox": {"wake": None}}, {"mailbox": None}):
+            with self.subTest(part=part):
+                self.assertTrue(any("security field" in e for e in self.refused(part)), self.refused(part))
+
+    def test_a_connector_job(self):
+        job = self.CUR["jobs"][0]
+        for part in ({"jobs": None}, {"jobs": []}, {"jobs": [{**job, "allow": ["Read", "Bash"]}]},
+                     {"jobs": [{**job, "legacy_name": "other"}]}):
+            with self.subTest(part=part):
+                self.assertTrue(any("security field" in e for e in self.refused(part)), self.refused(part))
+
+    def test_another_name(self):
+        for part in ({"name": "other"}, {"name": None}):
+            with self.subTest(part=part):
+                self.assertTrue(any("its own registry entry" in e for e in self.refused(part)), self.refused(part))
+
+    def test_v_null_is_a_whole_entry(self):
+        self.assertTrue(self.refused({"v": None, "tests": []}))
+
+    def test_no_aliases(self):
+        import registry
+        laughs = "a: &a [x, x, x, x, x, x, x, x, x, x]\n" + "".join(
+            f"{chr(98 + i)}: &{chr(98 + i)} [{', '.join(['*' + chr(97 + i)] * 10)}]\n" for i in range(9))
+        for text in ("models: &m {a: *m}\n", laughs):
+            with self.subTest(text=text[:20]), self.assertRaises(yaml.YAMLError):
+                yaml.load(text, Loader=registry.LetterLoader)
+
+    def test_no_entry_to_change(self):
+        import registry
+        new, errs = registry.manifest_update({"tests": []}, "ghost", None)
+        self.assertIsNone(new)
+        self.assertTrue(errs)
+
+    def test_the_fields_a_project_owns(self):
+        for part in ({"tests": None}, {"commits": "conventional"}, {"models": {"sum": {"tier": "fast"}}},
+                     {"mailbox": {"escalate": False}}, {"name": "open"}):
+            with self.subTest(part=part):   # (the scratch platform has no pdf and no prompt file: only who may change what)
+                self.assertEqual([e for e in self.refused(part) if "security field" in e or "own registry entry" in e], [])
 
 
 if __name__ == "__main__":

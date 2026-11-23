@@ -80,7 +80,6 @@
  "manifest.update was not applied; the registry is unchanged:\n- {errors}": "manifest.update 沒有套用,登錄沒變:\n- {errors}",
  "returned: {errors}": "退回:{errors}",
  "{sender}: manifest.update {mid} returned ({n} {n:problem|problems})": "{sender}:manifest.update {mid} 退回({n} 個問題)",
- "Project registry (schema v1, see bin/registry.py). Last updated by manifest.update {mid}": "專案登錄(schema v1,見 bin/registry.py)。最後一次由 manifest.update {mid} 更新",
  "manifest.update applied": "manifest.update 已套用",
  " (the commit failed; the file is written)": "(commit 失敗,檔案已寫入)",
  "; it takes effect at the next scheduler tick.": ";下一個排程 tick 生效。",
@@ -213,5 +212,14 @@
  "enforce.git_push.max_file_mb must be a whole number from 1 to 100": "enforce.git_push.max_file_mb 必須是 1 到 100 的整數",
  "enforce.git_push.public_emails must also be in enforce.git_push.emails": "enforce.git_push.public_emails 裡的也必須在 enforce.git_push.emails 裡",
  "enforce.git_push.visibility must be public or private": "enforce.git_push.visibility 只能是 public 或 private",
- "enforce.git_push.{key} must be a list of email addresses (local@domain, one line each)": "enforce.git_push.{key} 必須是 email 位址的清單(local@domain,每個一行)"
+ "enforce.git_push.{key} must be a list of email addresses (local@domain, one line each)": "enforce.git_push.{key} 必須是 email 位址的清單(local@domain,每個一行)",
+ "Project registry (see bin/registry.py). Last updated by manifest.update {mid}": "專案登錄(見 bin/registry.py)。最後一次由 manifest.update {mid} 更新",
+ "{sender} has no registry entry to change; a new entry is sent whole (with v)": "{sender} 沒有可以改的登錄;新的登錄要整份寄(含 v)",
+ "manifest.update changed nothing; the registry entry already says this": "manifest.update 沒有改到任何東西;登錄本來就是這樣",
+ "no change": "沒有改變",
+ "{sender}: manifest.update {mid} changed nothing": "{sender}:manifest.update {mid} 沒有改到任何東西",
+ "Now:": "現在是:",
+ "Removed: {keys}": "已移除:{keys}",
+ "aliases (*name) aren't accepted in a manifest.update": "manifest.update 不接受 alias(*名稱)",
+ "the platform couldn't apply it ({error}); write to brunna": "平台沒辦法套用({error});請寫信給 brunna"
 }

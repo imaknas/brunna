@@ -170,10 +170,12 @@ Usage: registry.py [check [name...]]   validate and refresh the cache, print the
        registry.py rename <old> <new> <workspace> <origin> <memory_bare>
                                            rename (the file and the prompt directory move together)
        registry.py apply-updates           apply the manifest.update letters projects sent (platform job, every
-                                           15 minutes)
+                                           15 minutes): a letter with v is the whole entry; one without is the
+                                           part that changes, merged into the entry (manifest_update())
 """
 from __future__ import annotations
 
+import copy
 import datetime
 import json
 import os
@@ -662,6 +664,61 @@ def platform_owned_changes(new: dict, cur: dict) -> list[str]:
         changed.append(_("a job's legacy_name"))
     return [_("{key} is a security field that only brunna can change ({owner} confirms); this letter changes it", key=k,
               owner=hubconf.owner_tag()) for k in changed]
+
+
+class LetterLoader(yaml.SafeLoader):
+    """A manifest.update letter's YAML, without aliases: one that refers to itself (`a: &x {b: *x}`) would never end
+    merging, and a chain of them (a billion laughs) would build without bound; nothing an entry says needs one."""
+
+    def compose_node(self, parent, index):
+        if self.check_event(yaml.AliasEvent):
+            raise yaml.composer.ComposerError(None, None, _("aliases (*name) aren't accepted in a manifest.update"),
+                                              self.peek_event().start_mark)
+        return super().compose_node(parent, index)
+
+
+def as_sent(new, patch):
+    """What a part changed, as it now stands, in the part's own shape: the keys of a mapping it merged into, and no
+    others (the reply shows the project its fields, never the owner's beside them)."""
+    if not isinstance(patch, dict) or not isinstance(new, dict):
+        return new
+    return {k: as_sent(new[k], v) for k, v in patch.items() if k in new}
+
+
+def merge_patch(cur, patch):
+    """A part of an entry merged into it, as JSON Merge Patch (RFC 7386) does: a mapping merges key by key, null
+    removes the key, anything else (a list included) replaces what was there."""
+    if not isinstance(patch, dict):
+        return copy.deepcopy(patch)
+    out = copy.deepcopy(cur) if isinstance(cur, dict) else {}
+    for k, v in patch.items():
+        if v is None:
+            out.pop(k, None)
+        else:
+            out[k] = merge_patch(out.get(k), v)
+    return out
+
+
+def manifest_update(doc, sender: str, cur: dict | None) -> tuple[dict | None, list[str]]:
+    """What one manifest.update letter makes of the sender's entry: (the new entry, the problems). A letter with v is
+    the whole entry and replaces it; one without is the part that changes, merged into the current entry
+    (merge_patch(), onto its v2 form), so a project needn't read its entry to change one field. Either way the result
+    is checked whole: it must validate, keep the sender's name and change no security field (platform_owned_changes)."""
+    if not isinstance(doc, dict):
+        return None, [_("not a YAML mapping")]
+    if "v" in doc:
+        new = doc
+    elif cur is None:
+        return None, [_("{sender} has no registry entry to change; a new entry is sent whole (with v)", sender=sender)]
+    else:
+        new = merge_patch(tiers.upgrade(cur), doc)
+    errs = validate(new, sender)
+    if new.get("name") != sender:
+        errs.append(_("a project can only change its own registry entry (the sender is {sender}, the YAML's name is {name})",
+                      sender=sender, name=new.get("name")))
+    else:
+        errs += platform_owned_changes(new, cur or {})
+    return new, errs
 
 
 def validate(doc, stem: str) -> list[str]:
@@ -1494,9 +1551,10 @@ def cmd_rename(old: str, new: str, workspace: str, origin: str, memory_bare: str
 
 
 def cmd_apply_updates() -> int:
-    """manifest.update letters sent by projects (text = the full registry YAML): if valid, write it into the registry
-    + commit; if not, send the errors back to that project's mailbox; either way the letter is closed. Only the
-    sending project's own entry can be changed. Zero LLM."""
+    """manifest.update letters sent by projects (text = registry YAML: the whole entry, or the part that changes;
+    manifest_update()): if valid, write it into the registry + commit and reply with what changed as it now stands;
+    if not, send the errors back to that project's mailbox; either way the letter is closed. Only the sending
+    project's own entry can be changed. Zero LLM."""
     import sqlite3
     bus = hubconf.bus_db()
     if not bus.exists():
@@ -1517,30 +1575,39 @@ def cmd_apply_updates() -> int:
         p = json.loads(pl or "{}")
         if p.get("type") != "manifest.update":
             continue
-        try:
-            doc = yaml.safe_load(p.get("text") or "")
-            errs = validate(doc, sender)
+        f = hubconf.registry_dir() / f"{sender}.yaml"
+        sent = cur = None
+        try:   # one letter is returned, whatever is wrong with it; it never stops the others
+            cur = (yaml.safe_load(f.read_text()) or {}) if f.exists() else None
+            sent = yaml.load(p.get("text") or "", Loader=LetterLoader)
+            new, errs = manifest_update(sent, sender, cur)
         except yaml.YAMLError as e:
-            doc, errs = None, [_("cannot read the YAML: {error}", error=e)]
-        if isinstance(doc, dict) and doc.get("name") != sender:
-            errs.append(_("a project can only change its own registry entry (the sender is {sender}, the YAML's name is {name})",
-                           sender=sender, name=doc.get("name")))
-        elif isinstance(doc, dict):
-            cur_f = hubconf.registry_dir() / f"{sender}.yaml"
-            cur = (yaml.safe_load(cur_f.read_text()) or {}) if cur_f.exists() else {}
-            errs += platform_owned_changes(doc, cur)
+            new, errs = None, [_("cannot read the YAML: {error}", error=e)]
+        except Exception as e:   # noqa: BLE001 (an entry the owner left unreadable, a structure too deep)
+            new, errs = None, [_("the platform couldn't apply it ({error}); write to brunna", error=f"{type(e).__name__}: {e}"[:200])]
         if errs:
             reply(sender, mid, _("manifest.update was not applied; the registry is unchanged:\n- {errors}", errors="\n- ".join(errs)),
                   _("returned: {errors}", errors="; ".join(errs)[:200]))
             print(_("{sender}: manifest.update {mid} returned ({n} {n:problem|problems})", sender=sender, mid=mid, n=len(errs)))
             continue
-        f = hubconf.registry_dir() / f"{sender}.yaml"
-        f.write_text("# " + _("Project registry (schema v1, see bin/registry.py). Last updated by manifest.update {mid}", mid=mid) + "\n"
-                     + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200))
+        before = tiers.upgrade(cur) if cur is not None else {}
+        changed = [k for k in dict.fromkeys([*before, *new]) if before.get(k) != new.get(k)]
+        if not changed:
+            reply(sender, mid, _("manifest.update changed nothing; the registry entry already says this"), _("no change"))
+            print(_("{sender}: manifest.update {mid} changed nothing", sender=sender, mid=mid))
+            continue
+        f.write_text("# " + _("Project registry (see bin/registry.py). Last updated by manifest.update {mid}", mid=mid) + "\n"
+                     + yaml.safe_dump(new, allow_unicode=True, sort_keys=False, width=200))
         r = subprocess.run([str(hubconf.ROOT / "bin" / "commit-hub-files.sh"), f"registry: {sender} manifest.update {mid}",
                             f"projects/{sender}.yaml"], capture_output=True, text=True)
+        # what a part changed, as it now stands: a list is replaced whole, so the project keeps what it needs to send
+        # next time (a whole entry is the project's own text already)
+        now = {} if "v" in sent else as_sent({k: new[k] for k in changed if k in new}, sent)
+        gone = [k for k in changed if k not in new]
         reply(sender, mid, _("manifest.update applied") + ("" if r.returncode == 0 else _(" (the commit failed; the file is written)"))
-              + _("; it takes effect at the next scheduler tick."), _("applied"))
+              + _("; it takes effect at the next scheduler tick.")
+              + ("\n" + _("Now:") + "\n" + yaml.safe_dump(now, allow_unicode=True, sort_keys=False, width=200).rstrip() if now else "")
+              + ("\n" + _("Removed: {keys}", keys=", ".join(gone)) if gone else ""), _("applied"))
         print(_("{sender}: manifest.update {mid} applied", sender=sender, mid=mid))
     return 0
 

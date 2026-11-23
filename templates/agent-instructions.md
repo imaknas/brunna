@@ -140,11 +140,16 @@ no longer needed), close it, or {{assistant}} keeps showing it as "waiting for y
   platform checks every day that each one exists, is backed up and is not about to expire, and alerts on problems.
   The platform's confined agent runs of this project (agent jobs with `allow:`, mail handlers) can't read or write the
   declared ones (or a copy of one at the same path anywhere in the project) with their file tools; a script a
-  `Bash(...)` rule starts, or a tool server the job names, still runs as the user and can. To add, remove or move one: send the full edited YAML with
-  `brunna send --to brunna --type manifest.update --text "$(cat <edited file>)"`
-  (it is returned if it doesn't validate; `type`, `enforce`, `network`, `allow_write`, `privacy`, `metered_models`, `paths`
-  are security fields, and a letter that changes them is returned whole: instead write to brunna with `--type request`
-  and explain why, and {{owner}} confirms).
+  `Bash(...)` rule starts, or a tool server the job names, still runs as the user and can. To add, remove or move one,
+  send only the part of the entry that changes, as YAML:
+  `brunna send --to brunna --type manifest.update --text "<the changed fields>"`.
+  It is merged into the entry: a mapping key by key, while a list (`secrets:`, `services:`, `jobs:`, `tests:`) or a
+  value replaces what was there, so send the whole list; `<field>: null` removes a field. Leave `v:` out:
+  a letter with `v:` is the whole entry and replaces it. The platform's reply shows the
+  changed fields as they now stand: keep it in your notes for the next change. The result is returned if it doesn't
+  validate; `type`, `enforce`, `network`, `allow_write`, `privacy`, `metered_models`, `paths` are security fields, and
+  a letter that changes them is returned whole: instead write to brunna with `--type request` and explain why, and
+  {{owner}} confirms.
 - **Machine-level credentials belong to the platform** (claude's login/token, the platform's Discord, backups): don't
   keep a copy of them in the project, and don't read the credential files under `~/.claude` yourself; if you need one,
   write to brunna.
@@ -170,7 +175,7 @@ nothing else: `brunna cap-run --cap pdf` is refused.
 
 For something that should keep running (a viewer, a webhook, a bot) or run on a schedule, **don't give {{owner}} commands
 to start it**. Declare it in this project's registry entry under `services:` (`name`, `run`, `keepalive: true`; add
-`expose: {local_port: <port>}` to reach it from the tailnet) or `jobs:`, and send the full YAML with
+`expose: {local_port: <port>}` to reach it from the tailnet) or `jobs:`, and send that list with
 `brunna send --to brunna --type manifest.update` (the same way as in "Credentials" above). That letter is internal to
 the platform and **needs no approval from {{owner}}**: once it validates, the platform creates the service within 15
 minutes (`brunna status <project>` shows it).

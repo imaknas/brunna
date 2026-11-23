@@ -190,8 +190,8 @@ LOG = hubconf.BUS_LOG
 OWNER_ADDRESS = hubconf.owner_address()
 OWNERS = hubconf.owner_addresses()
 TYPES = ("request", "question", "info", "progress", "done", "task", "drop", "manifest.update")
-# manifest.update: a project sends its full registry YAML to the platform (--to agent-hub); registry.py apply-updates
-# validates it, then applies or rejects it
+# manifest.update: a project sends registry YAML to the platform (--to agent-hub), its whole entry or the part that
+# changes; registry.py apply-updates validates the result, then applies or rejects it
 OWNER = hubconf.owner_tag()                         # the name people see (the to-do tag), here hub.json owner.tag
 ASSISTANT = hubconf.assistant_name()                # the personal assistant's display name (hub.json assistant.name)
 OWNER_ALIAS = hubconf.owner_alias()                 # the address agents mail the owner at (first of owner.aliases)
@@ -274,7 +274,7 @@ def outbox_rel(ws) -> str:
 
 def view_rel(ws) -> str:
     return f".git/{names.repo_dir(pathlib.Path(ws) / '.git').name}/inbox.json"
-OUTBOX_CAP = 512 << 10    # one outbox file (a manifest.update carries a whole registry entry)
+OUTBOX_CAP = 512 << 10    # one outbox file (a manifest.update may carry a whole registry entry)
 OUTBOX_RUN = 100          # files taken from one outbox per run; the rest wait for the next minute
 VIEW_CAP = 32 << 20
 # the id a project picks for its letter: a shape no other writer uses, so it can't take an id another writer will use
