@@ -18,7 +18,8 @@
 # caller (librarian.sh / onboard-project.sh) commits.
 set -euo pipefail
 
-HUB="${AGENT_HUB:-${AGENT_HUB_ROOT:-${BRUNNA_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}}"   # default = the hub this script is in
+GIVEN="${AGENT_HUB:-${AGENT_HUB_ROOT:-${BRUNNA_ROOT:-}}}"   # a root given from outside (tests, a data directory)
+HUB="${GIVEN:-$(cd "$(dirname "$0")/.." && pwd)}"   # default = the hub this script is in
 PY="$(dirname "$0")/py"   # the platform's Python goes with this script (AGENT_HUB may point at another data directory)
 source "$(dirname "${BASH_SOURCE[0]}")/hubpaths.sh"
 [ -n "${AGENT_HUB:-}" ] && HUB_DATA="$HUB"   # when AGENT_HUB points at another data directory (tests), use it
@@ -29,8 +30,15 @@ INDEX="$HUB_DATA/index.md"
 mkdir -p -m 700 "$HUB_SECRETS" "$HUB_SECRETS/tmp"; export TMPDIR="$HUB_SECRETS/tmp"   # what it writes goes into index.md: not in a folder sandboxes can write
 block=$(mktemp); out=$(mktemp); rows=$(mktemp); ideas=$(mktemp)
 trap 'rm -f "$block" "$out" "$rows" "$ideas"' EXIT
-AGENT_HUB_ROOT="$HUB" "$PY" "$HUB/bin/hubconf.py" roster > "$rows"
-AGENT_HUB_ROOT="$HUB" "$PY" "$HUB/bin/hubconf.py" ideas > "$ideas"   # idea sandboxes are listed as a separate group
+# A root given from outside is passed on; without one hubconf finds its own, as a linked worktree of the hub must: an
+# explicit root skips the lookup of the main checkout's instance, and the roster came back empty, which stopped
+# onboarding before it committed the registration (11-23)
+hubconf_run() {
+  if [ -n "$GIVEN" ]; then AGENT_HUB_ROOT="$HUB" "$PY" "$HUB/bin/hubconf.py" "$@"
+  else "$PY" "$HUB/bin/hubconf.py" "$@"; fi
+}
+hubconf_run roster > "$rows"
+hubconf_run ideas > "$ideas"   # idea sandboxes are listed as a separate group
 # Note: when filtering, the idea list is read in awk's BEGIN; don't change it back to the two-file `NR==FNR` form:
 # when the list is an empty file (no ideas yet) NR==FNR holds for every line and every project gets filtered out
 # (the roster went empty once because of this on 2026-10-24)

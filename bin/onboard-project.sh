@@ -323,7 +323,10 @@ manifest_origin="${origin_url:-(native)}"
 # librarian/mirror-backup on the hub machine only saw a new project once someone happened to commit by hand (a
 # project once got stuck locally that way). Only these three files are committed; nothing else uncommitted in
 # agent-hub is touched.
-"$AGENT_HUB/bin/gen-index-roster.sh"
+# The roster is regenerated every night as well: its failure is said, never a reason to leave the registration
+# uncommitted and skip the steps after it (11-23)
+"$AGENT_HUB/bin/gen-index-roster.sh" \
+  || hub_say "Warning: the roster in index.md wasn't regenerated; the librarian does it tonight" >&2
 if "$AGENT_HUB/bin/commit-hub-files.sh" "register $PROJ_NAME (onboard-project.sh)" \
     "projects/$PROJ_NAME.yaml" mirror-list.txt index.md; then
   hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml); brunna committed and pushed" name="$PROJ_NAME"

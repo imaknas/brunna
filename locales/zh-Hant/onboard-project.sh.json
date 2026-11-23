@@ -43,5 +43,6 @@
  "usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]... <local project path>": "用法: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <地址>]... <本機專案路徑>",
  "--push {push} is for a sandboxed project: add --sandbox": "--push {push} 是給沙盒專案用的:加上 --sandbox",
  "ONBOARD_REGISTRY_EXTRA is not valid JSON": "ONBOARD_REGISTRY_EXTRA 不是合格的 JSON",
- "Warning: the platform's push for {name} was not set up; run brunna push setup {name}": "警告:{name} 的平台推送沒設好;請跑 brunna push setup {name}"
+ "Warning: the platform's push for {name} was not set up; run brunna push setup {name}": "警告:{name} 的平台推送沒設好;請跑 brunna push setup {name}",
+ "Warning: the roster in index.md wasn't regenerated; the librarian does it tonight": "警告:index.md 的名冊沒有重新產生;今晚 librarian 會再做"
 }
