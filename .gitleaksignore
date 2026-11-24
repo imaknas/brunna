@@ -1,4 +1,5 @@
 # Findings gitleaks reports in this repo's history that are test data, not secrets (a fake AWS key id in
-# tests/test_lease_show_file.py, since written in two parts). Format: commit:file:rule:line
+# tests/test_lease_show_file.py, since written in two parts; the git broker test's made-up SECRET). Format: commit:file:rule:line
 f600866f50bf6a25675063829a34449bece9a0ec:tests/test_lease_show_file.py:aws-access-token:144
 70bea1258ff82a9f6030015be445e4d37e4033a7:tests/test_lease_show_file.py:aws-access-token:144
+361abb2724153112a7cdf0b531d9c4c9e713828e:tests/test_git_broker.py:generic-api-key:37
