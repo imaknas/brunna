@@ -4,6 +4,9 @@
 > land's steps after the move, the start's code rather than a later import, dynamic loads, the manager's pid). Follows the
 > 11-24 incident below; replaces the `code_stamp` restart that lease-runner and cap-runner have had since 10-25
 > (`known-issues.md`, "A long-running service runs the code loaded when it started").
+>
+> **Landed 11-24** (main `742a1fe6`): steps 1–6 built. The runners that were running moved to it by the old mechanism;
+> the next merge is the first that they follow by `code-landed`.
 
 ## Why
 
