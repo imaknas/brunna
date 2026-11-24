@@ -2099,7 +2099,8 @@ def login_check() -> list[tuple[str, str]]:
             out.append(("status", _("codex login status says the login doesn't work: {detail}",
                                     detail=(r.stderr or r.stdout).strip()[-200:])))
     except (OSError, subprocess.SubprocessError) as e:
-        out.append(("status", _("codex login status could not run: {error}", error=type(e).__name__)))
+        # the check itself couldn't run: "broke", which check-runtime-login takes as a failure, not a finding
+        out.append(("broke", _("codex login status could not run: {error}", error=type(e).__name__)))
     finally:
         end_run_home(home)
     return out

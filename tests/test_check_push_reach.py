@@ -109,7 +109,7 @@ class Check(unittest.TestCase):
         for code in (0, 0):
             self.assertEqual(self.run_with(TimeoutError()), code)
             self.assertEqual(self.alerts[-1][1], [])
-        self.assertEqual(self.run_with(TimeoutError()), self.m.alert.FOUND)
+        self.assertEqual(self.run_with(TimeoutError()), 1, "unknown is no finding: the check can't check")
         self.assertEqual(len(self.alerts[-1][1]), 1)
 
     def test_a_server_error_is_no_answer(self):

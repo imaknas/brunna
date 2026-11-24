@@ -155,8 +155,11 @@ class Registry(unittest.TestCase):
         import registry
         hub = hubconf.hub_project()
         doc = {"name": hub, "jobs": [{"name": "check", "every": "1h", "run": "true", "found_exit": True}]}
-        jobs, _s, _r = registry.scheduler_jobs({"projects": {hub: doc}}, set())
-        self.assertIs(jobs[0].get("found_exit"), True)
+        proj = {"name": "proj", "paths": {"workspace": "/nonexistent"},
+                "jobs": [{"name": "check", "every": "1h", "run": "true", "found_exit": True}]}
+        jobs, _s, _r = registry.scheduler_jobs({"projects": {hub: doc, "proj": proj}}, set())
+        flags = {j["name"]: j.get("found_exit") for j in jobs}
+        self.assertEqual(flags, {f"{hub}/check": True, "proj/check": None}, "never from an entry that may not have it")
 
     def test_the_checks_declare_it(self):
         import yaml
@@ -165,6 +168,53 @@ class Registry(unittest.TestCase):
         for f, name in want.items():
             jobs = {j["name"]: j for j in yaml.safe_load((ROOT / f).read_text())["jobs"]}
             self.assertIs(jobs[name].get("found_exit"), True, f)
+
+
+class Checks(unittest.TestCase):
+    """What check-secrets and check-runtime-login answer: FOUND only when what they found was delivered and the check
+    itself worked."""
+
+    def secrets(self, argv: list[str], delivered: bool) -> int:
+        m = load("check_secrets_found", ROOT / "bin" / "check-secrets.py")
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        index = {"projects": {"demo": {"name": "demo", "paths": {"workspace": str(tmp)},
+                                       "secrets": [{"name": "gone", "path": "gone.key"}]}}, "modules": {}}
+        with mock.patch.object(m.registry, "refresh", lambda: index), \
+                mock.patch.object(m.alert, "probe", lambda: True), \
+                mock.patch.object(m.alert, "clear_failure", lambda k: None), \
+                mock.patch.object(m.alert, "once", lambda *a, **k: delivered), \
+                mock.patch("builtins.print"):
+            return m.main(argv)
+
+    def test_secrets(self):
+        import alert
+        self.assertEqual(self.secrets([], True), alert.FOUND)
+        self.assertEqual(self.secrets([], False), 1, "not delivered")
+        self.assertEqual(self.secrets(["demo"], True), 1, "projects named: no alert is sent, so nothing was delivered")
+
+    def runtime_login(self, problems, delivered: bool = True):
+        m = load("check_runtime_login_found", ROOT / "bin" / "check-runtime-login.py")
+        import alert
+
+        def check():
+            if isinstance(problems, Exception):
+                raise problems
+            return problems
+        with mock.patch.object(m.runtime_ports, "RUNTIMES", {"tool": None}), \
+                mock.patch.object(m.runtime_ports, "platform_work", lambda: {"tool"}), \
+                mock.patch.object(m.runtime_ports, "_module", lambda n: mock.Mock(login_check=check)), \
+                mock.patch.object(alert, "once", lambda *a, **k: delivered), \
+                mock.patch("builtins.print"):
+            return m.main(["--runtime", "tool"])
+
+    def test_runtime_login(self):
+        import alert
+        self.assertEqual(self.runtime_login([]), 0)
+        self.assertEqual(self.runtime_login([("status", "the login doesn't work")]), alert.FOUND)
+        self.assertEqual(self.runtime_login([("status", "the login doesn't work")], delivered=False), 1)
+        self.assertEqual(self.runtime_login(RuntimeError("x")), 1, "the check raised")
+        self.assertEqual(self.runtime_login([("broke", "codex login status could not run: TimeoutExpired")]), 1)
 
 
 class Once(unittest.TestCase):

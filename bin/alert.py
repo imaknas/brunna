@@ -14,9 +14,9 @@ Standard library + the system's curl only (no Homebrew). The scheduler watchdog 
 does not import this (it must still be able to send when the scheduler and the platform code are both broken).
 
   alert.send(text) -> bool
-  alert.once(key, problems, ok_text, ids=None) -> None
-                                               new problems are sent at once; unresolved ones are repeated every 24
-                                               hours; one recovery when resolved, to the keyed channels only (the
+  alert.once(key, problems, ok_text, ids=None) -> bool (delivered or told before; a check's alert.FOUND needs it)
+                                               new problems are sent at once; unresolved ones are repeated daily (after 23
+                                               hours); one recovery when resolved, to the keyed channels only (the
                                                assistant closes its item; nothing pushed, 11-18). A problem is told apart by
                                                its wording, or by its ids[i] when given (one stable name per problem, so
                                                a text that carries a changing detail, an error's tail or a count, is

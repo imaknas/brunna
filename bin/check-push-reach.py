@@ -18,7 +18,8 @@ Off when the assistant channel is off (`alerts.assistant`, `assistant.api`): not
 as it is, since nothing recovered either.
 
 Exit (found_exit, docs/design/alert-routing.md step 3): 0 nothing found; alert.FOUND (4) what it found is with the
-owner; 1 the check is broken (an answer that breaks the contract, the token unreadable) or what it found couldn't be
+owner; 1 the check is broken (an answer that breaks the contract, the token unreadable, no answer for 3 hours) or
+what it found couldn't be
 delivered: the scheduler's job alert then goes to the platform's agents and the next tick tries again.
 
 Usage: check-push-reach.py
@@ -101,6 +102,7 @@ def main() -> int:
         n = streak(True)
         print(_("no answer ({n} {n:time|times} in a row): {err}", n=n, err=e))
         if n >= SOFT_LIMIT:
+            broken = True   # unknown, not found (and the assistant's channel is down with it)
             problems.append(_("The assistant hasn't answered for {limit} hours, so whether its pushes reach the phone is "
                               "unknown", limit=SOFT_LIMIT))
     except BadAnswer as e:

@@ -515,7 +515,7 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   to expire, and alerts on problems; it also lists files whose names look like credentials but are not declared
   (reminder only). Neither this script nor `check-claude-login.py` prints values
 - **Alerts** (`bin/alert.py`; channels: Discord, ntfy, email, macOS notifications, configured in brunna.json `alerts`): a
-  new problem is sent at once, an unresolved one is re-sent every 24 hours, and a recovery goes only to the assistant (it
+  new problem is sent at once, an unresolved one is re-sent daily (after 23 hours), and a recovery goes only to the assistant (it
   closes its item; nothing is pushed to the owner); every notice tried is logged in `.state/alerts-log.jsonl`
   (design `docs/design/alert-routing.md`). An alert whose problem the platform's agents can fix goes first as a letter to
   that project (a project's own job) or to brunna (the platform's jobs and self-checks), and to the owner only after a

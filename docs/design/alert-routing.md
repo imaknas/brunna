@@ -115,7 +115,9 @@ of three ways:
   to whoever fixes the job. Two kinds of finding also exit 1, so they are retried at the next tick and shown red as
   before:
   - a problem that says the check itself broke: the push health answer breaks the contract, the ingest token can't be
-    read, the login check raised, or llm.py printed no JSON;
+    read, the assistant hasn't answered for 3 hours (its own channel is down with it, so the alert can't go out whole
+    either), the login check raised or couldn't run (`codex login status` timed out: the adapter's id `broke`), or
+    llm.py printed no JSON;
   - a finding `alert.once` couldn't deliver, because no channel is set up or a send failed.
 
   Only the code path that called `alert.once` may answer FOUND; `check-secrets <project>` doesn't.

@@ -1464,7 +1464,7 @@ def scheduler_jobs(index: dict, legacy_names: set[str]) -> tuple[list[dict], lis
                              ("until", "end_date"), ("between", "between"), ("background", "background"),
                              ("max_attempts_per_day", "max_attempts_per_day"), ("catch_up", "catch_up"),
                              ("found_exit", "found_exit")):
-                if src in job:
+                if src in job and (src != "found_exit" or platform_doc(doc, name)):
                     j[dst] = job[src]
             if "trigger" in job:
                 on = job["trigger"]
