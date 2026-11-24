@@ -328,6 +328,12 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   doesn't hold `max_tokens`, and `provider_anthropic`'s forced `tool_choice`, which current models refuse. Resuming it
   needs the per-project budgets above first.
 
+- **A stranger's fresh install** (11-25, a container walkthrough from the README, no agent and no model): built: the
+  nightly tidy-up with nothing to run on is "off" everywhere (`bin/job_off.py`), onboarding without `github.owner` stays
+  local, connecting again is a no-op and needs a terminal or `--yes`, a wrong answer is asked again, doctor's `!` asks
+  for something (a runtime's gaps and the checkout race are `·`, once). `brunna --help` gained `llm setup` and `connect`.
+  Left: a fresh install also schedules the platform's own test suite (`brunna/nightly-tests`).
+
 - **Alerts** (`alert-routing.md`, 11-18): both steps built: one alert per failing job, recoveries not pushed, a log of
   notices; and each alert routed to whoever can fix it (a project's job → the project, the platform's → brunna, a day
   unsettled → the owner). Left: count the log after a week against the 72-in-ten-days baseline.

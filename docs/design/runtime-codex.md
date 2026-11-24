@@ -484,7 +484,7 @@ The session's own mail follows `bus-sender.md`:
 walk can't run and `CODEX_SANDBOX` is set, Codex's `CODEX_THREAD_ID` wins.
 
 **7. Doctor and the status page.**
-- `doctor_confined` becomes per project and per installed agent: "confined", or the reason from (5). Reasons include no
+- `doctor_confined` (11-25: one row for all sandboxed projects, a reminder only when no installed agent is confined) becomes per project and per installed agent: "confined", or the reason from (5). Reasons include no
   rendered config, changed, a foreign `.codex` entry, not trusted in Codex, hooks not installed or not trusted, and
   "network off for Codex sessions".
 - `doctor_control` lists `.codex` with the other control names.

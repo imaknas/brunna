@@ -69,14 +69,17 @@ By hand, requirements, machines that sleep and where things are kept: [docs/inst
    brunna connect ~/code
    ```
 
-2. Open your agent in a project's folder (`claude` or `codex`). Claude Code picks up the project's setup when the
+2. Open your agent in a project's folder (`claude` or `codex`; brunna runs Claude Code through
+   [nvm's node](docs/install.md#requirements)). Claude Code picks up the project's setup when the
    session starts, and writes notes as it works; Codex reaches the mailbox and the notes through brunna's tools (MCP)
    for now.
 3. `brunna doctor` says what is still missing, each with how to fix it. The status page at http://localhost:18790
    shows how everything is doing, no terminal needed
-   ([from another computer](docs/install.md#the-status-page-from-another-computer)).
+   ([from another computer](docs/install.md#the-status-page-from-another-computer),
+   [in a container](docs/install.md#without-launchd-or-systemd), where nothing serves it).
 
-The next morning, the digest and the to-do list are waiting:
+The next morning, the digest and the to-do list are waiting. A model writes them: without one nothing happens
+overnight (no digest, no `todo.md`, and each `STATE.md` stays a placeholder) until `brunna llm setup`.
 
 ```markdown
 # Cross-project to-do
@@ -114,7 +117,8 @@ Everything it does, in detail: [docs/features.md](docs/features.md).
 | The model behind brunna's decisions | Your agent's own login, Anthropic, any OpenAI-compatible API, or a local Ollama (`brunna llm setup`) |
 | The computer | macOS or Linux. An always-on machine is best; a laptop works |
 
-No agent and no model yet? Notes, schedules and the mailbox still work; `brunna doctor` says what is off and why.
+No agent and no model yet? Notes, schedules and the mailbox still work, the nightly tidy-up doesn't; `brunna doctor`
+says what is off and why.
 
 ## Privacy and safety
 

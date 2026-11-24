@@ -30,8 +30,8 @@ brunna init                        # the questions (open a new terminal first if
 ```
 
 With a model set up (`brunna llm setup`) and the scheduler running, the next morning there is a digest and a `todo.md`
-in the instance's data directory. Without a model they are not written: the librarian's judgment calls fail and say
-why, and `brunna doctor` reports that judgment points have nowhere to run until you set one up.
+in the instance's data directory. Without a model they are not written: the nightly tidy-up is off, and `brunna doctor`,
+the status page and `brunna run brunna/librarian` say so, with the reason, until you set one up.
 
 ## Claude Code's token
 
@@ -55,19 +55,23 @@ alert say it is about to expire; do the same two steps again.
 - macOS (launchd) or Linux (systemd user units). Project sandboxes use Seatbelt on macOS and Landlock on Linux (a
   declared listening port needs Landlock ABI 4, kernel 6.7 or later). The capability runner, which runs programs a
   sandbox blocks, uses Seatbelt, so it is macOS only.
-- `git`, `jq` and [`uv`](https://docs.astral.sh/uv/). `uv` builds the platform's own Python 3.13 venv, so platform scripts
+- `git` and [`uv`](https://docs.astral.sh/uv/). `uv` builds the platform's own Python 3.13 venv, so platform scripts
   don't depend on whichever `python3` is on PATH.
 - **A model for the platform's judgment calls**, for the core payoff: the nightly digest, the upkeep of each `STATE.md`,
   and the items in `todo.md` (which are read from the to-do sections the model keeps in `STATE.md`) are all written by
   a model. It can be your coding agent's own login, an Anthropic or OpenAI-compatible API key, or a local Ollama; pick
   one with `brunna llm setup` (`brunna init` asks). Without one, the platform still runs: project memory folders,
   the mailbox, the scheduler and its jobs, the status page and the project registry all work, judgment calls fail and
-  say why, and init leaves the modules that only do model work (consolidation, reflection) off.
+  say why, nothing is written overnight, and init leaves the modules that only do model work (consolidation, reflection) off.
 - Optional:
   - a coding agent, such as [Claude Code](https://claude.com/claude-code) or any headless CLI agent. Without one, init
     sets `runtime.default: none`: agent features (dispatching agents to mailbox requests, session hooks) are then off,
-    and `brunna doctor` lists each one.
-  - `gh`, to create GitHub repos on onboarding;
+    and `brunna doctor` lists each one. Claude Code needs [nvm](https://github.com/nvm-sh/nvm) with a default node
+    (`nvm install --lts`): brunna keeps a checked copy of it under nvm's npm, and looks for node nowhere else;
+  - `gh`, logged in (`gh auth login`) before `brunna init`, to create GitHub repos on onboarding: init reads
+    `github.owner` from it. Without it, `brunna onboard` keeps a new project on this machine and says so (`--public`
+    fails instead, before anything is made); set `github.owner` in `brunna.json` later to have repos created;
+  - `jq`, only on a remote machine whose shell scripts run without the platform's Python;
   - `restic`, for the backup module;
   - an alert channel: Discord, ntfy, email or macOS notifications;
   - Docker, for `bin/linux-test`.

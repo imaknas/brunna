@@ -5,6 +5,7 @@ brunna status [project]       # project state, services, STATE.md
 brunna state history <project>   # every night's STATE.md; `brunna state restore <project> <date>` brings one back
 brunna config plan            # what a config change would do; `brunna config apply` applies it
 brunna modules                # optional features; `brunna modules enable <name>`
+brunna connect <folder>       # connect a project, or a folder of them; safe to run again. --verbose shows every step
 brunna llm setup              # which provider/model the platform's judgment calls use
 brunna jobs                   # all scheduled jobs; `brunna run <job>` runs one now
 brunna recover <project>      # new machine or lost folder (never re-onboard an onboarded project)

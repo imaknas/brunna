@@ -127,7 +127,8 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
 
 - **Start a new project, or connect an existing folder to this system**:
   `bin/onboard-project.sh [--public] [--no-remote] ~/workspace/<name>` (run on the hub machine): fully automatic (it
-  does the git init, adds the first commit, creates the GitHub repo); details in its header comment and
+  does the git init, adds the first commit, creates the GitHub repo; with no `github.owner` set it stays local and says
+  so); details in its header comment and
   `.claude/skills/new-or-onboard-project/SKILL.md`
 - **New machine, or a project's local folder is gone**: `bin/recover-project.sh <name>`
   — **never** re-run `onboard-project.sh` for a project that was already onboarded: it creates a brand-new memory cut
@@ -262,6 +263,8 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
 
 ## Scheduling / nightly automation (runs on the hub machine)
 
+- **A job whose feature is off on this machine** (the librarian or consolidate with no model) exits 0 and records why
+  with `bin/job_off.py`: completed for the scheduler, "off" on the status page, and `brunna run` says so and exits 1
 - `bin/scheduler.py` + `schedule.yaml` + `bin/schedulectl`: the scheduler, triggered every 15 minutes; `schedulectl` is
   the CLI for viewing/adjusting the schedule (e.g. `schedulectl models` shows the model each judgment point uses,
   `schedulectl run <name>` runs one right now). **All schedules live only here**, including ones that need model

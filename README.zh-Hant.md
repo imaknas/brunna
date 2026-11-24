@@ -67,11 +67,14 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
    brunna connect ~/code
    ```
 
-2. 在專案資料夾裡打開你的 agent(`claude` 或 `codex`)。session 開始時它會載入這個專案的設定，邊做事邊寫筆記。
+2. 在專案資料夾裡打開你的 agent(`claude` 或 `codex`;brunna 用
+   [nvm 的 node](docs/install.md#requirements) 跑 Claude Code)。session 開始時它會載入這個專案的設定，邊做事邊寫筆記。
 3. `brunna doctor` 會列出還缺什麼，每項都附上怎麼補。狀態頁 http://localhost:18790 讓你不開終端機也能看到
-   一切是否正常([從別台電腦看](docs/install.md#the-status-page-from-another-computer))。
+   一切是否正常([從別台電腦看](docs/install.md#the-status-page-from-another-computer)、
+   [在容器裡](docs/install.md#without-launchd-or-systemd)沒有東西替你開這個網址)。
 
-隔天早上，摘要和待辦清單已經在等你:
+隔天早上，摘要和待辦清單已經在等你。它們是模型寫的:沒有模型，晚上什麼都不會發生(沒有摘要、沒有 `todo.md`，
+每個 `STATE.md` 都停在佔位的樣子)，直到你跑 `brunna llm setup`。
 
 ```markdown
 # 跨專案待辦
