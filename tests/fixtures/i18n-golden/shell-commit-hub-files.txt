@@ -15,7 +15,7 @@ $ commit-hub-files.sh m hub.json todo.md
 [exit 0]
 --- stdout
 commit-hub-files: todo.md 不是 config(data 不進 git),略過
-commit-hub-files: 已 commit+push:hub.json
+commit-hub-files: 已 commit:hub.json
 --- stderr
 
 $ commit-hub-files.sh m hub.json

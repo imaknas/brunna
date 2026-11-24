@@ -46,8 +46,8 @@ placeholder README.md is enough.
 Add `--public` only when the user explicitly says this project is meant to be public (a portfolio, open source). If
 unsure, ask; don't guess.
 
-`--no-remote` (no GitHub repo) only when the user says the project doesn't need one for now, or `hub.json` has no
-`github.owner`. Tell them the trade-off: without a remote there is no copy beyond this machine (the platform's
+`--no-remote` (no GitHub repo) only when the user says the project doesn't need one for now; when the settings have no
+`github.owner`, onboarding stays local by itself and says so (`--public` fails). Tell them the trade-off: without a remote there is no copy beyond this machine (the platform's
 encrypted backup, if on, still covers it). `agenthub connect` uses `--no-remote` unless given `--remote`.
 
 ## Decision 5: sandbox it, and which branches may the platform push?

@@ -12,12 +12,14 @@
 # and the script won't guess and clear it away.
 #
 # Usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all]
-#                           [--push-confirm] [--push-email <address>]... <local project path>
+#                           [--push-confirm] [--push-email <address>]... [--log <file>] <local project path>
 #   run on the hub machine, new projects go in ~/workspace/<name> (since 2026-10-15 every project is on the hub
 #   machine)
 #   --public     make the GitHub repo public when creating it (default private)
 #   --no-remote  don't create a GitHub remote automatically, stay purely local (native): only use this when you're
-#                really sure the project doesn't need a backup on GitHub
+#                really sure the project doesn't need a backup on GitHub. Without it but with no github.owner in the
+#                settings (a fresh install) there is nobody to create a repo for: the project stays local, and that is
+#                said. --public then fails instead, before anything is done: a public repo was asked for
 #   --sandbox    sandbox the project (enforce.sandbox, owner-only): when its agent would touch other people's data, or
 #                run or read untrusted code or content (docs/design/platform-push.md section 1). Default: not
 #                sandboxed (--no-sandbox), as before
@@ -30,6 +32,8 @@
 #   --push-confirm  the --push given was a person's typed answer (brunna connect's question): after what it does is
 #                printed, it still asks [y/N] before your gh login adds the key; a no leaves none and the to-do
 #   --push-email the commit emails the platform's pushes may carry (repeatable; default: check 6's proposal)
+#   --log        append the steps' lines to this file instead of printing them (brunna connect): what is left on the screen
+#                is the result, the push grant's own questions, warnings and errors
 #
 # What it does (in order):
 #   1. Precondition checks and automatic fill-in:
@@ -39,8 +43,8 @@
 #          first commit: in this case there's no "work the user isn't ready with" to protect, so it can be done
 #          automatically
 #        - commits exist but the working tree is dirty: fail right away, no guessing, no clearing
-#        - no origin and no --no-remote: create a GitHub repo automatically (private by default) and push what was
-#          just committed
+#        - no origin, no --no-remote and github.owner set: create a GitHub repo automatically (private by default) and
+#          push what was just committed
 #   2. git worktree add --orphan -b agent-memory .agent-memory
 #   3. copy the AGENT.md/STATE.md skeleton, create an empty memory/, commit on the agent-memory branch
 #   4. write .agent-memory/ into the local .git/info/exclude (the committed .gitignore is untouched)
@@ -75,6 +79,7 @@ NO_REMOTE=false
 SANDBOX=false
 PUSH=""
 PUSH_ARGS=()
+LOG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --public) VISIBILITY="--public"; shift ;;
@@ -87,12 +92,18 @@ while [ $# -gt 0 ]; do
       [ -n "${2:-}" ] || fail "$(hub_msg "--push-email takes an address")"
       PUSH_ARGS+=(--push-email "$2"); shift 2 ;;
     --push-confirm) PUSH_ARGS+=(--confirm); shift ;;
+    --log)
+      [ -n "${2:-}" ] || fail "$(hub_msg "--log takes a file")"
+      LOG="$2"; shift 2 ;;
     --) shift; break ;;
     -*) fail "$(hub_msg "unknown argument: {arg}" arg="$1")" ;;
     *) break ;;
   esac
 done
-[ $# -eq 1 ] || fail "$(hub_msg "usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]... <local project path>")"
+[ $# -eq 1 ] || fail "$(hub_msg "usage: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]... [--log <file>] <local project path>")"
+# 3: what the person sees whatever --log says; 4: where a step's own stderr chatter goes (the config repo's commit hook)
+exec 3>&1 4>&2
+[ -z "$LOG" ] || exec >>"$LOG" 4>&1
 # the platform pushes only for a sandboxed project (an unsandboxed one's agents push with your own git)
 if [ "$SANDBOX" != true ] && { [ "$PUSH" = others ] || [ "$PUSH" = all ]; }; then
   fail "$(hub_msg "--push {push} is for a sandboxed project: add --sandbox" push="$PUSH")"
@@ -123,11 +134,21 @@ if [ -n "${AGENTHUB_CONNECT_ROOTS:-${BRUNNA_CONNECT_ROOTS:-}}" ]; then
   for _r in "${_roots[@]}"; do case "$_real" in "$_r"/?*) _inside=true ;; esac; done
   $_inside || fail "$(hub_msg "{path} is not inside a folder the owner named for projects" path="$_real")"
 fi
+# the folder isn't trusted yet: every git call in it runs with its own hooks and fsmonitor off (B6)
+sgit() { git -c core.hooksPath=/dev/null -c core.fsmonitor= "$@"; }
+# no GitHub account to create a repo under (a fresh install): the project stays local. Settled before anything is made
+GH_OWNER=""; NO_OWNER=false
+if [ "$NO_REMOTE" != true ] && ! { [ -e "$1/.git" ] && sgit -C "$1" remote get-url origin >/dev/null 2>&1; }; then
+  GH_OWNER=$("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hubconf.py" get github.owner 2>/dev/null) || GH_OWNER=""
+  if [ -z "$GH_OWNER" ]; then
+    [ "$VISIBILITY" = --private ] || fail "$(hub_msg "{settings} has no github.owner, so no public GitHub repo can be created: gh auth login, then set github.owner (nothing was done)")"
+    NO_REMOTE=true
+    NO_OWNER=true   # said once the guards below have passed
+  fi
+fi
 mkdir -p "$1"
 # the real path (-P): a folder given through a symlink is onboarded where it really is (docs/design/newcomer-path.md B6)
 PROJ_PATH="$(cd "$1" && pwd -P)"
-# the folder isn't trusted yet: every git call in it runs with its own hooks and fsmonitor off (B6)
-sgit() { git -c core.hooksPath=/dev/null -c core.fsmonitor= "$@"; }
 # where the memory bare repos live on the hub machine (hub.json git_origin), as a path its shell expands
 GO_REMOTE="$(hub_json_get git_origin)"; GO_REMOTE="${GO_REMOTE:-~/git-origin}"
 GO_SH="${GO_REMOTE/#\~/\$HOME}"
@@ -201,8 +222,7 @@ elif git show-ref --verify --quiet refs/heads/agent-memory; then
 fi
 
 if [ -z "$origin_url" ] && [ "$NO_REMOTE" != true ]; then
-  # the account is read from hub.json's github.owner, not hard-coded (CLAUDE.md, "rules for writing new code")
-  GH_OWNER=$("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hubconf.py" get github.owner) || fail "$(hub_msg "{settings} has no github.owner: cannot create the GitHub repo")"
+  # GH_OWNER: the settings' github.owner, read above
   gh repo create "$GH_OWNER/$PROJ_NAME" $VISIBILITY --source=. --remote=origin
   sgit remote set-url origin "git@github.com:${GH_OWNER}/${PROJ_NAME}.git"
   outer_branch=$(sgit branch --show-current)
@@ -210,10 +230,13 @@ if [ -z "$origin_url" ] && [ "$NO_REMOTE" != true ]; then
   origin_url=$(sgit remote get-url origin)
 fi
 
+if $NO_OWNER && [ -z "$origin_url" ]; then
+  hub_say "No GitHub repo: {settings} has no github.owner, so {name} stays on this machine only. To create repos for later projects: gh auth login, then set github.owner" name="$PROJ_NAME" >&3
+fi
 if [ -n "$origin_url" ]; then
   hub_say "[1/11] Preconditions OK: {name} (external remote: {origin})" name="$PROJ_NAME" origin="$origin_url"
 else
-  hub_say "[1/11] Preconditions OK: {name} (--no-remote, stays local only)" name="$PROJ_NAME"
+  hub_say "[1/11] Preconditions OK: {name} (no remote, stays local only)" name="$PROJ_NAME"
 fi
 
 if [ "$RESUME" != true ]; then
@@ -328,16 +351,17 @@ manifest_origin="${origin_url:-(native)}"
 "$AGENT_HUB/bin/gen-index-roster.sh" \
   || hub_say "Warning: the roster in index.md wasn't regenerated; the librarian does it tonight" >&2
 if "$AGENT_HUB/bin/commit-hub-files.sh" "register $PROJ_NAME (onboard-project.sh)" \
-    "projects/$PROJ_NAME.yaml" mirror-list.txt index.md; then
-  hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml); brunna committed and pushed" name="$PROJ_NAME"
+    "projects/$PROJ_NAME.yaml" mirror-list.txt index.md 2>&4; then
+  hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml), and committed" name="$PROJ_NAME"
 else
   hub_say "Warning: committing/pushing brunna's registry files failed; do it by hand (the registration itself is written)" >&2
+  [ -z "$LOG" ] || hub_say "  What it said: {log}" log="$LOG" >&2
   hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml); committing/pushing brunna failed (see the warning)" name="$PROJ_NAME"
 fi
 # A sandboxed project with a remote: which branches the platform may push for it (docs/design/platform-push.md section
 # 2), and its push grant when that isn't none; the decision and any failure are said by git_push_grant.py itself
 if [ -n "$origin_url" ]; then
-  "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/git_push_grant.py" onboard "$PROJ_NAME" ${PUSH_ARGS[@]+"${PUSH_ARGS[@]}"} \
+  "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/git_push_grant.py" onboard "$PROJ_NAME" ${PUSH_ARGS[@]+"${PUSH_ARGS[@]}"} >&3 \
     || hub_say "Warning: the platform's push for {name} was not set up; run brunna push setup {name}" name="$PROJ_NAME" >&2
 fi
 # The registration changed the config: apply it now and record that, or the status page keeps saying the config changed
@@ -345,5 +369,5 @@ fi
 # can't finish (no service manager, a linked worktree of the hub) doctor and the status page already say why.
 "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/agenthub" config apply >/dev/null 2>&1 || true
 
-echo
-hub_say "Done: {name} is connected to the brunna pipeline." name="$PROJ_NAME"
+[ -n "$LOG" ] || echo
+hub_say "Done: {name} is connected to brunna." name="$PROJ_NAME" >&3

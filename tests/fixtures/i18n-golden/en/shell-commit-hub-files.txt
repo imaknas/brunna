@@ -15,7 +15,7 @@ $ commit-hub-files.sh m hub.json todo.md
 [exit 0]
 --- stdout
 commit-hub-files: todo.md is not config (data does not go into git), skipped
-commit-hub-files: committed and pushed: hub.json
+commit-hub-files: committed: hub.json
 --- stderr
 
 $ commit-hub-files.sh m hub.json

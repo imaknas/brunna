@@ -114,6 +114,43 @@ class Onboard(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertNotIn("enforce", self.reg("x"))
 
+    def no_owner(self):
+        cfg = json.loads((self.hub / "hub.json").read_text())
+        cfg.pop("github")
+        (self.hub / "hub.json").write_text(json.dumps(cfg))
+
+    def test_without_a_github_owner_a_project_stays_local_and_that_is_said(self):
+        """A fresh install (11-25): no github.owner is no reason to fail, unless a public repo was asked for."""
+        self.no_owner()
+        r = self.onboard(self.ws / "fresh")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("No GitHub repo", r.stdout)
+        self.assertIn("github.owner", r.stdout)
+        self.assertNotIn("hubconf.py", r.stderr, "said once, in words")
+        self.assertIn("fresh", self.reg("fresh")["paths"]["workspace"])
+        r = self.onboard("--public", self.ws / "pub")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("nothing was done", r.stderr)
+        self.assertFalse((self.ws / "pub").exists())
+        # a project with its own remote needs no owner, and nothing is said
+        r = self.onboard(self.repo("own", origin="https://example.invalid/x/own.git"))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("No GitHub repo", r.stdout)
+
+    def test_log_takes_the_steps_and_leaves_the_result(self):
+        log = self.tmp / "steps.log"
+        r = self.onboard("--no-remote", "--log", log, self.ws / "quiet")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.strip(), "Done: quiet is connected to brunna.")
+        self.assertEqual(r.stderr, "")
+        self.assertIn("[11/11]", log.read_text())
+
+    def test_log_leaves_an_error_on_the_screen(self):
+        r = self.onboard("--no-remote", "--log", self.tmp / "l", self.ws / "twice")
+        r = self.onboard("--no-remote", "--log", self.tmp / "l", self.ws / "twice")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("already in the project registry", r.stderr)
+
     def test_sandbox_is_registered_and_merged_with_what_the_caller_registers(self):
         r = self.onboard("--no-remote", "--sandbox", self.ws / "alpha",
                          env={"ONBOARD_REGISTRY_EXTRA": json.dumps({"layout_intent": {"split": True}})})
@@ -179,6 +216,7 @@ class Connect(unittest.TestCase):
                   mock.patch.object(connect.hubconf, "instance_home", lambda: self.tmp / "instance"),
                   mock.patch.object(connect.pathlib.Path, "home", classmethod(lambda cls: self.home)),
                   mock.patch.object(connect, "hidden", lambda p: False),
+                  mock.patch.object(connect.hubconf, "LOGS", self.tmp / "logs"),
                   mock.patch("llm_ready.unsupported", lambda point: "no model in this test")):
             p.start()
             self.addCleanup(p.stop)
@@ -203,7 +241,9 @@ class Connect(unittest.TestCase):
 
     def onboard_flags(self) -> list[str]:
         self.assertEqual(len(self.ran), 1, self.ran)
-        return self.ran[0][1:-1]
+        flags = self.ran[0][1:-1]
+        self.assertEqual(flags[-2], "--log")   # where its steps go (--verbose: the screen)
+        return flags[:-2]
 
     def test_flags_pass_through(self):
         rc, out, err = self.run_connect(str(self.app), "--yes", "--sandbox", "--push", "others", "--push-email",

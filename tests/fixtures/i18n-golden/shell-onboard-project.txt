@@ -2,7 +2,7 @@
 exit 1
 --- stdout
 --- stderr
-onboard-project: 用法: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <地址>]... <本機專案路徑>
+onboard-project: 用法: onboard-project.sh [--public] [--no-remote] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <地址>]... [--log <檔案>] <本機專案路徑>
 
 === unknown flag
 exit 1
@@ -19,7 +19,7 @@ onboard-project: 連不上 hub 主機(hubbox)。這支腳本會在 hub 主機上
 === new folder, --no-remote
 exit 0
 --- stdout
-[1/11] 前置條件檢查通過:alpha(--no-remote,維持純本機)
+[1/11] 前置條件檢查通過:alpha(沒有 remote,維持純本機)
 [2/11] 已建立 .agent-memory worktree(agent-memory 分支,跟主分支完全隔離)
 [3/11] 骨架檔案就位並已在 agent-memory 分支上 commit
 [4/11] .agent-memory/ 已在 .git/info/exclude 排除(不動 .gitignore)
@@ -31,9 +31,9 @@ sync-local-setup (stand-in): alpha
 [10/11] 沒有外部 remote,跳過 mirror-backup 登記
 登錄:<TMP>/hub/projects/alpha.yaml
 commit-hub-files (stand-in): register alpha (onboard-project.sh)
-[11/11] 已登記進 brunna 的專案登錄(projects/alpha.yaml),並 commit+push brunna
+[11/11] 已登記進 brunna 的專案登錄(projects/alpha.yaml),並 commit
 
-完成:alpha 已接上 brunna 管線。
+完成:alpha 已接上 brunna。
 --- stderr
 
 === alpha's STATE.md
@@ -88,24 +88,38 @@ onboard-project: .agent-memory 已經存在,而且 hub 主機上也已經有對�
 exit 0
 --- stdout
 (偵測到本機已完成前面的步驟,但 hub 主機上沒有對應、有實際內容的 bare repo——像是上次被中途打斷,接著從 hub 主機端繼續,不重做已完成的部分)
-[1/11] 前置條件檢查通過:alpha(--no-remote,維持純本機)
+[1/11] 前置條件檢查通過:alpha(沒有 remote,維持純本機)
 [2-7/11] resume 模式,已在前一次呼叫完成,跳過
 [8/11] 已建 memory bare repo(~/git-origin/alpha-memory.git),agent-memory 分支已推送
 [9/11] 已 clone librarian 用的 memory 副本到 ~/.memory-copies/alpha
 [10/11] 沒有外部 remote,跳過 mirror-backup 登記
 登錄:<TMP>/hub/projects/alpha.yaml
 commit-hub-files (stand-in): register alpha (onboard-project.sh)
-[11/11] 已登記進 brunna 的專案登錄(projects/alpha.yaml),並 commit+push brunna
+[11/11] 已登記進 brunna 的專案登錄(projects/alpha.yaml),並 commit
 
-完成:alpha 已接上 brunna 管線。
+完成:alpha 已接上 brunna。
 --- stderr
 
 === no github.owner
-exit 1
+exit 0
 --- stdout
+不建 GitHub repo:hub.json 沒有 github.owner,所以 epsilon 只留在這台機器上。之後的專案要建 repo:先 gh auth login,再設 github.owner
+[1/11] 前置條件檢查通過:epsilon(沒有 remote,維持純本機)
+[2/11] 已建立 .agent-memory worktree(agent-memory 分支,跟主分支完全隔離)
+[3/11] 骨架檔案就位並已在 agent-memory 分支上 commit
+[4/11] .agent-memory/ 已在 .git/info/exclude 排除(不動 .gitignore)
+sync-local-setup (stand-in): epsilon
+[5-6/11] .claude/settings.local.json hook 跟 CLAUDE.local.md 區塊已就位(不進版控)
+[7/11] 外層 repo 沒有任何變更、不 commit
+[8/11] 已建 memory bare repo(~/git-origin/epsilon-memory.git),agent-memory 分支已推送
+[9/11] 已 clone librarian 用的 memory 副本到 ~/.memory-copies/epsilon
+[10/11] 沒有外部 remote,跳過 mirror-backup 登記
+登錄:<TMP>/hub/projects/epsilon.yaml
+commit-hub-files (stand-in): register epsilon (onboard-project.sh)
+[11/11] 已登記進 brunna 的專案登錄(projects/epsilon.yaml),並 commit
+
+完成:epsilon 已接上 brunna。
 --- stderr
-hubconf.py get:github.owner 沒有設定或不是單一值
-onboard-project: hub.json 沒有 github.owner,建不了 GitHub repo
 
 === GitHub repo created, commit fails
 exit 0
@@ -124,7 +138,7 @@ sync-local-setup (stand-in): zeta
 登錄:<TMP>/hub/projects/zeta.yaml
 [11/11] 已登記進 brunna 的專案登錄(projects/zeta.yaml),但 brunna 的 commit/push 失敗(見上面的警告)
 
-完成:zeta 已接上 brunna 管線。
+完成:zeta 已接上 brunna。
 --- stderr
 commit-hub-files (stand-in): push failed
 警告:brunna 登記檔 commit/push 失敗,請手動處理(登記內容本身已寫入)
@@ -135,7 +149,7 @@ git@github.com:o/zeta.git
 === not ignored
 exit 1
 --- stdout
-[1/11] 前置條件檢查通過:iota(--no-remote,維持純本機)
+[1/11] 前置條件檢查通過:iota(沒有 remote,維持純本機)
 [2/11] 已建立 .agent-memory worktree(agent-memory 分支,跟主分支完全隔離)
 [3/11] 骨架檔案就位並已在 agent-memory 分支上 commit
 --- stderr
@@ -144,7 +158,7 @@ onboard-project: .agent-memory 沒有被 ignore,停下來(不然 git add -A 會�
 === registry add fails
 exit 1
 --- stdout
-[1/11] 前置條件檢查通過:theta(--no-remote,維持純本機)
+[1/11] 前置條件檢查通過:theta(沒有 remote,維持純本機)
 [2/11] 已建立 .agent-memory worktree(agent-memory 分支,跟主分支完全隔離)
 [3/11] 骨架檔案就位並已在 agent-memory 分支上 commit
 [4/11] .agent-memory/ 已在 .git/info/exclude 排除(不動 .gitignore)
@@ -161,7 +175,7 @@ onboard-project: 登記進專案登錄失敗(projects/theta.yaml)
 === no coding agent
 exit 0
 --- stdout
-[1/11] 前置條件檢查通過:kappa(--no-remote,維持純本機)
+[1/11] 前置條件檢查通過:kappa(沒有 remote,維持純本機)
 [2/11] 已建立 .agent-memory worktree(agent-memory 分支,跟主分支完全隔離)
 [3/11] 骨架檔案就位並已在 agent-memory 分支上 commit
 [4/11] .agent-memory/ 已在 .git/info/exclude 排除(不動 .gitignore)
@@ -173,7 +187,7 @@ sync-local-setup (stand-in): kappa
 [10/11] 沒有外部 remote,跳過 mirror-backup 登記
 登錄:<TMP>/hub/projects/kappa.yaml
 commit-hub-files (stand-in): register kappa (onboard-project.sh)
-[11/11] 已登記進 brunna 的專案登錄(projects/kappa.yaml),並 commit+push brunna
+[11/11] 已登記進 brunna 的專案登錄(projects/kappa.yaml),並 commit
 
-完成:kappa 已接上 brunna 管線。
+完成:kappa 已接上 brunna。
 --- stderr

@@ -476,6 +476,8 @@ def outside(name: str, args: dict, client: "Client") -> tuple[bool, str]:
     if (why := connect.in_roots(pathlib.Path(str(args["path"])), roots)):
         return False, why
     real = pathlib.Path(os.path.expanduser(str(args["path"]))).resolve()
+    if (known := connect.connected_as(real)):
+        return True, _("{path} is already connected, as the project {name}; nothing to do", path=real, name=known)
     if (why := connect.refusal(real)):
         return False, why
     answer = client.confirm(_("Connect {path} as an brunna project? Its notes are kept in a separate place, a "

@@ -1,6 +1,6 @@
 #!/bin/sh -c exec${IFS}"${0%/*}/py"${IFS}"$0"${IFS}"$@"
 """Connect existing folders as projects (docs/design/newcomer-path.md B6): `brunna connect [<folder>] [--yes]
-[--remote] [--dry-run] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]…`.
+[--remote] [--dry-run] [--verbose] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]…`.
 
 The user names a folder. What it holds is found by reading files, and the only git call made in it (the
 unsaved-changes check) runs with its hooks and fsmonitor off, because the folder isn't trusted yet. Then:
@@ -10,8 +10,11 @@ unsaved-changes check) runs with its hooks and fsmonitor off, because the folder
   a folder holding several repos    one project per repo; whether they belong together is asked and recorded
                                     (layout_intent: {span: [...]}) for the same
 It never connects a part of a monorepo as a repo of its own. Before each one it says, in plain words, what connecting
-does; a repo with unsaved changes is skipped until they're saved. No GitHub repo is created unless --remote is given and
-{settings} has github.owner. The connecting itself is bin/onboard-project.sh.
+does; a repo with unsaved changes is skipped until they're saved, a folder that is connected already is left as it is
+(so running it again is safe), and every folder left out is named with why. Without a terminal to ask in it connects
+nothing unless --yes says so. The connecting's own steps go to a log, named at the end (--verbose prints them). No
+GitHub repo is created unless --remote is given and {settings} has github.owner. The connecting itself is
+bin/onboard-project.sh.
 
 Two questions per project (docs/design/platform-push.md section 2), or their flags for a run without a person:
   sandbox it?   when its agent will touch other people's data, or run or read untrusted code or content (downloaded
@@ -31,6 +34,7 @@ that is already connected. The folder is resolved to its real path first.
 """
 from __future__ import annotations
 
+import datetime
 import json
 import os
 import pathlib
@@ -150,6 +154,34 @@ def add_root(folder: str) -> int:
     return 0
 
 
+def connected_as(p: pathlib.Path) -> str | None:
+    """The project whose folder this is exactly: connecting it again has nothing to do. (A folder inside a project is
+    refused: refusal.)"""
+    for name, doc in (hubconf.projects() or {}).items():
+        ws = ((doc.get("paths") or {}).get("workspace") or "")
+        if ws and p == pathlib.Path(os.path.expanduser(ws)).resolve():
+            return name
+    return None
+
+
+def left_out(folder: pathlib.Path, candidates: list[pathlib.Path]) -> list[str]:
+    """In a folder of repos: the other folders, which are not taken as projects because they have no git history."""
+    return sorted(c.name for c in folder.iterdir() if c.is_dir() and not c.name.startswith(".") and c not in candidates)
+
+
+def next_step() -> str:
+    """What to do after connecting, for the agents this install really has."""
+    import runtime_ports
+    agents = [n for n in runtime_ports.installed() if n != "none"]
+    if any("lifecycle" in runtime_ports.capabilities(n) for n in agents):
+        return _("Done. Start a new session in each connected folder: hooks and rules load when a session starts.")
+    if agents:
+        return _("Done. {agents} loads no hooks of brunna's here: its sessions reach the mailbox and the notes through "
+                 "brunna's tools (brunna mcp config).", agents=", ".join(agents))
+    return _("Done. No AI agent is set up, so nothing loads in a session yet: brunna init --agent <name> sets one up, and "
+             "any agent with MCP reaches the mailbox and the notes (brunna mcp config).")
+
+
 def ask(question: str, yes: bool, default: bool) -> bool:
     if yes or not sys.stdin.isatty():
         return default
@@ -212,7 +244,12 @@ def decide(p: pathlib.Path, remote: bool, opts: dict, yes: bool) -> list[str]:
     return out
 
 
-def connect_one(p: pathlib.Path, remote: bool, intent: dict | None, dry: bool, flags: list[str] | None = None) -> int:
+def connect_log() -> pathlib.Path:
+    return hubconf.LOGS / f"connect-{datetime.date.today().isoformat()}.log"
+
+
+def connect_one(p: pathlib.Path, remote: bool, intent: dict | None, dry: bool, flags: list[str] | None = None,
+                verbose: bool = False) -> int:
     if is_repo(p) and sgit(p, "status", "--porcelain").stdout.strip():
         print(_("Skipped {path}: it has unsaved changes. Save (commit) them, then run brunna connect again.", path=p))
         return 1
@@ -220,6 +257,9 @@ def connect_one(p: pathlib.Path, remote: bool, intent: dict | None, dry: bool, f
     if not (remote and hubconf.get("github.owner")):
         argv.append("--no-remote")
     argv += flags or []
+    if not verbose and not dry:
+        hubconf.LOGS.mkdir(parents=True, exist_ok=True)
+        argv += ["--log", str(connect_log())]
     argv.append(str(p))
     if dry:
         print(_("(dry run) would run: {command}", command=" ".join(argv))
@@ -228,7 +268,10 @@ def connect_one(p: pathlib.Path, remote: bool, intent: dict | None, dry: bool, f
     env = dict(os.environ)
     if intent:
         env["ONBOARD_REGISTRY_EXTRA"] = json.dumps({"layout_intent": intent})
-    return subprocess.run(argv, env=env).returncode
+    rc = subprocess.run(argv, env=env).returncode
+    if rc != 0 and not verbose:
+        print(_("{path} was not connected. Its steps up to there: {log}", path=p, log=connect_log()), file=sys.stderr)
+    return rc
 
 
 def main(argv: list[str]) -> int:
@@ -237,6 +280,8 @@ def main(argv: list[str]) -> int:
             print(_("brunna connect --add-root takes one folder"), file=sys.stderr)
             return 2
         return add_root(argv[1])
+    if hasattr(sys.stdout, "reconfigure"):   # in order with what the steps print, piped or not
+        sys.stdout.reconfigure(line_buffering=True)
     flags, args, opts, it = set(), [], {}, iter(argv)
     for a in it:
         if a in ("--push", "--push-email"):
@@ -255,7 +300,7 @@ def main(argv: list[str]) -> int:
             flags.add(a)
         else:
             args.append(a)
-    unknown = flags - {"--yes", "--remote", "--dry-run", "--help", "-h"}
+    unknown = flags - {"--yes", "--remote", "--dry-run", "--verbose", "--help", "-h"}
     if opts.get("push") in ("others", "all") and opts.get("sandbox") is not True:   # the platform pushes only for a sandboxed one
         unknown.add("--push without --sandbox")
     if unknown or {"--help", "-h"} & flags:
@@ -264,16 +309,39 @@ def main(argv: list[str]) -> int:
     if len(args) > 1:
         print(_("brunna connect takes one folder"), file=sys.stderr)
         return 2
-    yes, remote, dry = "--yes" in flags, "--remote" in flags, "--dry-run" in flags
+    yes, remote, dry, verbose = (f in flags for f in ("--yes", "--remote", "--dry-run", "--verbose"))
     folder = pathlib.Path(os.path.expanduser(args[0] if args else ".")).resolve()
+    if (name := connected_as(folder)):
+        print(_("{path} is already connected, as the project {name}; nothing to do", path=folder, name=name))
+        return 0
     if (why := refusal(folder)):
         print(_("brunna connect: {reason}; nothing was done", reason=why), file=sys.stderr)
         return 2
     kind, candidates = layout(folder)
-    if kind == "repos":
-        names = [c.name for c in candidates]
+    known = [(c, name) for c in candidates if (name := connected_as(c))]
+    others = left_out(folder, candidates) if kind == "repos" else []
+    candidates = [c for c in candidates if c not in dict(known)]
+    asks = not yes and not dry and sys.stdin.isatty()
+    for c, name in known:
+        print(_("{path} is already connected, as the project {name}; nothing to do", path=c, name=name))
+    names = [c.name for c in candidates]
+    if kind == "repos" and candidates:
         print(_("{path} holds {n} {n:repo|repos}: {names}. Each becomes a project of its own.", path=folder,
                 n=len(names), names=", ".join(names)))
+    if others:
+        print(_("Left out, with no version history (git) to tell them as projects: {names}. To connect one: brunna "
+                "connect {path}", names=", ".join(others), path=folder / others[0]))
+    if not candidates:
+        return 0
+    if remote and not hubconf.get("github.owner"):
+        print(_("No GitHub repo: {settings} has no github.owner, so what is connected stays on this machine only. To "
+                "create repos for later projects: gh auth login, then set github.owner"))
+    if not (yes or dry or asks):   # nobody to ask, and no --yes: never a silent yes
+        print(_("brunna connect: no terminal here to ask in, so nothing was connected ({folders}). With --yes it connects "
+                "with the defaults", folders=", ".join(map(str, candidates))),
+              file=sys.stderr)
+        return 2
+    if kind == "repos" and len(candidates) > 1:
         together = ask(_("Do they belong together as one project? (Recorded now, carried out once brunna supports "
                          "a project spanning several repos.)"), yes, False)
         intent = {"span": names} if together else None
@@ -290,7 +358,7 @@ def main(argv: list[str]) -> int:
     ready = not dry and llm_ready.unsupported("first-look") is None   # without a model, first-look only says so
     look = not dry and (not ready or ask(_("Write a first summary of each project now? It sends its README and recent "
                                            "commit titles to the AI model that makes brunna's decisions."), yes, True))
-    rc = 0
+    rc = done = 0
     for c in candidates:
         if (why := refusal(c)):
             print(_("Skipped: {reason}", reason=why))
@@ -299,12 +367,15 @@ def main(argv: list[str]) -> int:
         explain(c)
         if not ask(_("Connect it?"), yes, True):
             continue
-        one = connect_one(c, remote, intent, dry, decide(c, remote, opts, yes))
+        one = connect_one(c, remote, intent, dry, decide(c, remote, opts, yes), verbose)
         rc = one or rc
+        done += one == 0
         if one == 0 and not dry and look:
             subprocess.run([*hubconf.launch(BIN / "first-look.py"), c.name])
-    if not dry and rc == 0:
-        print(_("Done. Start a new session in each connected folder: hooks and rules load when a session starts."))
+    if not dry and done:
+        if not verbose:
+            print(_("The steps of connecting: {log}", log=connect_log()))
+        print(next_step())
     return rc
 
 

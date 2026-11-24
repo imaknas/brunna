@@ -59,5 +59,8 @@ fi
 
 git add -- "$@" \
   && git commit -q -m "$msg" -- "$@" \
-  && { [ -z "$(git remote)" ] || "$HUB/bin/git-safe-push.sh"; } \
-  && hub_say "commit-hub-files: committed and pushed: {paths}" paths="$*"
+  && if [ -z "$(git remote)" ]; then
+       hub_say "commit-hub-files: committed: {paths}" paths="$*"   # a config repo with no remote: nowhere to push
+     else
+       "$HUB/bin/git-safe-push.sh" && hub_say "commit-hub-files: committed and pushed: {paths}" paths="$*"
+     fi
