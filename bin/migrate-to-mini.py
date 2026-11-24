@@ -268,7 +268,9 @@ def merge_info_exclude(name: str, path: str) -> None:
     missing = [l for l in lines if l not in have]
     if missing:
         body = "\n".join(missing)
-        mini(f"mkdir -p {target}/.git/info && printf '%s\\n' {shlex.quote(body)} >> {target}/.git/info/exclude")
+        # the first on a line of its own: a file may end without a newline
+        mini(f"mkdir -p {target}/.git/info && f={target}/.git/info/exclude && "
+             f"{{ [ ! -s $f ] || [ -z \"$(tail -c 1 $f)\" ] || echo >> $f; }} && printf '%s\\n' {shlex.quote(body)} >> $f")
         print(_("  info/exclude: added {count} ignore {count:rule|rules}", count=len(missing)))
 
 
@@ -362,11 +364,9 @@ def main() -> None:
 
     print(_("[2/6] Catching up memory sync and push"))
     mem = os.path.join(path, ".agent-memory")
-    env = dict(os.environ, GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.hooksPath",
-               GIT_CONFIG_VALUE_0="/dev/null")
-    for script in ("git-sync-memory.sh", "git-safe-push.sh"):
-        r = subprocess.run([str(hublib.HUB / "bin/with-lock.sh"), str(hublib.HUB / "bin" / script)],
-                           cwd=mem, env=env, capture_output=True, text=True)
+    for script, *args in (("git-sync-memory.sh",), ("git-safe-push.sh", "--memory")):
+        r = subprocess.run([str(hublib.HUB / "bin/with-lock.sh"), str(hublib.HUB / "bin" / script), *args],
+                           cwd=mem, capture_output=True, text=True)
         if r.returncode != 0:
             fail(_("{script} failed: {output}", script=script, output=r.stdout + r.stderr))
 

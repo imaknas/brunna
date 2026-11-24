@@ -10,8 +10,10 @@
 # machine on 10-15 it had nothing to do.)
 # Zero LLM cost; nothing to commit, nothing done.
 #
-# Per project: run git-sync-memory.sh under with-lock (only adds memory/ and STATE.md, never git add -A), then push
-# the commits that haven't gone out yet (e.g. the last push failed, or sync-local-setup.sh's AGENT.md commit).
+# Per project: run git-sync-memory.sh under with-lock (only adds memory/ and STATE.md, never git add -A), which also pushes
+# the commits that haven't gone out yet (e.g. the last push failed, or sync-local-setup.sh's AGENT.md commit). How each sync
+# went is recorded (memory_health.py: what the project's next session is told), and a project that keeps failing is
+# alerted. A code remote that has the project's memory branch is told once, from what this machine knows of it (no network).
 set -uo pipefail
 
 HUB="${AGENT_HUB_ROOT:-${BRUNNA_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
@@ -20,13 +22,6 @@ SERVER="$(hub_server)"   # the machine that runs the hub (hub.json hosts.server)
 LOG_DIR="$HUB/.logs"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/sync-all-memory-$(date +%Y-%m-%d).log"
-
-# Catch-up pushes too: memory commits/pushes never run the project's own git hooks: .agent-memory is a worktree of
-# the same repo and shares core.hooksPath (e.g. the project's husky runs npx lint-staged).
-# Under launchd there's no npx, so the hook failed and notes got stuck uncommitted (2026-10-01); with npx, the
-# project's prettier rewrites their formatting. Memory notes aren't project code and shouldn't go through the
-# project's lint/formatting.
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
 
 log() { echo "[$(date '+%H:%M:%S')] $*" >>"$LOG"; }
 
@@ -46,6 +41,7 @@ export AGENT_HUB_OFFLINE="$OFFLINE"
 
 # The registry's paths only: git runs below as the user, and a folder left behind by a project that left the registry, or one
 # nobody registered, is nobody's to vouch for. Each path is done only once.
+health() { "$HUB/bin/py" "$HUB/bin/memory_health.py" "$@" >>"$LOG" 2>&1; }
 "$HUB/bin/py" "$HUB/bin/hubconf.py" roster | cut -f1,2 | awk -F'\t' '!seen[$2]++' | while IFS=$'\t' read -r name path; do
   mem="$path/.agent-memory"
   [ -d "$mem" ] || continue
@@ -57,27 +53,35 @@ export AGENT_HUB_OFFLINE="$OFFLINE"
     case $? in
       0) "$HUB/bin/py" "$HUB/bin/project_git.py" sync-memory --lock "$name" >>"$LOG" 2>&1 \
            || log "$(hub_msg "{name}: git-sync-memory failed" name="$name")"
+         health alert "$name"
          exit 0 ;;
       3) ;;
       *) log "$(hub_msg "{name}: could not tell whether it is sandboxed; skipped" name="$name")"; exit 0 ;;
     esac
     # never through a link: what runs below is that folder's config, as the user
     if [ -L "$mem" ]; then log "$(hub_msg "{name}: its memory folder is a link; skipped" name="$name")"; exit 0; fi
+    # a plain folder is not connected memory (the hub's own, memory: false): git there is the user's repo's, and the sync
+    # pushed the user's branch. Before with-lock, which runs git too
+    # (a rebase under way has no branch checked out: the sync says that)
+    if ! memory_checkout "$mem" && ! (cd "$mem" && memory_toplevel . && memory_under_way); then
+      log "$(hub_msg "{name}: its memory folder is not a checkout of {branch}; skipped" name="$name" branch="$MEMORY_BRANCH")"
+      health not-a-checkout "$name" "$mem"
+      health alert "$name"
+      exit 0
+    fi
     cd "$mem" || exit 1
     before=$(git rev-parse HEAD)
-    "$HUB/bin/with-lock.sh" "$HUB/bin/git-sync-memory.sh" >>"$LOG" 2>&1 \
-      || log "$(hub_msg "{name}: git-sync-memory failed" name="$name")"
+    ahead=""; memory_ahead && ahead=1
+    health sync "$mem" "$name" || log "$(hub_msg "{name}: git-sync-memory failed" name="$name")"
+    health alert "$name"
     if [ "$(git rev-parse HEAD)" != "$before" ]; then
       if [ -n "$OFFLINE" ]; then
         log "$(hub_msg "{name}: committed new memory; not pushed yet (cannot reach the hub machine)" name="$name")"
       else
         log "$(hub_msg "{name}: committed and pushed new memory" name="$name")"
       fi
-    fi
-    if [ -z "$OFFLINE" ] && [ -n "$(git rev-list '@{u}..HEAD' 2>/dev/null)" ]; then
-      "$HUB/bin/with-lock.sh" "$HUB/bin/git-safe-push.sh" >>"$LOG" 2>&1 \
-        && log "$(hub_msg "{name}: pushed the commits that had not gone out" name="$name")" \
-        || log "$(hub_msg "{name}: the catch-up push failed" name="$name")"
+    elif [ -n "$ahead" ] && ! memory_ahead; then
+      log "$(hub_msg "{name}: pushed the commits that had not gone out" name="$name")"
     fi
   )
 done

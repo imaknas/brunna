@@ -23,8 +23,8 @@ waited=0
 
 while ! mkdir "$LOCK_DIR" 2>/dev/null; do
   if [ "$waited" -ge "$MAX_WAIT" ]; then
-    hub_say "with-lock: still no lock after waiting over {seconds}s (another session may be stuck); giving up this time" \
-      seconds="$MAX_WAIT" >&2
+    hub_say "with-lock: {path} is still held after {seconds}s (another session may be stuck); giving up this time. If no session or sync is at work there, one that was killed left it: rmdir '{path}'" \
+      seconds="$MAX_WAIT" path="$(cd "$GIT_DIR" && pwd)/${LOCK_DIR##*/}" >&2
     exit 1
   fi
   sleep 1

@@ -50,7 +50,7 @@ class ShellGolden(unittest.TestCase):
             (self.tmp / d).mkdir(parents=True)
         self.cfg = {"owner": {"name": "alex", "tag": "Alex"}, "registry_dir": "projects",
                     "memory_copies": str(self.tmp / "copies"), "workspace_root": str(self.tmp / "ws"),
-                    "git_origin": str(self.tmp / "origin"), "language": {"ui": golden_lang.LANG, "content": golden_lang.LANG}}
+                    "git_origin": str(self.tmp / "remotes"), "language": {"ui": golden_lang.LANG, "content": golden_lang.LANG}}
         self.write_cfg()
         self.env = {**{k: v for k, v in os.environ.items() if not k.startswith(("BRUNNA_", "AGENT_HUB_", "GIT_"))},
                     "AGENT_HUB_PYTHON": PY, "HOME": str(self.tmp / "home"), "AGENT_HUB_CONFIG": str(self.tmp / "config"),
@@ -71,10 +71,10 @@ class ShellGolden(unittest.TestCase):
     def git_out(self, cwd, *args) -> str:
         return subprocess.run(["git", *args], cwd=cwd, env=self.env, check=True, capture_output=True, text=True).stdout
 
-    def repo(self, path, files=None) -> pathlib.Path:
+    def repo(self, path, files=None, branch="main") -> pathlib.Path:
         path = pathlib.Path(path)
         path.mkdir(parents=True, exist_ok=True)
-        self.git(path, "init", "-q", "-b", "main")
+        self.git(path, "init", "-q", "-b", branch)
         for name, text in (files or {"README": "x\n"}).items():
             (path / name).parent.mkdir(parents=True, exist_ok=True)
             (path / name).write_text(text)
@@ -82,13 +82,17 @@ class ShellGolden(unittest.TestCase):
         self.git(path, "commit", "-q", "-m", "init")
         return path
 
-    def bare_remote(self, repo, name):
+    def bare_remote(self, repo, name, remote="origin"):
         bare = self.tmp / "remotes" / f"{name}.git"
         bare.parent.mkdir(exist_ok=True)
         self.git(self.tmp, "init", "-q", "--bare", "-b", "main", str(bare))
-        self.git(repo, "remote", "add", "origin", str(bare))
-        self.git(repo, "push", "-q", "-u", "origin", "main")
+        self.git(repo, "remote", "add", remote, str(bare))
+        self.git(repo, "push", "-q", "-u", remote, "HEAD")
         return bare
+
+    def memory(self, path, files) -> pathlib.Path:
+        """a memory checkout: its own toplevel, on the memory branch"""
+        return self.repo(path, files, branch="agent-memory")
 
     def fake(self, path, body):
         path = pathlib.Path(path)
@@ -166,11 +170,11 @@ class ShellGolden(unittest.TestCase):
         out.append(self.run_(s, "--quiet", moved))
         # leaks, a tracked local file, an unknown rule, AGENT.md that cannot be pushed
         p = self.repo(self.tmp / "ws" / "proj", {"README": "see ~/agent-hub/bin\n", "CLAUDE.local.md": "mine\n"})
-        self.repo(p / ".agent-memory", {"AGENT.md": "old\n", "RULES": "engineering no-such-rule\n"})
+        self.memory(p / ".agent-memory", {"AGENT.md": "old\n", "RULES": "engineering no-such-rule\n"})
         out.append(self.run_(s, p))
         # a clean project: AGENT.md pushed, then nothing to say with --quiet
         q = self.repo(self.tmp / "ws" / "clean")
-        self.bare_remote(self.repo(q / ".agent-memory", {"AGENT.md": "old\n"}), "clean-memory")
+        self.bare_remote(self.memory(q / ".agent-memory", {"AGENT.md": "old\n"}), "clean-memory", "memory")
         out.append(self.run_(s, q))
         out.append(self.run_(s, "--quiet", q))
         # an older checkout whose memory remote is still called mini: renamed, upstream kept; a mini remote that is
@@ -299,26 +303,29 @@ class ShellGolden(unittest.TestCase):
     def test_sync_all_memory(self):
         s, out = BIN / "sync-all-memory.sh", []
         h = self.hub("hub", links=("with-lock.sh", "git-sync-memory.sh", "git-safe-push.sh", "project_git.py",
-                                   "isolation.py", "project-git-job.py", "memory_paths.py"))
+                                   "isolation.py", "project-git-job.py", "memory_paths.py", "memory_health.py"))
         log = h / ".logs"
         a = self.register("alpha")
         self.repo(a)
-        mem = self.repo(a / ".agent-memory", {"STATE.md": "s\n"})
-        self.bare_remote(mem, "alpha-memory")
+        mem = self.memory(a / ".agent-memory", {"STATE.md": "s\n"})
+        self.bare_remote(mem, "alpha-memory", "memory")
         (mem / "memory").mkdir()
         (mem / "memory" / "note.md").write_text("n\n")
         b = self.register("beta")
         self.repo(b)
-        bmem = self.repo(b / ".agent-memory", {"STATE.md": "s\n"})
-        bare = self.bare_remote(bmem, "beta-memory")
+        bmem = self.memory(b / ".agent-memory", {"STATE.md": "s\n"})
+        bare = self.bare_remote(bmem, "beta-memory", "memory")
         (bmem / "STATE.md").write_text("s2\n")
         self.git(bmem, "commit", "-q", "-am", "local")       # committed earlier, not pushed yet
         c = self.register("gamma")
         self.repo(c)
-        cmem = self.repo(c / ".agent-memory", {"STATE.md": "s\n"})
+        cmem = self.memory(c / ".agent-memory", {"STATE.md": "s\n"})
         (cmem / "STATE.md").write_text("s2\n")
         self.git(cmem, "add", "STATE.md")
         (cmem / ".git" / "index.lock").write_text("")        # another git holds the index: the sync fails
+        d = self.register("delta")
+        self.repo(d)
+        (d / ".agent-memory").mkdir()                        # a plain folder: not a checkout, nothing to sync
 
         def logged():
             """the script's own log lines (git's output in between is not ours)"""
@@ -337,6 +344,7 @@ class ShellGolden(unittest.TestCase):
         out.append(logged())
         # the hub machine cannot be reached: commit only
         self.cfg["hosts"] = {"server": "hubhost"}
+        self.cfg["git_origin"] = str(self.tmp / "elsewhere")
         self.write_cfg()
         self.fake_cmd("ssh", "exit 255\n")
         (mem / "memory" / "note2.md").write_text("n\n")
@@ -352,7 +360,7 @@ class ShellGolden(unittest.TestCase):
         (self.tmp / "config" / "mirror-list.txt").write_text(f"# comment\n\n{src}\n{self.tmp / 'src' / 'missing'}\n")
         out.append(self.run_(s, AGENT_HUB_ROOT=str(h)))
         out.append(self.run_(s, AGENT_HUB_ROOT=str(h)))
-        self.git(self.tmp, "--git-dir", str(self.tmp / "origin" / "mirrors" / "proj.git"), "remote", "set-url", "origin",
+        self.git(self.tmp, "--git-dir", str(self.tmp / "remotes" / "mirrors" / "proj.git"), "remote", "set-url", "origin",
                  str(self.tmp / "src" / "gone"))
         out.append(self.run_(s, AGENT_HUB_ROOT=str(h)))
         self.check("mirror-backup", out)

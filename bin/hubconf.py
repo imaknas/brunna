@@ -1232,13 +1232,20 @@ def manual_scheduler() -> str:
 def process_cwds() -> list[tuple[int, str, str]]:
     """(pid, program name, working directory): every process's working directory. lsof when there is one (macOS
     always has it); otherwise read /proc (Linux often has no lsof); neither = empty (the caller says it could not
-    find out)."""
+    find out; a listing without this very process is one that failed halfway)."""
     import shutil
     import subprocess
-    if shutil.which("lsof"):
-        r = subprocess.run(["lsof", "-d", "cwd", "-Fpcn"], capture_output=True, text=True)
+    # a service's PATH may have no /usr/sbin, where macOS keeps it (LAUNCHD_PATH has none)
+    if lsof := shutil.which("lsof") or shutil.which("lsof", path="/usr/sbin:/sbin"):
+        try:
+            r = subprocess.run([lsof, "-d", "cwd", "-Fpcn"], capture_output=True, timeout=120)
+        except (OSError, subprocess.TimeoutExpired):
+            return []
         out, pid, name = [], 0, ""
-        for line in r.stdout.splitlines():
+        # without a UTF-8 locale (a service's environment) it writes a name's other bytes as \xNN, and always a backslash as two
+        text = re.sub(rb"\\(?:\\|x([0-9a-f]{2}))", lambda m: bytes([int(m[1], 16)]) if m[1] else b"\\",
+                      r.stdout).decode(errors="surrogateescape")
+        for line in text.split("\n"):
             tag, val = line[:1], line[1:]
             if tag == "p":
                 pid, name = int(val) if val.isdigit() else 0, ""

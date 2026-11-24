@@ -58,6 +58,7 @@ def prune_line() -> str:
              _("{mb} MB freed", mb=r.get('freed_mb', 0))]
     if r.get("skipped"):
         parts.append(_("{n} skipped (files that may not be rebuildable)", n=len(r['skipped'])))
+    parts += [esc(str(n)) for n in r.get("notes") or []]
     return ("<div class='sub gap'>"
             + _("Worktree auto-cleanup ({at}): {parts}", at=esc(str(r.get('at', ''))[:16]), parts=_(", ").join(parts))
             + "</div>")

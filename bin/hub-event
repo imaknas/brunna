@@ -67,6 +67,7 @@ BIN = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
+import memory_paths  # noqa: E402
 import names  # noqa: E402
 import project_git  # noqa: E402
 import runtime_ports  # noqa: E402
@@ -110,8 +111,9 @@ def _memdir(ws):
 # ---------- handlers: the platform's logic, returning only neutral results (text / None / reason to block) ----------
 
 def memory_pull(ev, ws):
-    if _memory(ws):
-        subprocess.run([str(BIN / "with-lock.sh"), "git", "pull", "-q"], cwd=_memdir(ws),
+    """Only a memory checkout (another branch there is somebody's work)."""
+    if _memory(ws) and memory_paths.is_checkout(_memdir(ws)):
+        subprocess.run([str(BIN / "with-lock.sh"), str(BIN / "memory-pull.sh")], cwd=_memdir(ws),
                        capture_output=True, timeout=60)
 
 
@@ -128,12 +130,20 @@ def memory_sync(ev, ws):
     """The notes committed and pushed. At a session's end under a runtime that kills its end hook within seconds (its
     END_BUDGET_S), started on its own and left to finish: killed halfway, git would leave its lock behind."""
     if _memory(ws):
-        cmd = [str(BIN / "with-lock.sh"), str(BIN / "git-sync-memory.sh")]
+        cmd = [*hubconf.launch(BIN / "memory_health.py"), "sync", str(_memdir(ws))]   # records how it went
         if ev.event == "session_end" and getattr(_RT, "END_BUDGET_S", None):
             subprocess.Popen(cmd, cwd=_memdir(ws), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                              stderr=subprocess.DEVNULL, start_new_session=True)
             return
-        subprocess.run(cmd, cwd=_memdir(ws), capture_output=True, timeout=120)
+        r = subprocess.run(cmd, cwd=_memdir(ws), capture_output=True, timeout=120)
+        if r.returncode != 0:   # the log says it failed; the next session's start says why (memory_notice)
+            raise RuntimeError("memory sync")
+
+
+def memory_notice(ev, ws):
+    """The project's notes that don't reach the hub, and what to do about it (memory_health: the platform's own record)."""
+    import memory_health
+    return memory_health.notice(_project_of_folder(ev.cwd))
 
 
 def moved_notice(ws):
@@ -419,7 +429,8 @@ def wait(name: str | None, raw: str) -> int:
 HANDLERS = {
     # session_record before mail: a session told a letter is on record by then, or the tick in between could judge it closed
     "session_start": [("hub_pull", hub_pull), ("memory_pull", memory_pull), ("local_setup", local_setup), ("rules", rules),
-                      ("nudge", nudge), ("session_record", session_record), ("mail", mail), ("wake_address", wake_address)],
+                      ("nudge", nudge), ("memory_notice", memory_notice), ("session_record", session_record), ("mail", mail),
+                      ("wake_address", wake_address)],
     "session_end": [("mail_end", mail_end), ("end_mark", end_mark), ("wake_address_drop", wake_address_drop),
                     ("memory_sync", memory_sync)],
     "pre_compact": [("memory_sync", memory_sync)],
@@ -437,7 +448,7 @@ DENY_HANDLERS = {"guard"}
 AS_PROJECT = {"memory_pull", "local_setup", "nudge"}
 # What runs no git and no script of the folder's. Any other handler, a new one included, runs only where the folder lets it: as
 # the project, or as the user where project_git.user_git_ok says so. The default is no.
-NOT_IN_FOLDER = {"session_record", "mail", "mail_end", "end_mark", "wake_address", "wake_address_drop", "guard"}
+NOT_IN_FOLDER = {"memory_notice", "session_record", "mail", "mail_end", "end_mark", "wake_address", "wake_address_drop", "guard"}
 # What runs only in the project's memory checkout (project_git.memory_dir), so it can go on where its folder is only a worktree
 MEMORY_ONLY = {"memory_pull", "memory_sync", "rules"}
 
@@ -614,6 +625,7 @@ def worktree(what: str, raw: str, name: str | None = None) -> int:
             texts.append(gate_notice(ev, gated))
     elif not refused:
         steps += [("nudge", lambda: _worktree_nudge(ev, ws, cage))] if what == "nudge" else []
+        steps += [("memory_notice", lambda: memory_notice(ev, ws))] if what == "start" else []
         steps += [("mail", lambda: mail(ev, ws))]
     for name, fn in steps:
         try:

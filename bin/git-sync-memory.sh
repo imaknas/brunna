@@ -1,44 +1,55 @@
 #!/usr/bin/env bash
-# For the SessionEnd hook of "native" projects (working directly in the project root, not a separate .agent-memory
-# worktree). Why this exists: it adds/commits only memory/ and STATE.md, agent-hub's own two files, and never does
-# `git add -A`, which would bundle in the user's other code changes that are not ready to commit.
+# Commits and pushes the notes of the memory checkout it runs in (a project's .agent-memory). It adds/commits only memory/
+# and STATE.md, the platform's own two, and never does `git add -A`, which would bundle in changes that are not ready to
+# commit.
 #
-# Nothing to commit: exit right away, no empty commit, no needless push.
+# Nothing to commit: no empty commit; what was committed before and hasn't gone out (offline, a failed push) is pushed, which
+# merges what the other side has: a copy that is ahead never waits for its next note. Anything that keeps the notes from
+# being committed or pushed is said on stderr, exit 1, or one of hubpaths.sh's MEMORY_* when only a person (or an agent) can change it.
 set -uo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-# Memory commits/pushes never run the project's own git hooks: .agent-memory is a worktree of the same repo and shares
-# core.hooksPath (e.g. the project's husky running npx lint-staged). Under launchd there is no npx, so the hook failed
-# and notes got stuck uncommitted (2026-10-01); with npx, the project's prettier rewrites their format. Memory notes
-# are not project code and should not go through the project's lint/formatting.
-export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null
+source "$SCRIPT_DIR/hubpaths.sh"
 
 # This runs git as the user, so its caller has decided, by a project's name, that that's right here: a sandboxed project's .git is
 # its own to write, and its memory is synced as the project (project_git.py sync-memory <name>; docs/design/projects-and-repos.md
 # section 4). It doesn't ask again by folder: the answer can be changed by flipping a link, and "not sandboxed" is what a flip gets.
 
-# Only in a checkout of its own (a project's .agent-memory worktree, or a native project's root). A plain folder inside
-# another repo (agent-hub's own, memory: false) would make every git command below act on that repo: on 10-31 a bare
-# `git commit` here committed and pushed another session's staged files as "sync memory/STATE.md".
-[ "$(git rev-parse --show-toplevel 2>/dev/null)" = "$(pwd -P)" ] || exit 0
-
+# Only in a memory checkout (hubpaths.sh memory_checkout). A plain folder inside another repo (the hub's own, memory:
+# false) would make every git command below act on that repo: on 10-31 a bare `git commit` here committed and pushed
+# another session's staged files as "sync memory/STATE.md". That one is quiet; another branch checked out is said.
+# What is under way is asked first: a rebase has no branch checked out, and "check it out" would throw it away.
+if memory_toplevel . && memory_under_way; then
+  # a merge (or the like) is someone's to finish, whoever began it: staging its files would mark the conflicts in them resolved
+  hub_say "git-sync-memory: a merge or the like is under way in {path}; nothing is committed or pushed until it is finished. Take the conflict marks out of {files}, then run: {command}" path="$(pwd -P)" files="$("$SCRIPT_DIR/py" "$SCRIPT_DIR/memory_paths.py" unfinished)" command="$(memory_finish)" >&2
+  exit "$MEMORY_UNDER_WAY"
+fi
+if ! memory_checkout .; then
+  [ -e .git ] || exit 0
+  hub_say "git-sync-memory: {path} is not a checkout of {branch}; nothing was committed or pushed" path="$(pwd -P)" branch="$MEMORY_BRANCH" >&2
+  exit "$MEMORY_BRANCH_BAD"
+fi
 # each path on its own: one that does not exist (no STATE.md yet) makes `git add a b` add nothing at all; -A picks up
 # deletions of tracked files too
 for p in memory STATE.md; do
-  if [ -e "$p" ] || git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then git add -A -- "$p" 2>/dev/null; fi
+  if [ -e "$p" ] || git ls-files --error-unmatch -- "$p" >/dev/null 2>&1; then
+    memory_git add -A -- "$p" || exit 1   # git says why (the index locked by one that was killed): a failed sync
+  fi
 done
 
 # what a memory branch may not hold (a hidden name under memory/, an executable, a link, a rules file's name: bin/memory_paths.py) goes back
 # out of the index and stays in the folder, so a Finder .DS_Store never commits; it's said once, on stderr. Can't check: nothing commits
 "$SCRIPT_DIR/py" "$SCRIPT_DIR/memory_paths.py" unstage || exit 1
 
-# commit only these two paths, whatever else is staged (bash 3.2: no mapfile)
+# commit only these two paths, whatever else is staged (bash 3.2: no mapfile). Their names as they are (-z: otherwise git
+# quotes a non-ASCII one, and there is no such file to commit), taken literally
 files=()
-while IFS= read -r f; do files+=("$f"); done < <(git diff --cached --name-only -- memory/ STATE.md)
-[ ${#files[@]} -eq 0 ] && exit 0
-
-git commit -q -m "brunna: sync memory/STATE.md" -- "${files[@]}"
+while IFS= read -r -d '' f; do files+=("$f"); done < <(git diff --cached --name-only --no-renames -z -- memory/ STATE.md)
+if [ ${#files[@]} -gt 0 ]; then
+  memory_git --literal-pathspecs commit -q -m "brunna: sync memory/STATE.md" -- "${files[@]}" || exit 1
+elif ! memory_ahead; then
+  exit 0
+fi
 # when the hub machine cannot be reached (the caller has checked), commit locally only; a later round with a
 # connection pushes it
 [ -n "${AGENT_HUB_OFFLINE:-}" ] && exit 0
-"$SCRIPT_DIR/git-safe-push.sh"
+"$SCRIPT_DIR/git-safe-push.sh" --memory

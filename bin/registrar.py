@@ -64,6 +64,7 @@ import acts_md  # noqa: E402
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import memlock  # noqa: E402
+import memory_paths  # noqa: E402
 import ph_records  # noqa: E402
 import ph_wire  # noqa: E402
 import todo_tokens  # noqa: E402
@@ -268,14 +269,21 @@ def targets() -> list[tuple[str, pathlib.Path, str]]:
     return out
 
 
-def commit(project: str, path: pathlib.Path, how: str, msg: str) -> bool:
+# under the copy's lock: nothing is written while somebody has a merge or the like under way there, and only STATE.md is committed
+WRITE_COPY = ('source {hub}/bin/hubpaths.sh && {{ ! memory_under_way || {{ echo "a merge or the like is under way there" >&2; exit 1; }}; }} '
+              '&& cat >STATE.md && memory_git add STATE.md && memory_git commit -qm {msg} -- STATE.md && {hub}/bin/git-safe-push.sh --memory')
+
+
+def commit(project: str, path: pathlib.Path, how: str, msg: str, text: str) -> bool:
+    """The file written and committed."""
     if how == "hub":
+        path.write_text(text)
         r = subprocess.run([str(HUB / "bin" / "commit-hub-files.sh"), msg, path.name], cwd=HUB,
                            capture_output=True, text=True)
     else:
         r = subprocess.run([str(HUB / "bin" / "with-lock.sh"), "bash", "-c",
-                            f"git add STATE.md && git commit -qm {shlex.quote(msg)} && {HUB}/bin/git-safe-push.sh"],
-                           cwd=path.parent, capture_output=True, text=True)
+                            WRITE_COPY.format(hub=shlex.quote(str(HUB)), msg=shlex.quote(msg))],
+                           cwd=path.parent, input=text, capture_output=True, text=True)
     if r.returncode != 0:
         log(_("{project}: commit/push failed (left for tomorrow night): {output}", project=project,
               output=(r.stderr or r.stdout).strip()[-200:]))
@@ -401,9 +409,8 @@ def run_project(project: str, path: pathlib.Path, how: str, warned: set[str]) ->
     if DRY:
         return ok, sent
     if changed:
-        path.write_text(text)
         if not commit(project, path, how, _("registrar: owner to-dos in step with {assistant}",
-                                            assistant=hubconf.assistant_name())):
+                                            assistant=hubconf.assistant_name()), text):
             return False, sent
     if applied:
         hubbus("done", *applied, "--note", _("registrar updated the STATE.md to-dos by key") if changed else
@@ -424,6 +431,11 @@ def main() -> int:
                     who, since = memlock.holder(path.parent)
                     log(_("{project}: {who} has been writing in the memory copy since {since}; left for the next "
                           "night", project=project, who=who or "?", since=since or "?"))
+                    continue
+                if memory_paths.under_way(path.parent):   # before anything is sent for it; asked again under the lock
+                    log(_("{project}: a merge or the like is under way in the memory copy {path}; left until somebody finishes it",
+                          project=project, path=path.parent))
+                    failed += 1
                     continue
                 ok, sent = run_project(project, path, how, warned)
         else:

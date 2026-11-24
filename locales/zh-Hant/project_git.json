@@ -1,4 +1,5 @@
 {
  "{project}: its memory notes don't reach the platform: {why}": "{project}:它的 memory 筆記到不了平台:{why}",
- "{project}: its memory notes sync again": "{project}:memory 筆記又同步了"
+ "{project}: its memory notes sync again": "{project}:memory 筆記又同步了",
+ "the notes in {path} are not pushed: their branch {branch} follows {remote} ({url}), which is not the platform's memory repo. Set it back with: git -C '{path}' config branch.{branch}.remote {memory} (its URL is {own})": "{path} 的筆記沒有 push:它們的 branch {branch} 跟著 {remote}({url}),那不是平台的 memory repo。改回來:git -C '{path}' config branch.{branch}.remote {memory}(它的 URL 是 {own})"
 }

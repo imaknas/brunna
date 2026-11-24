@@ -701,7 +701,10 @@ def deliver(lease: Lease, h: dict, n: int, earlier: list[dict] | None = None) ->
     notes = (h.get("notes_markdown") or "").strip()
     mem = pathlib.Path(lease.cwd) / ".agent-memory" / "memory"
     if notes and mem.is_dir():
+        import memory_paths
         f = mem / f"{now():%Y-%m-%d}.md"
+        if (mem.parent / ".git").exists() and memory_paths.begun(mem.parent):   # a file of its own: the day's may hold a conflict
+            f = mem / f"{now():%Y-%m-%d}-lease-{sid[:8]}.md"
         extra = ("\n\n" + _c("Tasks registered for {owner}: {keys}", owner=hubconf.owner_tag(),
                                  keys=_c(", ").join(keys))) if keys else ""
         with open(f, "a") as fh:
@@ -796,7 +799,7 @@ def idle_loop() -> None:
 # platform modules this file imports inside functions: imported at start (code_watch.preload), so a runner draining on
 # old code never mixes in a module from the new (lease 9af483fb's handover failed that way on 10-25). main also loads the
 # runtime adapter (rt()) and registrar.py (registrar()), which are loaded by path or by name
-PRELOAD = ("lease_files", "policy", "project_git", "prompts", "registry", "runtime_claude", "runtime_store")
+PRELOAD = ("lease_files", "memory_paths", "policy", "project_git", "prompts", "registry", "runtime_claude", "runtime_store")
 CODE_POLL_S = 2
 WATCH = None   # code_watch.Watch, set by main
 ACTIVE = 0     # POST requests being handled and handovers running (in_flight, spawn_detach)

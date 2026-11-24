@@ -25,6 +25,7 @@ BIN = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(BIN))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
+import memory_paths  # noqa: E402
 import nofollow  # noqa: E402
 import prompts  # noqa: E402
 import todo_tokens  # noqa: E402
@@ -107,6 +108,10 @@ def main(argv: list[str]) -> int:
     if (problems := todo_problems(state)):
         print(_("{project}: the summary's to-do section isn't in the expected format ({problems}); not written",
                 project=name, problems="; ".join(problems)[:300]))
+        return 1
+    if (ws / ".agent-memory" / ".git").exists() and memory_paths.begun(ws / ".agent-memory"):
+        print(_("{project}: a merge or the like is under way in {path}; the summary is not written until somebody finishes it",
+                project=name, path=ws / ".agent-memory"))
         return 1
     nofollow.replace(ws, ".agent-memory/STATE.md", (state.rstrip() + "\n").encode())
     if (why := project_git.sync_memory_of(name, ws)):

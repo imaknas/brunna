@@ -65,6 +65,7 @@ import hublib  # noqa: E402
 import i18n  # noqa: E402
 import job_off  # noqa: E402
 import memlock  # noqa: E402
+import memory_paths  # noqa: E402
 import todo_tokens  # noqa: E402
 
 _ = i18n.domain(__file__)
@@ -108,11 +109,9 @@ HEDGES = list(dict.fromkeys(h for d in TEXT.values() for h in d["hedges"]))
 PUNCTUATION = "".join(dict.fromkeys(c for d in TEXT.values() for c in d["punctuation"]))
 LINK_END = "".join(dict.fromkeys(c for d in TEXT.values() for c in d["link_end"]))
 
+NO_HOOKS = ("-c", "core.hooksPath=/dev/null")
 GIT_ENV = {
     **os.environ,
-    # the memory repo does not run the project's git hooks (see known-issues, "The memory worktree inherits the
-    # project's git hooks")
-    "GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null",
     "PATH": "/opt/homebrew/bin:/usr/local/bin:" + os.environ.get("PATH", ""),
 }
 
@@ -130,11 +129,23 @@ def log(msg: str) -> None:
 
 
 def git(*args, cwd=None, git_dir=None, check=True) -> str:
-    cmd = ["git"] + ([f"--git-dir={git_dir}"] if git_dir else []) + list(args)
+    # the memory repo does not run the project's git hooks (see known-issues, "The memory worktree inherits the project's git
+    # hooks"): on the command line, which every git takes (GIT_CONFIG_COUNT needs 2.31)
+    cmd = ["git", *NO_HOOKS] + ([f"--git-dir={git_dir}"] if git_dir else []) + list(args)
     r = subprocess.run(cmd, cwd=cwd, env=GIT_ENV, capture_output=True, text=True)
     if check and r.returncode != 0:
         raise RuntimeError(_("git {args} failed: {stderr}", args=" ".join(args), stderr=r.stderr.strip()[:500]))
     return r.stdout
+
+
+def pull_after(copy: pathlib.Path) -> subprocess.CompletedProcess:
+    """The copy brought to what was pushed, unless somebody has a merge or the like under way there (asked again under the
+    lock): then nothing of it is touched, and the librarian's next pull tells."""
+    if not memory_paths.under_way(copy):
+        hublib.harden_copy(copy)
+    return subprocess.run([str(BIN / "with-lock.sh"), "bash", "-c", 'source "$0/hubpaths.sh" && ! memory_under_way && '
+                           'memory_ff "$@"', str(BIN), *hublib.NO_SYMLINKS], cwd=copy,
+                          env=GIT_ENV, capture_output=True, text=True)
 
 
 def load_state() -> dict:
@@ -522,7 +533,7 @@ def consolidate(s: dict, model: str, dry_run: bool, keep: bool) -> dict:
             return result
 
         patch = git("format-patch", "--stdout", f"{base}..HEAD", cwd=repo)
-        push = subprocess.run([str(BIN / "git-safe-push.sh")], cwd=repo, env=GIT_ENV, capture_output=True, text=True)
+        push = subprocess.run([str(BIN / "git-safe-push.sh"), "--memory"], cwd=repo, env=GIT_ENV, capture_output=True, text=True)
         if push.returncode != 0:
             fdir = STATE_DIR / "consolidate" / "failed"
             fdir.mkdir(parents=True, exist_ok=True)
@@ -534,9 +545,7 @@ def consolidate(s: dict, model: str, dry_run: bool, keep: bool) -> dict:
         log(_("{project}: pushed {sha}", project=name, sha=pushed))
 
         copy = COPIES / name
-        hublib.harden_copy(copy)
-        upd = subprocess.run([str(BIN / "with-lock.sh"), "git", *hublib.NO_SYMLINKS, "pull", "-q"], cwd=copy,
-                             env=GIT_ENV, capture_output=True, text=True)
+        upd = pull_after(copy)
         if upd.returncode != 0:
             log(_("{project}: git pull of the copy failed (the librarian pulls again next time): {stderr}", project=name,
                   stderr=upd.stderr.strip()[:200]))

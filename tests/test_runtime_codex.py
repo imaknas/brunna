@@ -508,7 +508,7 @@ class Handlers(unittest.TestCase):
         self.he._LOOKED[self.tmp] = mem
         started, ran = [], []
         with mock.patch.object(self.he.subprocess, "Popen", lambda cmd, **kw: started.append(kw)), \
-                mock.patch.object(self.he.subprocess, "run", lambda *a, **kw: ran.append(a)):
+                mock.patch.object(self.he.subprocess, "run", lambda *a, **kw: ran.append(a) or subprocess.CompletedProcess(a, 0)):
             self.he.memory_sync(self.ev("session_end", self.tmp), self.tmp)
             self.he.memory_sync(self.ev("pre_compact", self.tmp), self.tmp)
         self.assertEqual(len(started), 1)

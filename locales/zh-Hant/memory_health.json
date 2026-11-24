@@ -1,0 +1,14 @@
+{
+ "{path} is not a checkout of {branch}, so the notes in it are not committed or pushed: check that branch out there": "{path} 不是 {branch} 的 checkout,裡面的筆記沒有 commit、沒有 push:請在那裡 checkout 那個 branch",
+ "{path} is a plain folder, not a checkout of {branch}, so the notes in it are not committed or pushed: move it aside, run git -C '{ws}' worktree add -f .agent-memory {branch}, and copy the notes back in": "{path} 是一般資料夾,不是 {branch} 的 checkout,裡面的筆記沒有 commit、沒有 push:把它移開,跑 git -C '{ws}' worktree add -f .agent-memory {branch},再把筆記複製回去",
+ "⚠️ This project's memory notes have not reached the hub since {since} (notes written here stay here, and nothing that reads them sees them). Tell the user, and fix it if you can:\n{why}": "⚠️ 這個專案的記憶筆記從 {since} 起就沒有送到 hub(在這裡寫的筆記只留在這裡,讀筆記的程式都看不到)。告訴使用者,能修就修:\n{why}",
+ "{project}: its memory notes have not reached the hub since {since}: {why}": "{project}:它的記憶筆記從 {since} 起就沒有送到 hub:{why}",
+ "{project}: its memory notes reach the hub again": "{project}:它的記憶筆記又送得到 hub 了",
+ "{project}: its memory notes are only in the platform's memory repo, as far as this machine knows": "{project}:就這台機器所知,它的記憶筆記只在平台的 memory repo 裡",
+ "the notes there and the hub's both changed the same files, and nothing is pushed until somebody merges them: git -C '{path}' pull --no-rebase, take the conflict marks out, then git -C '{path}' commit -a -m merge": "那裡跟 hub 的筆記改了同一些檔案,合併之前什麼都不會 push:git -C '{path}' pull --no-rebase,清掉衝突標記,再 git -C '{path}' commit -a -m merge",
+ "its branch {branch} doesn't follow the platform's memory repo, so nothing is pushed: git -C '{path}' config branch.{branch}.remote memory, and git -C '{path}' remote -v says where that leads": "它的 branch {branch} 沒有跟著平台的 memory repo,所以什麼都沒有 push:git -C '{path}' config branch.{branch}.remote memory,git -C '{path}' remote -v 看那指向哪裡",
+ "the sync in {path} fails": "{path} 的同步失敗",
+ "(printed there, the project's own text: {said})": "(那裡印出來的,是專案自己的文字:{said})",
+ "{project}: its memory notes (branch {branch}) are on its code remotes {remotes}, not only in the platform's memory repo. Anyone who can read that repo can read them. brunna doesn't delete anything there: take the branch down yourself if they shouldn't be there": "{project}:它的記憶筆記(branch {branch})也在它的 remote {remotes} 上,不只在平台的 memory repo。讀得到那個 repo 的人就讀得到筆記。brunna 不會刪那邊的任何東西:不該在那裡的話,請自己把那個 branch 拿掉",
+ "a merge or the like is under way there, and nothing is committed or pushed until somebody finishes it: take the conflict marks out of its files (git -C '{path}' status lists them), then run {command}": "那裡有一個合併(或類似的操作)做到一半,做完之前不會 commit 也不會 push:把檔案裡的衝突標記清掉(git -C '{path}' status 會列出來),再跑 {command}"
+}

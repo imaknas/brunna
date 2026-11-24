@@ -85,6 +85,75 @@ hub_json_get() {
 # The name of a project's git remote for its memory bare repo on the hub machine (the .agent-memory branch's upstream).
 # Older checkouts called it mini; sync-local-setup.sh renames those.
 MEMORY_REMOTE=memory
+# The memory branch's name (memory_paths.BRANCH).
+MEMORY_BRANCH=agent-memory
+# what a memory sync exits with when trying again won't help and somebody has to do something (memory_paths has the same
+# numbers; memory_health.py says what to do for each)
+MEMORY_CONFLICT=6     # both sides changed the same notes
+MEMORY_UNDER_WAY=7    # a merge (or the like) somebody has to finish
+MEMORY_REMOTE_BAD=8   # the branch follows a remote that isn't the platform's memory repo, or none
+MEMORY_BRANCH_BAD=9   # another branch is checked out there
+# git for the notes: never the project's hooks (.agent-memory is a worktree of its repo and shares core.hooksPath: husky
+# running npx lint-staged kept notes uncommitted on 2026-10-01, or rewrote them), and nothing left in a stash. On the
+# command line, which every git takes (GIT_CONFIG_COUNT needs 2.31)
+memory_git() { git -c core.hooksPath=/dev/null -c merge.autoStash=false -c rebase.autoStash=false "$@"; }
+# a merge, rebase, cherry-pick or revert under way in the folder git runs in, or conflicts in its index: never touched, whoever
+# began it. Every writer of a memory checkout or copy asks this first, under the lock (memory_paths.under_way is the same)
+memory_under_way() {
+  local f
+  for f in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-merge rebase-apply; do
+    [ -e "$(git rev-parse --git-path "$f" 2>/dev/null)" ] && return 0
+  done
+  [ -n "$(git ls-files -u 2>/dev/null | head -1)" ]
+}
+# how what is under way here is finished, for a message: after the conflict marks are out of its files
+memory_finish() {
+  local how="commit -a -m merge" here; here="$(pwd -P)"
+  if [ -e "$(git rev-parse --git-path rebase-merge)" ] || [ -e "$(git rev-parse --git-path rebase-apply)" ]; then how=rebase
+  elif [ -e "$(git rev-parse --git-path CHERRY_PICK_HEAD)" ]; then how=cherry-pick
+  elif [ -e "$(git rev-parse --git-path REVERT_HEAD)" ]; then how=revert; fi
+  case "$how" in commit*) ;; *) how="add -u && git -C '$here' $how --continue" ;; esac
+  printf '%s' "git -C '$here' $how"
+}
+# the checkout brought to its upstream when that is all there is to do (arguments: git's, before the command). Never `pull`:
+# with pull.rebase set, git 2.30's --ff-only rebases. An ssh that can't connect gives up within a hook's time (unless the
+# user's settings say how to ssh). 2: the other side couldn't be asked
+memory_ff() {
+  if [ -z "${GIT_SSH_COMMAND:-}${GIT_SSH:-}$(git config --get core.sshCommand)" ]; then
+    GIT_SSH_COMMAND="ssh -o ConnectTimeout=10" memory_git "$@" fetch -q || return 2
+  else
+    memory_git "$@" fetch -q || return 2
+  fi
+  memory_git "$@" merge -q --ff-only '@{u}'
+}
+# whether the folder's notes have something to send: commits its upstream lacks, or no upstream to compare with (none set,
+# or its tracking ref is gone), which is not the same as nothing to send
+memory_ahead() {
+  local out
+  out=$(git rev-list -n 1 '@{u}..HEAD' 2>/dev/null) || return 0
+  [ -n "$out" ]
+}
+# text git printed, for a log or a record: no user name or password of a URL in it
+scrub_urls() {
+  LC_ALL=C sed -E -e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/[:space:]]*@#\1#g' -e 's#(^|[^A-Za-z0-9/])[^][:space:]/@'"'"'"]+@([A-Za-z0-9.-]+:)#\1\2#g'
+}
+# memory_checkout <folder>: whether it is a memory checkout: its own git toplevel (asked of git as the prefix, so two
+# spellings of one path are no difference), with the memory branch checked out. Asked before any git that commits, pulls
+# or pushes there: in a plain folder git works on the repo around it, the user's own, and a checkout of another branch is
+# somebody's work. memory_paths.is_checkout is the same for the platform's Python.
+memory_toplevel() { [ "$(git -C "$1" rev-parse --is-inside-work-tree --show-prefix 2>/dev/null)" = true ]; }
+memory_checkout() {
+  memory_toplevel "$1" \
+    && [ "$(git -C "$1" symbolic-ref -q --short HEAD 2>/dev/null)" = "$MEMORY_BRANCH" ]
+}
+# exclude_add <info/exclude file> <pattern>: the pattern as its own last line (a file may end without a newline, and the
+# user's last pattern must not take ours in)
+exclude_add() {
+  mkdir -p "$(dirname "$1")"
+  # counted as bytes: the last one may be part of a character (macOS's tr refuses it in a UTF-8 locale)
+  if [ -s "$1" ] && [ "$(LC_ALL=C tail -c 1 "$1" | LC_ALL=C tr -d '\n' | wc -c)" -gt 0 ]; then echo >>"$1"; fi
+  printf '%s\n' "$2" >>"$1"
+}
 # The machine that runs the hub (hosts.server; the old key memory_host); empty = one machine does everything
 hub_server() { hub_json_get hosts.server || hub_json_get memory_host; }
 # Owner-facing text in the UI language (docs/design/i18n.md): hub_msg "<English msgid>" [name=value …] prints it without

@@ -13,11 +13,18 @@ or a bundle) that it parses or fetches into a repo it owns (project_git.py).
 Standard library only, and every path is an argument: inside the sandbox the platform's state and config are not
 readable. Nothing here decides anything for the platform; the caller treats the output as untrusted data.
 
-  worktrees <repo> <days>                 JSON {base, worktrees: [{path, branch, last, merged, clean, exists, files}],
-                                          main: [shas on the base branch in the last <days> days]}
-  ignored <worktree>                      JSON [ignored entries] (git status --ignored)
+  worktrees <repo> <days>                 JSON {base, worktrees: [{path, branch, last, merged, clean, exists, files,
+                                          hidden}], main: [shas on the base branch in the last <days> days]}: the linked
+                                          worktrees of another branch than the base (never the main one, the repo's own
+                                          folder or the memory branch's). last: the newest of the branch's tip, what
+                                          HEAD there last moved at and its index, null when one can't be read; hidden: files
+                                          there that git is told not to look at (skip-worktree, assume-unchanged), at most
+                                          5; clean: git says so, untracked files included whatever the config shows, and
+                                          none hidden
+  ignored <worktree>                      JSON [ignored entries]: a folder with nothing else in it as one entry
   worktree-add <repo> <path>              a detached worktree of HEAD at <path>; prints its HEAD
   worktree-remove <repo> <path> [--force]
+                                          without --force, refused when the worktree isn't clean (as `worktrees` says)
   worktree-plan <repo> <branch>           JSON {exists: whether refs/heads/<branch> exists}: asked before
                                           session-worktree, so an undo knows whether the branch is the make's to delete
   session-worktree <repo> <path> <branch> <rules>
@@ -69,6 +76,7 @@ readable. Nothing here decides anything for the platform; the caller treats the 
                                           most 200): what a sandboxed project tracks among the control names
   test-runs <repo> <since>                JSON [run log lines at or after <since> (ISO time)]: the test runner's
                                           measurements in the repo's git common dir (tiers.RunLog), newest MAX_RUNS
+  memory-remotes <ws> <branch>            JSON {remote: [urls]}: the remotes known here to have <branch>
   memory-sync <memdir> <bare> <branch> [--lock] [--rules=<name>,…]
                                           commit memory/ and STATE.md, merge what <bare>'s <branch> has, then stdout: a
                                           bundle of HEAD that <bare> lacks (empty: nothing to push); --lock takes
@@ -82,11 +90,11 @@ import hashlib
 import json
 import os
 import pathlib
+import re
 import shutil
 import stat
 import subprocess
 import sys
-import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import names  # noqa: E402  (standard library only, like this file)
@@ -100,11 +108,8 @@ if os.path.isabs(GIT) and os.path.basename(GIT) == "git" and os.access(GIT, os.X
 else:
     GIT = "git"
 
-# memory notes are not project code: the project's own git hooks don't run on them (git-sync-memory.sh says why)
-NO_HOOKS = {"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.hooksPath", "GIT_CONFIG_VALUE_0": "/dev/null"}
 MEMORY_PATHS = ("memory", "STATE.md")
 NOTHING = 3
-LOCK_WAIT_S = 30
 
 
 def git(cwd, *args, check=False, env=None, text=True, **kw) -> subprocess.CompletedProcess:
@@ -135,31 +140,90 @@ def op_worktrees(repo: str, days: str) -> int:
     if not base:
         return emit({"base": None, "worktrees": [], "main": []})
     rp = pathlib.Path(repo).resolve()
-    wts, cur = [], {}
+    wts, cur, n = [], {}, 0
     for line in out(repo, "worktree", "list", "--porcelain").splitlines() + [""]:
         if line.startswith("worktree "):
             cur = {"path": line[9:]}
+            n += 1   # git lists the main worktree first, whichever one this is asked in
         elif line.startswith("branch "):
             cur["branch"] = line[7:].removeprefix("refs/heads/")
         elif line == "" and cur:
             p = pathlib.Path(cur["path"])
-            if p.resolve() != rp and p.name != ".agent-memory" and cur.get("branch") not in (None, "agent-memory"):
+            if n > 1 and p.resolve() != rp and p.name != ".agent-memory" and cur.get("branch") not in (None, "agent-memory", base):
                 b = cur["branch"]
-                last = out(repo, "log", "-1", "--format=%ct", b).strip()
-                cur.update(merged=git(repo, "merge-base", "--is-ancestor", b, base).returncode == 0,
-                           last=int(last) if last.isdigit() else None,
-                           clean=p.exists() and not out(p, "status", "--porcelain").strip(),
-                           exists=p.exists(),
-                           files=out(repo, "diff", "--name-only", f"{base}...{b}").split())
+                here = p.is_dir()
+                hidden = hidden_files(p) if here else []
+                cur.update(merged=git(repo, "merge-base", "--is-ancestor", f"refs/heads/{b}", base).returncode == 0,
+                           last=last_work(repo, p, b) if here else None,
+                           clean=here and hidden == [] and is_clean(p), hidden=(hidden or [])[:5],
+                           exists=here,
+                           files=out(repo, "diff", "--name-only", f"{base}...refs/heads/{b}").split())
                 wts.append(cur)
             cur = {}
     main = out(repo, "log", f"--since={int(days)} days ago", "--format=%H", base).split()
     return emit({"base": base, "worktrees": wts, "main": main})
 
 
+# Looking at a worktree: without git's optional locks (a status that refreshes the index would make the worktree look used),
+# and with what the repo's config could turn off in a status turned on
+LOOK = {"GIT_OPTIONAL_LOCKS": "0"}
+STATUS = ("-c", "status.showUntrackedFiles=all", "-c", "core.fsmonitor=false")
+
+
+def is_clean(wt) -> bool:
+    """git says nothing changed here; one that can't say is not clean."""
+    r = git(wt, *STATUS, "status", "--porcelain", "--ignore-submodules=none", env=LOOK)
+    return r.returncode == 0 and not r.stdout.strip()
+
+
+def hidden_files(wt) -> list[str] | None:
+    """The files here that git is told not to look at (`ls-files -v`: S skip-worktree, lower case assume-unchanged), so a status
+    shows no edit in them. One that isn't there (a path left out of the checkout: a sparse one, the control files of a sandboxed
+    project's worktree) holds nothing. None when git can't say."""
+    r = git(wt, "ls-files", "-v", "-z", env=LOOK, text=False)
+    if r.returncode != 0:
+        return None
+    return [e[2:] for e in _z(r) if (e[0] == "S" or e[0].islower()) and os.path.lexists(pathlib.Path(wt) / e[2:])]
+
+
+REFLOG_AT = re.compile(rb"> (\d+) [+-]\d{4}(\t|$)")
+
+
+def head_moved(gd: pathlib.Path) -> int:
+    """When HEAD last moved there: what the last line of logs/HEAD says, not the file's time, which `gc` (reflog expire)
+    renews in every worktree. 0 when there is none (expired, or logging is off)."""
+    try:
+        with open(gd / "logs" / "HEAD", "rb") as fh:
+            fh.seek(max(0, os.fstat(fh.fileno()).st_size - 65536))
+            lines = fh.read().splitlines()
+    except FileNotFoundError:
+        return 0
+    m = REFLOG_AT.search(lines[-1]) if lines else None
+    return int(m[1]) if m else 0
+
+
+def last_work(repo, wt, branch: str) -> int | None:
+    """The newest of the branch's tip, what HEAD there last moved at (a checkout, a reset, its making) and the index: a
+    session that committed nothing still staged or checked out there. Not the admin folder's own time: gc, maintenance and
+    any status renew it. The index's is another matter: git writes it again only when what's on disk is not what it noted
+    (measured with git 2.30 and 2.50, untracked cache included: a status in a worktree left alone leaves it), so a tool
+    that polls status makes a worktree younger once after a change, not every time, and where it does, the worktree is
+    only kept longer. None when one of them can't be read."""
+    tip = out(repo, "log", "-1", "--format=%ct", f"refs/heads/{branch}", "--").strip()
+    gd = out(wt, "rev-parse", "--absolute-git-dir").strip()
+    try:
+        return max(int(tip), head_moved(pathlib.Path(gd)), int(os.stat(pathlib.Path(gd) / "index").st_mtime)) if gd else None
+    except (OSError, ValueError):
+        return None
+
+
 def op_ignored(wt: str) -> int:
-    return emit([line[3:].rstrip("/") for line in out(wt, "status", "--porcelain", "--ignored").splitlines()
-                 if line.startswith("!! ")])
+    # both said here, whatever status.showUntrackedFiles is: `no` would list no ignored file, `all` each one in a folder
+    r = git(wt, "status", "--porcelain", "-z", "--untracked-files=normal", "--ignored=traditional", env=LOOK, text=False)
+    if r.returncode != 0:
+        sys.stderr.write(f"git status: {os.fsdecode(r.stderr).strip()[-300:]}\n")
+        return 1
+    return emit([e[3:].rstrip("/") for e in _z(r) if e.startswith("!! ")])
 
 
 def op_worktree_add(repo: str, path: str) -> int:
@@ -169,7 +233,11 @@ def op_worktree_add(repo: str, path: str) -> int:
 
 
 def op_worktree_remove(repo: str, path: str, *flags: str) -> int:
-    r = git(repo, "worktree", "remove", *(["--force"] if "--force" in flags else []), path)
+    force = "--force" in flags
+    if not force and os.path.isdir(path) and (hidden_files(path) != [] or not is_clean(path)):
+        sys.stderr.write(f"{path} holds changes that are not committed\n")
+        return 1
+    r = git(repo, *STATUS, "worktree", "remove", *(["--force"] if force else []), path)
     sys.stderr.write(r.stderr)
     return r.returncode
 
@@ -184,10 +252,12 @@ def op_worktree_plan(repo: str, branch: str) -> int:
 def _remove_worktree(repo: str, path: str) -> list[str]:
     """Empty the worktree but its .git (bottom-up, links removed as links), then unregister it only if nothing was left:
     git's own `worktree remove` unregisters even when it can't delete the folder (measured 11-15: a control file the
-    project's sandbox may not remove). What was left, if anything."""
+    project's sandbox may not remove). Only this one: `worktree prune` would drop the entry of every worktree whose folder
+    isn't there right now (an unmounted disk), with what was staged in it. What was left, if anything."""
     top = pathlib.Path(path)
     if not top.is_dir() or top.is_symlink():
-        git(repo, "worktree", "prune")   # gone already: only its admin entries, if any
+        if not os.path.lexists(top):   # gone already: only its admin entry, if any (a link's target is another's)
+            git(repo, "worktree", "remove", "--force", path)
         return []
     left = []
     for root, dirs, files in os.walk(top, topdown=False, followlinks=False):
@@ -215,7 +285,6 @@ def _remove_worktree(repo: str, path: str) -> list[str]:
     r = git(repo, "worktree", "remove", "--force", path)
     if r.returncode != 0:
         return [f"git worktree remove: {r.stderr.strip()[-200:]}"]
-    git(repo, "worktree", "prune")
     return []
 
 
@@ -265,7 +334,6 @@ def op_session_worktree(repo: str, path: str, branch: str, rules: str) -> int:
         if r.returncode != 0:   # undone, so the same name can be made again: the worktree, and the branch if new
             sys.stderr.write(f"git {args[0]}: {(r.stderr if isinstance(r.stderr, str) else os.fsdecode(r.stderr or b'')).strip()[-300:]}\n")
             git(repo, "worktree", "remove", "--force", path)
-            git(repo, "worktree", "prune")
             if not exists:
                 git(repo, "branch", "-D", branch)
             sys.exit(1)
@@ -460,36 +528,45 @@ def op_memory_sync(memdir: str, bare: str, branch: str, *flags: str) -> int:
     """git-sync-memory.sh's commit, then what git-safe-push.sh's pull did (merge the bare repo's branch), then a bundle
     of what the bare repo lacks. --lock: take with-lock.sh's lock (the same directory in the git dir); without it the
     caller holds it."""
-    if out(memdir, "rev-parse", "--show-toplevel").strip() != str(pathlib.Path(memdir).resolve()):
-        sys.stderr.write(f"{memdir} is not a checkout of its own\n")
-        return 1
     import memory_paths
+    # its own toplevel, the memory branch checked out (memory_paths.is_checkout): anywhere else these commits and merges
+    # would be another branch's
+    top = out(memdir, "rev-parse", "--is-inside-work-tree", "--show-prefix").strip() == "true"
+    if top and memory_paths.begun(memdir):   # first: a rebase has no branch checked out, and checking it out throws it away
+        return say_under_way(memdir)
+    if not top or out(memdir, "symbolic-ref", "-q", "--short", "HEAD").strip() != branch:
+        sys.stderr.write(f"{memdir} is not a checkout of {branch}\n")
+        return memory_paths.BRANCH_BAD
     for f in flags:
         if f.startswith("--rules="):
             memory_paths.RULES_NAMES = tuple(n for n in f[len("--rules="):].split(",") if n)
     if "--lock" not in flags:
         return memory_sync(memdir, bare, branch)
-    lock = pathlib.Path(out(memdir, "rev-parse", "--absolute-git-dir").strip()) / "agent-hub-op.lock"
-    for _ in range(LOCK_WAIT_S):
-        try:
-            lock.mkdir()
-            break
-        except FileExistsError:
-            time.sleep(1)
-    else:
-        sys.stderr.write(f"still no lock after {LOCK_WAIT_S}s ({lock}); not synced this time\n")
-        return 1
     try:
-        return memory_sync(memdir, bare, branch)
-    finally:
-        lock.rmdir()
+        with memory_paths.locked(memdir):
+            return memory_sync(memdir, bare, branch)
+    except memory_paths.Blocked as e:
+        sys.stderr.write(f"not synced this time: {e}\n")
+        return 1
+
+
+def say_under_way(memdir: str) -> int:
+    """A merge (or the like) is someone's to finish, whoever began it: staging its files would mark the conflicts in them
+    resolved."""
+    import memory_paths
+    sys.stderr.write(f"a merge or the like is under way in {memdir}; nothing is committed until it is finished. Take the conflict marks "
+                     f"out of {', '.join(memory_paths.unfinished(memdir)[:5])}, then run: {memory_paths.finish_with(memdir)}\n")
+    return memory_paths.UNDER_WAY
 
 
 def memory_sync(memdir: str, bare: str, branch: str) -> int:
+    import memory_paths
+    MG = memory_paths.GIT
+    if memory_paths.under_way(memdir):
+        return say_under_way(memdir)
     for p in MEMORY_PATHS:
         if os.path.lexists(pathlib.Path(memdir) / p) or git(memdir, "ls-files", "--error-unmatch", "--", p).returncode == 0:
-            git(memdir, "add", "-A", "--", p, env=NO_HOOKS)
-    import memory_paths
+            git(memdir, *MG, "add", "-A", "--", p, check=True)   # a failed one (the index locked) is a failed sync
     try:
         left = memory_paths.unstage_refused(memdir)
     except memory_paths.Unreadable as e:
@@ -497,20 +574,26 @@ def memory_sync(memdir: str, bare: str, branch: str) -> int:
         return 1
     if left:
         sys.stderr.write("left in the folder, not committed (a memory branch holds only plain notes): " + "; ".join(left) + "\n")
-    files = out(memdir, "diff", "--cached", "--name-only", "--", "memory/", "STATE.md").split("\n")
-    files = [f for f in files if f]
+    files = _z(git(memdir, "diff", "--cached", "--name-only", "--no-renames", "-z", "--", "memory/", "STATE.md", check=True, text=False))
     if files:
-        git(memdir, "commit", "-q", "-m", "brunna: sync memory/STATE.md", "--", *files, env=NO_HOOKS, check=True)
+        git(memdir, *MG, "--literal-pathspecs", "commit", "-q", "-m", "brunna: sync memory/STATE.md", "--", *files, check=True)
     up = out(memdir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}").strip()
     track = f"refs/remotes/{up}" if up and "/" in up else names.repo_ref("memory-remote")
-    git(memdir, "fetch", "-q", bare, f"+refs/heads/{branch}:{track}", env=NO_HOOKS, check=True)
+    git(memdir, *MG, "fetch", "-q", bare, f"+refs/heads/{branch}:{track}", check=True)
     head, remote = out(memdir, "rev-parse", "HEAD").strip(), out(memdir, "rev-parse", track).strip()
     if git(memdir, "merge-base", "--is-ancestor", remote, head).returncode != 0:
-        r = git(memdir, "merge", "--no-edit", "-q", track, env=NO_HOOKS)
+        if memory_paths.under_way(memdir):
+            return say_under_way(memdir)
+        r = git(memdir, *MG, "merge", "--no-edit", "-q", remote)
         if r.returncode != 0:
-            git(memdir, "merge", "--abort", env=NO_HOOKS)
-            sys.stderr.write(f"the memory branch could not merge {bare}'s {branch}, possibly a real content conflict; "
-                             f"a person has to look: {r.stderr.strip()[-300:]}\n")
+            if (files := memory_paths.undo_conflict(memdir, remote, r.returncode)) is not None:
+                sys.stderr.write(f"the notes here and the platform's both changed {', '.join(files[:5])}; the merge was undone. Someone "
+                                 f"has to merge them: git -C '{memdir}' fetch -q '{bare}' {branch} && git -C '{memdir}' merge FETCH_HEAD, "
+                                 f"take the conflict marks out, then git -C '{memdir}' commit -a -m merge\n")
+                return memory_paths.CONFLICT
+            if memory_paths.under_way(memdir):
+                return say_under_way(memdir)
+            sys.stderr.write(f"the notes could not be merged with the platform's: {memory_paths.scrub(r.stderr or r.stdout).strip()[-300:]}\n")
             return 1
         head = out(memdir, "rev-parse", "HEAD").strip()
     if head == remote:
@@ -518,6 +601,16 @@ def memory_sync(memdir: str, bare: str, branch: str) -> int:
     sys.stdout.flush()
     return git(memdir, "bundle", "create", "-q", "-", "HEAD", f"^{remote}", text=False,
                stdout=sys.stdout.buffer).returncode
+
+
+def op_memory_remotes(ws: str, branch: str) -> int:
+    """JSON {remote: [urls]}: the remotes this repo knows to have <branch> (its remote-tracking refs; nothing is asked over
+    the network)."""
+    have = {}
+    for r in out(ws, "remote").split():
+        if git(ws, "rev-parse", "-q", "--verify", f"refs/remotes/{r}/{branch}").returncode == 0:
+            have[r] = out(ws, "remote", "get-url", "--all", r).splitlines()
+    return emit(have)
 
 
 def op_exclude(repo: str, pattern: str) -> int:
@@ -673,7 +766,7 @@ OPS = {"test-runs": op_test_runs, "worktrees": op_worktrees, "ignored": op_ignor
        "session-worktree-undo": op_session_worktree_undo, "session-worktree-remove": op_session_worktree_remove, "branch-delete": op_branch_delete, "remove-dep": op_remove_dep,
        "checkout-sigs": op_checkout_sigs, "changed": op_changed, "copy-back": op_copy_back, "hooks": op_hooks,
        "hook-write": op_hook_write, "hook-remove": op_hook_remove, "bundle-unpushed": op_bundle_unpushed, "diff-head": op_diff_head,
-       "memory-sync": op_memory_sync, "exclude": op_exclude, "save": op_save, "head": op_head, "first-look": op_first_look,
+       "memory-sync": op_memory_sync, "memory-remotes": op_memory_remotes, "exclude": op_exclude, "save": op_save, "head": op_head, "first-look": op_first_look,
        "bundle-head": op_bundle_head, "bundle-branch": op_bundle_branch, "set-origin": op_set_origin, "tracked": op_tracked,
        "set-identity": op_set_identity}
 

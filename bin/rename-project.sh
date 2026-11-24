@@ -56,6 +56,7 @@ if [ -z "$NEW_PATH" ]; then
 fi
 
 [ -d "$OLD_PATH/.agent-memory" ] || fail "$(hub_msg "{path}/.agent-memory does not exist" path="$OLD_PATH")"
+memory_checkout "$OLD_PATH/.agent-memory" || fail "$(hub_msg "{path}/.agent-memory is not a checkout of {branch}" path="$OLD_PATH" branch="$MEMORY_BRANCH")"
 [ -z "$(git -C "$OLD_PATH" status --porcelain --untracked-files=no)" ] || fail "$(hub_msg "{path} has uncommitted changes to tracked files; deal with them first" path="$OLD_PATH")"
 [ -z "$(git -C "$OLD_PATH/.agent-memory" status --porcelain)" ] || fail "$(hub_msg ".agent-memory has uncommitted changes; sync it first")"
 git -C "$OLD_PATH/.agent-memory" fetch -q "$MEMORY_REMOTE"

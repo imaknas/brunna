@@ -597,7 +597,7 @@ class TheRefusalIsSeen(MemoryBranchPaths):
             return project_git.Result(0, b"", "")
         said = []
         with mock.patch.object(project_git, "job", job), mock.patch.object(hubconf, "private_tmp", lambda: self.tmp), \
-                mock.patch.object(alert, "once", lambda key, problems, ok: said.append((key, problems))):
+                mock.patch.object(alert, "once", lambda key, problems, ok, ids=None: said.append((key, problems))):
             why = project_git.sync_memory("proj", self.docs["proj"], self.tmp / "ws" / "proj" / ".agent-memory")
         return why, said
 

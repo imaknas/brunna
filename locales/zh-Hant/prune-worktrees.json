@@ -10,5 +10,6 @@
  "Removed a run's leftovers: {line}": "移除了某次執行的殘留:{line}",
  "Kept a run's leftovers: {line}: can't find out whether a process is working in it": "保留某次執行的殘留:{line}:查不出有沒有程序在裡面工作",
  "Kept a run's leftovers: {line}: something in it can't be removed": "保留某次執行的殘留:{line}:裡面有東西移除不了",
- "The private temp folder could not be read, nothing pruned there: {why}": "讀不了私用暫存資料夾,那裡什麼都沒清:{why}"
+ "The private temp folder could not be read, nothing pruned there: {why}": "讀不了私用暫存資料夾,那裡什麼都沒清:{why}",
+ "Note: {line}": "注意:{line}"
 }

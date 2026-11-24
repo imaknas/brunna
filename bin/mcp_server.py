@@ -522,6 +522,11 @@ def write_note(project: str, text: str) -> tuple[bool, str]:
     if not base or not policy.notes_dir(project):
         return False, _("{project} has no memory folder (.agent-memory); this project is not set up for memory tracking",
                          project=project)
+    import memory_paths
+    mem = pathlib.Path(base) / ".agent-memory"
+    if (mem / ".git").exists() and memory_paths.begun(mem):
+        return False, _("{project}: a merge or the like is under way in {path}; the note is not written until somebody finishes it",
+                        project=project, path=mem)
     name = f"{datetime.date.today().isoformat()}.md"
     line = " ".join(text.split())
     try:

@@ -1,7 +1,8 @@
 """E1 golden (docs/design/i18n.md) for bin/worktrees.py and bin/prune-worktrees, on zh-Hant: what the manual prune
-prints (with and without --yes), the result lines of the nightly auto prune (deps deleted, worktree removed, skipped
-for unknown ignored files or a failed `git worktree remove`) and the rebuild marker it leaves, and how
-prune-worktrees --auto prints a result (dry run or not).
+prints (with and without --yes; what is deleted, every reason one is kept for, a failed `git worktree remove`), the
+result lines of the nightly auto prune (deps deleted, worktree removed, skipped for unknown ignored files or a failed
+`git worktree remove`, who is working where not known) and the rebuild marker it leaves, and how prune-worktrees --auto
+prints a result (dry run or not).
 
 In-process; overview() and the git/du calls are replaced, the deps folder is a real temp dir.
 
@@ -32,8 +33,9 @@ UPDATE = os.environ.get("I18N_GOLDEN_UPDATE") == "1"
 ZH = {"AGENT_HUB_LANG_UI": golden_lang.LANG}
 
 
-def wt(path, branch, merged=True, clean=True, age=3.0):
-    return {"path": str(path), "branch": branch, "merged": merged, "clean": clean, "exists": True, "age_days": age}
+def wt(path, branch, merged=True, clean=True, age=3.0, exists=True, hidden=()):
+    return {"path": str(path), "branch": branch, "merged": merged, "clean": clean, "exists": exists, "age_days": age,
+            "hidden": list(hidden)}
 
 
 class Golden(unittest.TestCase):
@@ -44,17 +46,34 @@ class Golden(unittest.TestCase):
         repo = tmp / "repo"
         repo.mkdir()
         manual = {"proj": {"worktrees": [wt(tmp / "a", "feat-a", age=1.5), wt(tmp / "b", "feat-b", merged=False),
-                                         wt(tmp / "c", "feat-c", clean=False)]}}
+                                         wt(tmp / "c", "feat-c", clean=False),
+                                         wt(tmp / "gone", "feat-gone", clean=False, exists=False),
+                                         wt(tmp / "hid", "feat-hid", clean=False, hidden=["a.txt", "b.txt"]),
+                                         wt(tmp / "busy", "feat-busy"), wt(tmp / "seen", "feat-seen"),
+                                         wt(tmp / "secret", "feat-env"), wt(tmp / "unlisted", "feat-unlisted"),
+                                         wt(tmp / "broken", "feat-broken", age=None)]},
+                  "shut": {"worktrees": [], "unavailable": "shut: the sandbox refused"}}
+        ignored = {str(tmp / "secret"): [".env", "build", "dist", "more"], str(tmp / "unlisted"): None}
+        procs = [(os.getpid(), "me", "/"), (7, "editor", str(tmp / "busy" / "src"))]
         ok = subprocess.CompletedProcess([], 0, "", "")
         done = worktrees.project_git.Result(0, b"", "")
         with mock.patch.dict(os.environ, ZH), mock.patch.object(worktrees, "overview", lambda: manual), \
                 mock.patch.object(hubconf, "workspace", lambda name: repo), \
-                mock.patch.object(worktrees.project_git, "job", lambda *a, **k: done):
+                mock.patch.object(worktrees, "_unknown_ignored", lambda p, project: ignored.get(str(p), [])), \
+                mock.patch.object(hubconf, "process_cwds", lambda: procs), \
+                mock.patch.object(worktrees, "_cwds_in_use", lambda: [c for _pid, _n, c in procs] + [str(tmp / "seen")]), \
+                mock.patch.object(worktrees.project_git, "job",
+                                  lambda project, cwd, op, *a, **k: worktrees.project_git.Result(1, b"", "fatal: cannot remove\n")
+                                  if op == "worktree-remove" and str(a[-1]) == str(tmp / "broken") else done):
             for yes in (False, True):
                 buf = io.StringIO()
                 with contextlib.redirect_stdout(buf):
                     worktrees.prune(None, yes)
                 res.append((f"prune yes={yes}", buf.getvalue()))
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), mock.patch.object(worktrees, "_cwds_in_use", lambda: None):
+                worktrees.prune(None, True)
+            res.append(("prune, who is working where not known", buf.getvalue()))
 
         # auto prune: tier 2 removed / skipped (unknown ignored) / skipped (remove failed); tier 1 deps
         old, deps = tmp / "old", tmp / "deps"
@@ -78,6 +97,7 @@ class Golden(unittest.TestCase):
                 mock.patch.object(hubconf, "workspace", lambda name: repo), \
                 mock.patch.object(hubconf, "STATE", tmp / "state"), \
                 mock.patch.object(worktrees, "_cwds_in_use", lambda: []), \
+                mock.patch.object(worktrees, "_agent_folders", lambda ws: [tmp]), \
                 mock.patch.object(worktrees, "_transcript_age_days", lambda path: None), \
                 mock.patch.object(worktrees, "_unknown_ignored", lambda p, project: unknown.get(str(p), [])), \
                 mock.patch.object(worktrees, "_size_mb", lambda p: 12.5), \
@@ -87,12 +107,21 @@ class Golden(unittest.TestCase):
                 r = worktrees.auto_prune(dry_run=dry)
                 for k in ("deps", "removed", "skipped"):
                     res.append((f"auto dry_run={dry}: {k}", "".join(line + "\n" for line in r[k])))
+            with mock.patch.object(worktrees, "_cwds_in_use", lambda: None):
+                r = worktrees.auto_prune(dry_run=True)
+            res.append(("auto, who is working where not known", "".join(
+                f"{k}: {line}\n" for k in ("deps", "removed", "skipped", "notes") for line in r[k])))
+            with mock.patch.object(worktrees, "_agent_folders", lambda ws: []):
+                r = worktrees.auto_prune(dry_run=True)
+            res.append(("auto, no runtime with worktree folders", "".join(
+                f"{k}: {line}\n" for k in ("deps", "removed", "skipped", "notes") for line in r[k])))
             marker = (gitdir / worktrees.MARKER).read_text()
             res.append(("marker", marker[11:]))   # without the date
 
         script = str(ROOT / "bin" / "prune-worktrees")
         for dry in (True, False):
-            fixed = {"dry_run": dry, "deps": ["d1 .venv"], "removed": ["r1"], "skipped": ["s1"], "freed_mb": 7.5}
+            fixed = {"dry_run": dry, "deps": ["d1 .venv"], "removed": ["r1"], "skipped": ["s1"], "notes": ["n1"],
+                     "freed_mb": 7.5}
             buf = io.StringIO()
             with mock.patch.dict(os.environ, ZH), mock.patch.object(worktrees, "auto_prune", lambda dry_run: fixed), \
                     mock.patch.object(sys, "argv", ["prune-worktrees", "--auto"]), contextlib.redirect_stdout(buf):

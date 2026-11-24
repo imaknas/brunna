@@ -1,4 +1,4 @@
-"""bin/git-sync-memory.sh commits only memory/ and STATE.md, and only in a checkout of its own.
+"""bin/git-sync-memory.sh commits only memory/ and STATE.md, and only in a memory checkout (test_memory_checkout has the rest).
 
 10-31: in agent-hub (memory: false) .agent-memory was a plain folder inside the hub repo; the session-end sync ran
 there, `git add memory/ STATE.md` added nothing (ignored paths), the "anything staged?" check saw another session's
@@ -28,9 +28,9 @@ class SyncMemory(unittest.TestCase):
         self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
 
-    def repo(self, path: pathlib.Path) -> pathlib.Path:
+    def repo(self, path: pathlib.Path, branch: str = "agent-memory") -> pathlib.Path:
         path.mkdir(parents=True)
-        git(path, "init", "-q", "-b", "main")
+        git(path, "init", "-q", "-b", branch)
         (path / "README").write_text("r\n")
         git(path, "add", "README")
         git(path, "commit", "-q", "-m", "init")
@@ -50,7 +50,7 @@ class SyncMemory(unittest.TestCase):
         self.assertEqual(git(r, "diff", "--cached", "--name-only").split(), ["code.py"], "still staged, not committed")
 
     def test_a_plain_folder_inside_another_repo_does_nothing(self):
-        outer = self.repo(self.tmp / "hub")
+        outer = self.repo(self.tmp / "hub", "main")
         (outer / "bin.py").write_text("y = 2\n")
         git(outer, "add", "bin.py")
         mem = outer / ".agent-memory"

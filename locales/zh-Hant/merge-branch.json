@@ -13,7 +13,6 @@
  "`{cmd}` failed:\n{tail}": "`{cmd}` 失敗:\n{tail}",
  "(dry-run) would fast-forward {n} {n:commit|commits} of {branch} into {base}; tests: {tests}": "(dry-run)會把 {branch} 的 {n} 個 commit fast-forward 進 {base};測試:{tests}",
  "the main checkout ({path}) is not on {base}": "主 checkout({path})現在不在 {base}",
- "the main checkout cannot fast-forward: {output}": "主 checkout 不能 fast-forward:{output}",
  "pushed": "已 push",
  "not pushed": "沒有 push",
  " (push_on_merge is false)": "(push_on_merge 是 false)",
@@ -36,5 +35,8 @@
  "merge-branch: {why}. A project's memory branch never goes into its main (memory notes live only on {mem}, in the .agent-memory worktree); nothing was merged": "merge-branch:{why}。專案的記憶分支絕不能進到它的 main(記憶筆記只放在 {mem},在 .agent-memory worktree 裡);什麼都沒合併",
  "can't make a temporary worktree to try the rebase in: {output}": "沒辦法開暫時的 worktree 來試 rebase:{output}",
  "this merge would change files in the coding agent's folder, which the project's sandbox can't write: {files}; nothing was moved. Make that change outside the sandbox (in the main checkout, by hand), or drop it from the branch": "這次合併會改到 coding agent 資料夾裡的檔案,專案的沙盒寫不了:{files};什麼都沒動。請在沙盒之外(在主 checkout 手動)做這個修改,或把它從分支拿掉",
- "push requested ({id}); its outcome comes as a letter": "已請平台推送({id});結果會寄信來"
+ "push requested ({id}); its outcome comes as a letter": "已請平台推送({id});結果會寄信來",
+ "the main checkout cannot fast-forward: {output}\n{owners}": "主 checkout 不能 fast-forward:{output}\n{owners}",
+ "The owner's uncommitted files in the main checkout are the owner's to commit there: an agent never moves, changes or removes them, whatever git suggests. Tell the owner, and run this again when they have": "主 checkout 裡{owner}還沒 commit 的檔案要由{owner}自己在那裡 commit:不管 git 怎麼建議,agent 都不移動、不改、不刪。告訴{owner},等處理好再跑一次",
+ "the main checkout ({path}) holds uncommitted files of the owner's (changed, staged, untracked or ignored) where this merge puts its own: {files}. They were left as they are and nothing was merged. {owners}": "主 checkout({path})在這次合併要放檔案的地方有{owner}還沒 commit 的檔案(改過、staged、沒追蹤或被忽略):{files}。它們照原樣留著,什麼都沒有合併。{owners}"
 }

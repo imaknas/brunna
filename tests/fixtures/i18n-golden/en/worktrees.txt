@@ -1,10 +1,41 @@
 === prune yes=False
 Can delete: proj feat-a (<TMP>/a, untouched for 1.5 days)
 Kept (not merged yet): proj feat-b
+Kept: proj feat-c (<TMP>/c): it has changes that are not committed, or git can't tell
+Kept: proj feat-gone (<TMP>/gone): its folder is not there
+Kept: proj feat-hid (<TMP>/hid): git is told not to look at a.txt, b.txt, so edits in them can't be seen
+Kept: proj feat-busy (<TMP>/busy): a process is working in it: editor(7)
+Kept: proj feat-seen (<TMP>/seen): a process is working in it
+Kept: proj feat-env (<TMP>/secret): ignored files not on the rebuildable list: .env, build, dist…
+Kept: proj feat-unlisted (<TMP>/unlisted): its ignored files could not be listed
+Can delete: proj feat-broken (<TMP>/broken, untouched for ? days)
+shut: its worktrees could not be read (shut: the sandbox refused); none touched
 (only listed; once you are sure no session is still open in them, add --yes to delete them)
 === prune yes=True
 Deleting: proj feat-a (<TMP>/a, untouched for 1.5 days)
 Kept (not merged yet): proj feat-b
+Kept: proj feat-c (<TMP>/c): it has changes that are not committed, or git can't tell
+Kept: proj feat-gone (<TMP>/gone): its folder is not there
+Kept: proj feat-hid (<TMP>/hid): git is told not to look at a.txt, b.txt, so edits in them can't be seen
+Kept: proj feat-busy (<TMP>/busy): a process is working in it: editor(7)
+Kept: proj feat-seen (<TMP>/seen): a process is working in it
+Kept: proj feat-env (<TMP>/secret): ignored files not on the rebuildable list: .env, build, dist…
+Kept: proj feat-unlisted (<TMP>/unlisted): its ignored files could not be listed
+Deleting: proj feat-broken (<TMP>/broken, untouched for ? days)
+proj feat-broken: git worktree remove failed: fatal: cannot remove
+shut: its worktrees could not be read (shut: the sandbox refused); none touched
+=== prune, who is working where not known
+Kept: proj feat-a (<TMP>/a): whether a process is working in it could not be found out
+Kept (not merged yet): proj feat-b
+Kept: proj feat-c (<TMP>/c): it has changes that are not committed, or git can't tell
+Kept: proj feat-gone (<TMP>/gone): its folder is not there
+Kept: proj feat-hid (<TMP>/hid): git is told not to look at a.txt, b.txt, so edits in them can't be seen
+Kept: proj feat-busy (<TMP>/busy): whether a process is working in it could not be found out
+Kept: proj feat-seen (<TMP>/seen): whether a process is working in it could not be found out
+Kept: proj feat-env (<TMP>/secret): whether a process is working in it could not be found out
+Kept: proj feat-unlisted (<TMP>/unlisted): whether a process is working in it could not be found out
+Kept: proj feat-broken (<TMP>/broken): whether a process is working in it could not be found out
+shut: its worktrees could not be read (shut: the sandbox refused); none touched
 === auto dry_run=True: deps
 proj idle .venv (idle 3.0 days, 12.5 MB)
 === auto dry_run=True: removed
@@ -19,15 +50,21 @@ proj old-ok (idle 20.0 days, 12.5 MB; branch kept)
 === auto dry_run=False: skipped
 proj old-env: ignored files not on the rebuildable list (.env, build, dist…); kept
 proj old-fail: git worktree remove failed: fatal: cannot remove
+=== auto, who is working where not known
+notes: who is working in which folder could not be found out; none was touched
+=== auto, no runtime with worktree folders
+notes: no installed coding agent keeps its worktrees in the projects, so none is cleaned up by itself (`bin/prune-worktrees` lists them)
 === marker
 .venv → rebuild: uv sync
 === prune-worktrees --auto (dry_run=True)
 Would delete deps: d1 .venv
 Would remove worktree: r1
 Skipped: s1
+Note: n1
 Would free 7.5 MB in total (dry-run, nothing was touched)
 === prune-worktrees --auto (dry_run=False)
 Deleted deps: d1 .venv
 Removed worktree: r1
 Skipped: s1
+Note: n1
 Freed 7.5 MB in total

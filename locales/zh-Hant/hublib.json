@@ -1,3 +1,5 @@
 {
- "usage: hublib.py digest-append <section> < content | digest-section <section>": "用法:hublib.py digest-append <段落名> < 內容 | digest-section <段落名>"
+ "usage: hublib.py digest-append <section> < content | digest-section <section>": "用法:hublib.py digest-append <段落名> < 內容 | digest-section <段落名>",
+ "{project}: the librarian's copy of its notes conflicts with the memory repo, so they are not tidied up: merge them in {path}": "{project}:librarian 的筆記副本跟 memory repo 衝突,所以沒有整理:請在 {path} 合併",
+ "{project}: the librarian's copy of its notes is up to date again": "{project}:librarian 的筆記副本又是最新的了"
 }

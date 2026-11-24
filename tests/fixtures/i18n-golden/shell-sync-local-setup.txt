@@ -50,7 +50,7 @@ $ sync-local-setup.sh <TMP>/ws/old
 sync-local-setup:memory 的 remote 改名為 memory(原本叫 mini)
 sync-local-setup: CLAUDE.local.md 已對齊
 sync-local-setup: hook 已對齊
-sync-local-setup: ⚠️ AGENT.md 已更新但 commit/push 失敗,下次開 session 會再試
+sync-local-setup: .agent-memory 不是 agent-memory 的 checkout;AGENT.md 照原樣留著
 sync-local-setup: .agent-memory/ 已加進 .git/info/exclude
 sync-local-setup: CLAUDE.local.md 已加進 .git/info/exclude
 sync-local-setup: .claude/settings.local.json 已加進 .git/info/exclude

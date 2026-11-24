@@ -137,15 +137,19 @@ fi
 # parallel with SessionStart's git pull, using the same with-lock lock so they don't collide.
 # It compares against the version in HEAD, not the working tree: if last time it copied but the commit/push failed,
 # the next run tries again. With AGENT_HUB_OFFLINE (a sandboxed project's hooks run this as the project, and its sandbox
-# can't write the bare repo) it only commits; the memory sync's bundle carries it.
-if ! git -C .agent-memory show HEAD:AGENT.md 2>/dev/null | cmp -s "$AGENT_HUB/templates/AGENT.md" -; then
-  # don't run the project's own git hooks (see the explanation in git-sync-memory.sh)
+# can't write the bare repo) it only commits; the memory sync's bundle carries it. Only in a memory checkout: a plain folder's
+# commit and push would be the project's own.
+if ! memory_checkout .agent-memory; then
+  $QUIET || hub_say "sync-local-setup: .agent-memory is not a checkout of {branch}; AGENT.md left as it is" branch="$MEMORY_BRANCH"
+elif ! git -C .agent-memory show HEAD:AGENT.md 2>/dev/null | cmp -s "$AGENT_HUB/templates/AGENT.md" -; then
+  # under the lock from the look to the push: what somebody is in the middle of there is not written over. Without the
+  # project's own git hooks (hubpaths.sh memory_git says why)
   ( cd .agent-memory \
-    && export GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.hooksPath GIT_CONFIG_VALUE_0=/dev/null \
-    && cp "$AGENT_HUB/templates/AGENT.md" AGENT.md \
-    && "$AGENT_HUB/bin/with-lock.sh" sh -c \
-         'git commit -q -m "brunna: sync AGENT.md from template" -- AGENT.md \
-          && { [ -n "${AGENT_HUB_OFFLINE:-${BRUNNA_OFFLINE:-}}" ] || "$0/bin/git-safe-push.sh"; }' "$AGENT_HUB" ) >/dev/null 2>&1 \
+    && "$AGENT_HUB/bin/with-lock.sh" bash -c \
+         'source "$0/bin/hubpaths.sh" && ! memory_under_way && memory_checkout . \
+          && cp "$0/templates/AGENT.md" AGENT.md \
+          && memory_git commit -q -m "brunna: sync AGENT.md from template" -- AGENT.md \
+          && { [ -n "${AGENT_HUB_OFFLINE:-${BRUNNA_OFFLINE:-}}" ] || "$0/bin/git-safe-push.sh" --memory; }' "$AGENT_HUB" ) >/dev/null 2>&1 \
     && { $QUIET || hub_say "sync-local-setup: AGENT.md aligned with the template and pushed"; } \
     || { $QUIET || hub_say "sync-local-setup: ⚠️ AGENT.md updated, but the commit/push failed; the next session start tries again"; }
 fi
@@ -163,8 +167,7 @@ for f in .agent-memory $("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hub-runtime" local-
     # (it leaks the name itself), so it can't be relied on.
     [ "$f" = .agent-memory ] && pat=".agent-memory/" || pat="$f"
     if ! grep -qxF "$pat" "$exclude" 2>/dev/null; then
-      mkdir -p "$(dirname "$exclude")"
-      printf '%s\n' "$pat" >> "$exclude"
+      exclude_add "$exclude" "$pat"
       $QUIET || hub_say "sync-local-setup: {pattern} added to {exclude}" pattern="$pat" exclude="$exclude"
     fi
   fi

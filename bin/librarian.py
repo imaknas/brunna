@@ -16,7 +16,10 @@ Robustness decisions (carried over):
    disagree a warning is logged.
 3. Every real change to STATE.md writes an entry (diff included) to review-log.md for a person to spot-check later;
    no blocking approval.
-4. Every push goes through git-safe-push.sh (on divergence it pulls and retries; only a real content conflict fails
+4. Nothing is written in a copy while somebody has a merge, rebase, cherry-pick or revert under way there: asked under
+   the copy's lock right before each write and again right before the add (memory_paths.writing, commit_state). The
+   project is said and left for the next night. Only STATE.md is committed.
+4b. Every push goes through git-safe-push.sh (on divergence it pulls and retries; only a real content conflict fails
    and is left for a person).
 5. The model may touch only ./STATE.md (enforced by permission rules); if it touches other files they are moved to
    quarantine and the checkpoint does not advance (second line of defence).
@@ -36,6 +39,7 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -49,6 +53,7 @@ import i18n  # noqa: E402
 import job_off  # noqa: E402
 import llm_ready  # noqa: E402
 import memlock  # noqa: E402
+import memory_paths  # noqa: E402
 import prompts  # noqa: E402
 import state  # noqa: E402
 import state_anchors  # noqa: E402
@@ -534,7 +539,8 @@ def state_by_edits(proj: str, d: pathlib.Path, before: str, memory_section: str,
     if proposed is None:
         return (rc or 1) if (obj or {}).get("llm_error") else rc, obj, text
     if obj["structured_output"].get("state_updated") and proposed != before:
-        (d / "STATE.md").write_text(proposed)
+        with memory_paths.writing(d):
+            (d / "STATE.md").write_text(proposed)
     return rc, obj, text
 
 
@@ -550,7 +556,8 @@ def todo_by_edits(proj: str, d: pathlib.Path, problems: str) -> None:
         log(_("{project}: the format fix was not applied: {error}", project=proj,
               error=(obj or {}).get("llm_error") or "?"))
     elif proposed != before:
-        st.write_text(proposed)
+        with memory_paths.writing(d):
+            st.write_text(proposed)
 
 
 def _roster_kept(before: str, proposed: str) -> list[str]:
@@ -665,6 +672,7 @@ def repair_state_todo(proj: str, d: pathlib.Path) -> None:
         todo_by_edits(proj, d, problems)
     else:
         malformed = (d / "STATE.md").read_text(errors="replace")
+        not_under_way(d)   # the model writes the file itself
         _rc, obj, _text = llm("librarian-todo-format", todo_fix_prompt(problems), d, proj)
         add_cost(obj)
         shadow_todo(proj, malformed, (d / "STATE.md").read_text(errors="replace"), problems)
@@ -689,13 +697,14 @@ def quarantine_stray(proj: str, d: pathlib.Path) -> bool:
         return False
     qdir = STATE_DIR / "stray" / f"{proj}-{TODAY}"
     qdir.mkdir(parents=True, exist_ok=True)
-    for f in stray:
-        if run(["git", "-C", str(d), "ls-files", "--error-unmatch", "--", f]).returncode == 0:
-            if (d / f).exists():
-                shutil.copy(d / f, qdir / f.replace("/", "_"))
-            run(["git", "-C", str(d), "checkout", "-q", "--", f])
-        else:
-            shutil.move(str(d / f), str(qdir / f.replace("/", "_")))
+    with memory_paths.writing(d):
+        for f in stray:
+            if run(["git", "-C", str(d), "ls-files", "--error-unmatch", "--", f]).returncode == 0:
+                if (d / f).exists():
+                    shutil.copy(d / f, qdir / f.replace("/", "_"))
+                run(["git", "-C", str(d), *memory_paths.GIT, "checkout", "-q", "--", f])
+            else:
+                shutil.move(str(d / f), str(qdir / f.replace("/", "_")))
     log(_("{project}: warning: the model touched files other than STATE.md, moved to {dir}: {files}", project=proj,
           dir=qdir, files=" ".join(stray)))
     return True
@@ -730,7 +739,8 @@ def admit_anchors(proj: str, d: pathlib.Path, before: str) -> list[str]:
     repo, _why = state_anchors.Repo.open(workspace(proj))   # cannot be checked: nothing new is admitted
     bad = sorted({a.raw for a in new if repo is None or repo.resolve(a).outcome not in ("ok", "pending")})
     if bad:
-        st.write_text(state_anchors.unanchor(text, OWNER, set(bad)))
+        with memory_paths.writing(d):
+            st.write_text(state_anchors.unanchor(text, OWNER, set(bad)))
     return bad
 
 
@@ -777,9 +787,50 @@ def dangling_note(dangling: str) -> str:
             f"memory/reference/):{dangling}") if dangling else ""
 
 
+def not_under_way(d: pathlib.Path) -> None:
+    """Before a model that writes in the copy itself: a check, not a lock (a call takes minutes)."""
+    if memory_paths.under_way(d):
+        raise memory_paths.Blocked("a merge or the like is under way there")
+
+
+# under the copy's lock, from the look to the push (registrar.WRITE_COPY is the same)
+COMMIT_STATE = ('source {hub}/bin/hubpaths.sh && {{ ! memory_under_way || exit "$MEMORY_UNDER_WAY"; }} && memory_git add STATE.md '
+                '&& memory_git commit -q -m {msg} -- STATE.md && {push}')
+
+
+def commit_state(d: pathlib.Path, msg: str) -> None:
+    """STATE.md only, whatever else is staged. Not committed (the lock or the index held, a merge) is Blocked: the checkpoint
+    doesn't move past it. The push's own failure is said by the next night's pull."""
+    head = git(d, "rev-parse", "HEAD")
+    r = run([str(HUB / "bin" / "with-lock.sh"), "bash", "-c",
+             COMMIT_STATE.format(hub=shlex.quote(str(HUB)), msg=shlex.quote(msg), push=shlex.quote(str(SAFE_PUSH)))], cwd=d)
+    if r.returncode == memory_paths.UNDER_WAY:
+        raise memory_paths.Blocked("a merge or the like is under way there")
+    if r.returncode != 0 and git(d, "rev-parse", "HEAD") == head:
+        raise memory_paths.Blocked(f"STATE.md could not be committed: {memory_paths.one_line(memory_paths.scrub(r.stderr), 300)}")
+
+
 def process(proj: str, d: pathlib.Path, handoffs: list[dict], digest: list[str]) -> None:
+    import alert
+    key, problems = f"memory-copy-blocked:{proj}", []
+    try:
+        _process(proj, d, handoffs, digest)
+    except memory_paths.Blocked as e:
+        log(_("{project}: nothing more is written in the memory copy {path} ({why}); the checkpoint is not advanced, left for the "
+              "next night", project=proj, path=d, why=e))
+        problems = [_("{project}: its notes are not tidied up: the librarian can't write in the memory copy {path} ({why})",
+                      project=proj, path=d, why=e)]
+    try:   # one alert per project, however often and why; a broken one doesn't stop the run
+        if problems or key in alert.open_keys(key):
+            alert.once(key, problems, _("{project}: the librarian can write in its memory copy again", project=proj),
+                       ids=["blocked"] if problems else [])
+    except Exception as e:
+        log(f"{proj}: the alert was not sent: {e!r}")
+
+
+def _process(proj: str, d: pathlib.Path, handoffs: list[dict], digest: list[str]) -> None:
     log(f"--- {proj} ---")
-    with LOG.open("a") as fh:   # hardened against committed symlinks first (hublib.pull_copy)
+    with LOG.open("a") as fh, memory_paths.locked(d):   # what is under way there, and links: hublib.pull_copy
         pulled = hublib.pull_copy(d, text=True, stdout=fh, stderr=fh)
     if pulled.returncode != 0:
         log(f"{proj}: git pull failed, skip")
@@ -833,12 +884,14 @@ def process(proj: str, d: pathlib.Path, handoffs: list[dict], digest: list[str])
     if COMPLETION["state"]:
         rc, obj, text = state_by_edits(proj, d, before, memory_section, h_note, d_note)
     else:
+        not_under_way(d)   # the model writes the file itself
         rc, obj, text = llm("librarian-state", state_prompt(proj, memory_section, h_note, d_note), d, proj)
     if rc != 0 or not text:
         # The call itself failed: it may have stopped halfway, so nothing is kept. Restore the copy to a clean state
         # rather than leave it for the next night
-        run(["git", "-C", str(d), "checkout", "-q", "--", "."])
-        run(["git", "-C", str(d), "clean", "-fdq"])
+        with memory_paths.writing(d):
+            run(["git", "-C", str(d), *memory_paths.GIT, "checkout", "-q", "--", "."])
+            run(["git", "-C", str(d), "clean", "-fdq"])
         log(_("{project}: the model call failed ({error}); the copy is restored and the checkpoint not advanced",
               project=proj, error=(obj or {}).get("llm_error") or f"exit {rc}"))
         return
@@ -875,9 +928,7 @@ def process(proj: str, d: pathlib.Path, handoffs: list[dict], digest: list[str])
         if git(d, "rev-parse", "HEAD") != pre:
             # the project's hook already committed the model's edit: commit this one on top (below only commits when
             # HEAD did not move)
-            if run(["git", "add", "STATE.md"], cwd=d).returncode == 0 and \
-                    run(["git", "commit", "-m", "librarian: admit STATE.md anchors", "-q"], cwd=d).returncode == 0:
-                run([str(SAFE_PUSH)], cwd=d)
+            commit_state(d, "librarian: admit STATE.md anchors")
 
     # Go by the actual git state. Trap: the project's own SessionEnd hook may already have committed and pushed
     # STATE.md while the call was still running (a headless call is a full session too) -- so first compare whether
@@ -906,9 +957,7 @@ def process(proj: str, d: pathlib.Path, handoffs: list[dict], digest: list[str])
         # the hook did not take over (the project did not go through its hook this time, or the hook is not set
         # up): commit and push ourselves
         if post == pre:
-            if run(["git", "add", "STATE.md"], cwd=d).returncode == 0 and \
-                    run(["git", "commit", "-m", "librarian: update STATE.md", "-q"], cwd=d).returncode == 0:
-                run([str(SAFE_PUSH)], cwd=d)
+            commit_state(d, "librarian: update STATE.md")
             new_sha = git(d, "rev-parse", "HEAD")
         log(f"{proj}: STATE.md updated & pushed ({new_sha})")
         # the reason label is a token registrar.py reads back (removal_reason, either set): the UI language's, like the

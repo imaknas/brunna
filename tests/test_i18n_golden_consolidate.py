@@ -67,7 +67,7 @@ class Consolidate(unittest.TestCase):
         private = mock.patch.object(hubconf, "private_tmp", lambda: self.tmp / "private")   # a run it keeps stays there, not in the tree's
         private.start()
         self.addCleanup(private.stop)
-        for f in ("git-safe-push.sh", "with-lock.sh", "check-state-todo.py"):
+        for f in ("git-safe-push.sh", "hubpaths.sh", "py", "memory_paths.py", "with-lock.sh", "check-state-todo.py"):
             (self.tmp / "bin" / f).symlink_to(ROOT / "bin" / f)
         self.commit_ok(True)
         with mock.patch.dict(os.environ, LANG):

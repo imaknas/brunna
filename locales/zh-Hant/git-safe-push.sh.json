@@ -1,5 +1,9 @@
 {
  "git-safe-push: blocked by a branch protection rule, not by diverged history; retrying will not help:": "git-safe-push: 被 branch protection 規則擋下,不是分岔問題,重試沒用:",
  "git-safe-push: the pull could not merge, possibly a real content conflict; a person has to look:": "git-safe-push: pull 合併失敗,可能是真的內容衝突,需要人工處理:",
- "git-safe-push: the push still fails after {n} attempts": "git-safe-push: 重試 {n} 次後仍然 push 失敗"
+ "git-safe-push: the push still fails after {n} attempts": "git-safe-push: 重試 {n} 次後仍然 push 失敗",
+ "git-safe-push: {path} is not a checkout of {branch}; nothing was pushed": "git-safe-push: {path} 不是 {branch} 的 checkout;什麼都沒有 push",
+ "git-safe-push: {branch} has no remote of its own (branch.{branch}.remote); nothing was pushed": "git-safe-push: {branch} 沒有自己的 remote(branch.{branch}.remote);什麼都沒有 push",
+ "git-safe-push: the notes here and the hub machine's both changed {files}; the merge was undone, both sides kept as they were and nothing was pushed. Someone has to merge them: git -C '{path}' pull --no-rebase {remote} {branch}, take the conflict marks out, then git -C '{path}' commit -a -m merge": "git-safe-push: 這裡跟 hub 主機的筆記都改了 {files};合併已經取消,兩邊都照原樣留著,沒有 push。需要有人合併:git -C '{path}' pull --no-rebase {remote} {branch},清掉衝突標記,再 git -C '{path}' commit -a -m merge",
+ "git-safe-push: a merge or the like is under way in {path}; nothing is pushed until it is finished. Take the conflict marks out of {files}, then run: {command}": "git-safe-push: {path} 有一個合併(或類似的操作)做到一半;做完之前不會 push。把 {files} 裡的衝突標記清掉,再跑:{command}"
 }

@@ -1,0 +1,4 @@
+{
+ "git-sync-memory: {path} is not a checkout of {branch}; nothing was committed or pushed": "git-sync-memory: {path} 不是 {branch} 的 checkout;什麼都沒有 commit、沒有 push",
+ "git-sync-memory: a merge or the like is under way in {path}; nothing is committed or pushed until it is finished. Take the conflict marks out of {files}, then run: {command}": "git-sync-memory: {path} 有一個合併(或類似的操作)做到一半;做完之前不會 commit 也不會 push。把 {files} 裡的衝突標記清掉,再跑:{command}"
+}

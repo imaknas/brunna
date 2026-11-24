@@ -6,6 +6,7 @@ $ sync-all-memory.sh
 --- log
 [<T>] alpha: 已 commit+push 新的 memory
 [<T>] beta: 補 push 了之前沒推出去的 commit
+[<T>] delta:它的 memory 資料夾不是 agent-memory 的 checkout;跳過
 [<T>] gamma: git-sync-memory 失敗
 
 $ sync-all-memory.sh
@@ -14,7 +15,8 @@ $ sync-all-memory.sh
 --- stderr
 
 --- log
-[<T>] beta: 補 push 失敗
+[<T>] beta: git-sync-memory 失敗
+[<T>] delta:它的 memory 資料夾不是 agent-memory 的 checkout;跳過
 [<T>] gamma: git-sync-memory 失敗
 
 $ sync-all-memory.sh
@@ -25,3 +27,5 @@ $ sync-all-memory.sh
 --- log
 [<T>] 連不到 hub 主機,這輪只在本機 commit、不 push
 [<T>] alpha: 已 commit(連不到 hub 主機,先不 push) 新的 memory
+[<T>] delta:它的 memory 資料夾不是 agent-memory 的 checkout;跳過
+[<T>] gamma: git-sync-memory 失敗

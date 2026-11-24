@@ -24,9 +24,11 @@ Run in the session's own worktree:
       skipped or not; stop if one does.
   3. Run the affected `merge` tiers through the main checkout's runner (`brunna test --when merge`; no tests declared:
      skipped and noted): on failure attach the last 40 lines, record merge.failed, stop.
-  4. In the main checkout, `git merge --ff-only <branch>` (stop if uncommitted changes in the main checkout get in the
-     way). In the hub's own repo, then `brunna land` from the merged code (the registry index; a problem is reported,
-     the merge stands).
+  4. In the main checkout, `git merge --ff-only --no-overwrite-ignore <branch>` (stop if uncommitted changes in the main
+     checkout get in the way, or files git doesn't track there, ignored ones too, where the branch brings its own: they
+     are the owner's, to commit there, never an agent's to move or remove, and the refusal says so). In
+     the hub's own repo, then `brunna land` from the merged code (the registry index; a problem is reported, the merge
+     stands).
   5. **Push only when the registry has `push_on_merge: true`** (no push by default: some repos are public, and
      merging ≠ publishing). A sandboxed project asks the platform to push its default branch instead (`brunna push`'s
      request, docs/design/platform-push.md); the outcome comes as a letter, and a request still pending is no failure.
@@ -101,6 +103,29 @@ def memory_problem(wt: pathlib.Path, main_dir: pathlib.Path, base: str, branch: 
                      "from {base})", n=len(theirs), total=len(brought), branch=branch, base=base, mem=mem,
                      sha=theirs[0][:10])
     return None
+
+
+def in_the_way(main_dir: pathlib.Path, base: str, head: str) -> list[str]:
+    """What the main checkout holds uncommitted where the merge writes, at most 10: untracked, ignored or staged where a file
+    is added (or a folder one needs is a file), changed where one is changed or removed."""
+    out: list[str] = []
+
+    def names_of(*args) -> list[str]:
+        return [x for x in git(main_dir, "diff", "--name-only", "--no-renames", "-z", *args).stdout.split("\0") if x]
+    try:
+        added, other = names_of("--diff-filter=A", base, head), names_of("--diff-filter=a", base, head)
+        changed = set(names_of("HEAD"))
+    except UnicodeDecodeError:   # a name that isn't UTF-8: git's own words say it, quoted
+        return out
+    for rel in added:
+        p = pathlib.PurePosixPath(rel)
+        for q in [*reversed([x for x in p.parents if str(x) != "."]), p]:
+            here = main_dir / q
+            if os.path.lexists(here) and (q == p or here.is_symlink() or not here.is_dir()):
+                if git(main_dir, "cat-file", "-e", f"HEAD:{q}").returncode != 0 and str(q) not in out:
+                    out.append(str(q))
+                break
+    return (out + [x for x in other if x in changed])[:10]
 
 
 def project_of(cwd: pathlib.Path) -> tuple[str | None, pathlib.Path | None]:
@@ -205,7 +230,8 @@ def main() -> int:
             # a dry run rebases a detached copy of the branch's commit in a temporary worktree in the repo's git dir (a
             # sandboxed session can write there), removed whatever happens: no ref moves, no worktree changes
             work = names.repo_dir(common) / f"merge-dry-run-{os.getpid()}"
-            cleanup.callback(lambda: (git(wt, "worktree", "remove", "--force", str(work)), git(wt, "worktree", "prune")))
+            # only this one's entry: `worktree prune` drops those of every worktree whose folder isn't there right now
+            cleanup.callback(lambda: git(wt, "worktree", "remove", "--force", str(work)))
             r = git(wt, "worktree", "add", "-q", "--detach", str(work), head0)
             if r.returncode != 0:
                 return fail("dry-run", _("can't make a temporary worktree to try the rebase in: {output}",
@@ -277,9 +303,17 @@ def main() -> int:
         # 4. fast-forward main
         if git(main_dir, "rev-parse", "--abbrev-ref", "HEAD").stdout.strip() != base:
             return fail("main", _("the main checkout ({path}) is not on {base}", path=main_dir, base=base))
-        r = git(main_dir, "merge", "--ff-only", branch)
+        # --no-overwrite-ignore: git otherwise overwrites a file it ignores there with the branch's file of that name
+        r = git(main_dir, "merge", "--ff-only", "--no-overwrite-ignore", branch)
         if r.returncode != 0:
-            return fail("main", _("the main checkout cannot fast-forward: {output}", output=(r.stderr or r.stdout).strip()))
+            owners = _("The owner's uncommitted files in the main checkout are the owner's to commit there: an agent never moves, "
+                       "changes or removes them, whatever git suggests. Tell the owner, and run this again when they have")
+            if files := in_the_way(main_dir, base, head):
+                return fail("main", _("the main checkout ({path}) holds uncommitted files of the owner's (changed, staged, untracked or "
+                                      "ignored) where this merge puts its own: {files}. They were left as they are and nothing was "
+                                      "merged. {owners}", path=main_dir, files=", ".join(files), owners=owners))
+            return fail("main", _("the main checkout cannot fast-forward: {output}\n{owners}", output=(r.stderr or r.stdout).strip(),
+                                  owners=owners))
         report["merged"] = True
         # 4b. the hub's own repo: what landed is the running platform. Its own code, started fresh from the main
         # checkout (not in this process, which imported the old modules), rebuilds what must match it, still under

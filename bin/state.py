@@ -54,6 +54,7 @@ import hubconf  # noqa: E402
 import hublib  # noqa: E402
 import i18n  # noqa: E402
 import memlock  # noqa: E402
+import memory_paths  # noqa: E402
 import names  # noqa: E402
 import todo_tokens  # noqa: E402
 
@@ -456,9 +457,14 @@ def finish_steps(project: str, copy: pathlib.Path, bare: pathlib.Path, rec: dict
         rec["todo"].remove(step)
         save(project, rec)
     if "pull" in rec["todo"]:
+        if memory_paths.under_way(copy):
+            raise Refused(_("{project}: the memory copy is in the middle of a git operation, or not on its branch (a "
+                            "stopped nightly run?); nothing changed", project=project))
         hublib.harden_copy(copy)
-        r = subprocess.run(["git", *hublib.NO_SYMLINKS, "pull", "--ff-only", "-q"], cwd=copy, capture_output=True,
-                           text=True)
+        for step in (["fetch", "-q"], ["merge", "-q", "--ff-only", "@{u}"]):   # never pull: pull.rebase would rebase it
+            r = subprocess.run(["git", *hublib.NO_SYMLINKS, *memory_paths.GIT, *step], cwd=copy, capture_output=True, text=True)
+            if r.returncode != 0:
+                break
         if r.returncode != 0:
             raise Refused(_("{project}: the memory copy could not be fast-forwarded ({error}); the restore is "
                             "published, run brunna state restore {project} to finish it", project=project,

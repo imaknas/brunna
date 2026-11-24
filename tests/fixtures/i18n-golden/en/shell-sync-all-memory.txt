@@ -6,6 +6,7 @@ $ sync-all-memory.sh
 --- log
 [<T>] alpha: committed and pushed new memory
 [<T>] beta: pushed the commits that had not gone out
+[<T>] delta: its memory folder is not a checkout of agent-memory; skipped
 [<T>] gamma: git-sync-memory failed
 
 $ sync-all-memory.sh
@@ -14,7 +15,8 @@ $ sync-all-memory.sh
 --- stderr
 
 --- log
-[<T>] beta: the catch-up push failed
+[<T>] beta: git-sync-memory failed
+[<T>] delta: its memory folder is not a checkout of agent-memory; skipped
 [<T>] gamma: git-sync-memory failed
 
 $ sync-all-memory.sh
@@ -25,3 +27,5 @@ $ sync-all-memory.sh
 --- log
 [<T>] cannot reach the hub machine; this round commits locally and does not push
 [<T>] alpha: committed new memory; not pushed yet (cannot reach the hub machine)
+[<T>] delta: its memory folder is not a checkout of agent-memory; skipped
+[<T>] gamma: git-sync-memory failed

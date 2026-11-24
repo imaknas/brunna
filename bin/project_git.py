@@ -23,6 +23,10 @@ for a write outside the project's own job.
                                                             refused for what it holds is an alert (once, reminded daily),
                                                             cleared by the next clean sync
   sync_memory_of(name, ws) → None | why not                 a platform script's sync of a project's memory, either kind
+  memory_remote(memdir) → (remote | None, why not)          the remote an unsandboxed project's notes go to: the memory branch's, when
+                                                            it is the platform's memory repo by its URL
+  code_remotes_with_notes(name, doc) → [remote]             remotes of the project's that are known here to have the memory branch and
+                                                            aren't the platform's
 
 CLI (git-sync-memory.sh, sync-all-memory.sh):
   project_git.py sandboxed-project <name>   exit 0 when this registered project is sandboxed, 3 when not (any
@@ -30,6 +34,7 @@ CLI (git-sync-memory.sh, sync-all-memory.sh):
   project_git.py run-as <name> <dir> -- <argv…>
                                       a shell hook's work as the project <dir> belongs to (HUB_AS_PROJECT=1 set, stdin
                                       and output passed through); exit 3 when it isn't sandboxed
+  project_git.py memory-remote <dir>  memory_remote's name on stdout; exit 8 (memory_paths.REMOTE_BAD) with the reason on stderr
   project_git.py sync-memory [--lock] <name>
                                       sync_memory for that project (exit 1 with the reason on stderr); --lock: the job
                                       takes with-lock.sh's lock (a caller under with-lock.sh holds it already)
@@ -39,6 +44,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+import re
 import selectors
 import signal
 import subprocess
@@ -199,8 +205,9 @@ def refusal_alert(name: str, why: str | None) -> None:
     every 24 hours, and hears when it syncs clean again. A broken alert doesn't change the outcome."""
     try:
         import alert
-        alert.once(f"memory-sync-refused:{name}", [_("{project}: its memory notes don't reach the platform: {why}", project=name, why=why)]
-                   if why else [], _("{project}: its memory notes sync again", project=name))
+        alert.once(f"memory-sync-refused:{name}", [_("{project}: its memory notes don't reach the platform: {why}", project=name,
+                                                     why=memory_paths.one_line(memory_paths.scrub(why), 600))] if why else [],
+                   _("{project}: its memory notes sync again", project=name), ids=["memory-sync-refused"] if why else [])
     except Exception as e:
         print(f"project_git: the alert was not sent: {e!r}", file=sys.stderr)
 
@@ -340,38 +347,121 @@ def sync_memory_of(name: str, ws) -> str | None:
     mem = pathlib.Path(ws) / ".agent-memory"
     if isolation.sandboxed({**doc, "name": name}):
         return sync_memory(name, doc, mem, lock=True)
-    bin_dir = pathlib.Path(__file__).resolve().parent
-    r = subprocess.run([str(bin_dir / "with-lock.sh"), str(bin_dir / "git-sync-memory.sh")], cwd=mem, capture_output=True, text=True)
-    if r.stderr.strip():
-        sys.stderr.write(r.stderr)
-    return None if r.returncode == 0 else f"{name}: the memory sync failed ({(r.stderr or r.stdout).strip()[-300:]})"
+    import memory_health
+    rc, said = memory_health.sync(mem, name)
+    if said:
+        print(memory_paths.quoted(said, memory_paths.SAID), file=sys.stderr)
+    return None if rc == 0 else f"{name}: the memory sync failed ({memory_paths.quoted(said, memory_paths.SAID)})"
+
+
+MEMORY_REMOTES = ("memory", "mini")   # what onboarding and recover call it (hubpaths.sh MEMORY_REMOTE), and an older checkout
+
+
+def _url_parts(url: str) -> tuple[str, str]:
+    """(host, path) of a git URL, whatever its spelling: a local path has no host; user, port and the host's case don't tell
+    one repo from another."""
+    m = re.match(r"([A-Za-z][A-Za-z0-9+.-]*)://([^/]*)(/.*)?$", url)
+    if m:
+        host = m[2].rpartition("@")[2].partition(":")[0].casefold()
+        if m[1].casefold() == "file":
+            return "", m[3] or ""
+        return host, (m[3] or "").removeprefix("/") if (m[3] or "").startswith("/~") else (m[3] or "")
+    host, sep, path = url.partition(":")
+    if url.startswith("/") or not sep or "/" in host:
+        return "", url
+    return host.rpartition("@")[2].casefold(), path
+
+
+def _memory_url_ok(url: str, name: str | None, docs: dict) -> bool:
+    """Whether this is the platform's memory repo: the project's own, or one under the memory repos' folder that is no other
+    project's (an older name's); on the machine that only reaches the hub machine over ssh, a memory repo there."""
+    own = [policy.memory_bare(name, docs[name])] if name in docs else []
+    others = {os.path.realpath(policy.memory_bare(n, d)) for n, d in docs.items() if n != name}
+    root = os.path.realpath(hubconf.p("git_origin", "~/git-origin"))
+    host, path = _url_parts(url)
+    path = path.rstrip("/")
+    if not host:
+        if not path.startswith("/"):
+            return False
+        real = os.path.realpath(path)
+        return real in {os.path.realpath(p) for p in own} \
+            or (os.path.dirname(real) == root and real.endswith("-memory.git") and real not in others)
+    return host == hubconf.host("server").rpartition("@")[2].casefold() and path.endswith("-memory.git")
+
+
+def _urls(cwd, remote: str, *flags) -> list[str]:
+    r = subprocess.run(["git", "-C", str(cwd), "remote", "get-url", "--all", *flags, remote], capture_output=True, text=True, timeout=30)
+    return r.stdout.splitlines() if r.returncode == 0 else []
+
+
+def memory_remote(memdir) -> tuple[str | None, str | None]:
+    """git runs in the project's repo: only where it may run as the user. In a worktree of the project's repo, which shares
+    its remotes, by the platform's names for it; a clone of the memory repo (.git a folder) calls it what it likes. By the
+    URL in both."""
+    r = subprocess.run(["git", "-C", str(memdir), "config", "--get", f"branch.{memory_paths.BRANCH}.remote"], capture_output=True,
+                       text=True, timeout=30)
+    remote = r.stdout.strip()
+    found = memory_project(memdir)
+    urls = [*_urls(memdir, remote, "--push"), *_urls(memdir, remote)] if remote else []
+    named = remote in MEMORY_REMOTES or (pathlib.Path(memdir) / ".git").is_dir()
+    if named and urls and all(_memory_url_ok(u, found[0] if found else None, hubconf.projects()) for u in urls):
+        return remote, None
+    shown = ", ".join(json.dumps(memory_paths.one_line(memory_paths.scrub(u), 120)) for u in dict.fromkeys(urls)) or "-"
+    return None, _("the notes in {path} are not pushed: their branch {branch} follows {remote} ({url}), which is not the platform's "
+                   "memory repo. Set it back with: git -C '{path}' config branch.{branch}.remote {memory} (its URL is {own})",
+                   path=memdir, branch=memory_paths.BRANCH, remote=json.dumps(memory_paths.one_line(memory_paths.scrub(remote), 60)) if remote else "-",
+                   url=shown, memory=MEMORY_REMOTES[0], own=policy.memory_bare(*found) if found else "-")
+
+
+def code_remotes_with_notes(name: str, doc: dict) -> list[str]:
+    """The names of the project's remotes known here to have its memory branch that aren't the platform's memory repo, whichever way
+    that is spelled. Raises Unavailable when the project's job couldn't say. The names are the project's own text."""
+    ws = hubconf.path((doc.get("paths") or {}).get("workspace"))
+    got = data(name, ws, "memory-remotes", ws, memory_paths.BRANCH)
+    docs, own = hubconf.projects(), policy.memory_bare(name, doc).name
+    out = []
+    for remote, urls in sorted(got.items()) if isinstance(got, dict) else ():
+        urls = strs(urls)   # none known: nothing to say
+        # the platform's by its names for it and the repo's own name (a host it isn't known under any more) is not a code remote
+        if not all(_memory_url_ok(u, name, docs) for u in urls) and not (
+                remote in MEMORY_REMOTES and all(os.path.basename(_url_parts(u)[1].rstrip("/")) == own for u in urls)):
+            out.append(remote)
+    return out
 
 
 def sync_memory(name: str, doc: dict, memdir, branch: str = "agent-memory", lock: bool = False) -> str | None:
-    """lock: the job takes with-lock's lock itself (the hourly sync; a hook's call already holds it)."""
+    """lock: the job takes with-lock's lock itself (the hourly sync; a hook's call already holds it). How it went is recorded
+    (memory_health)."""
+    import memory_health
+    why, rc = _sync_memory(name, doc, memdir, branch, lock)
+    memory_health.record(name, why and memory_paths.scrub(why), rc, memdir)
+    return why and memory_paths.scrub(why)
+
+
+def _sync_memory(name: str, doc: dict, memdir, branch: str, lock: bool) -> tuple[str | None, int]:
     bare = policy.memory_bare(name, doc)
     if not (bare / "objects").is_dir():
-        return f"{name}: no local memory bare repo at {bare}"
+        return f"{name}: no local memory bare repo at {bare}", 1
     try:
         tmp = tempfile.TemporaryDirectory(prefix="hub-memory-", dir=hubconf.private_tmp(), ignore_cleanup_errors=True)
     except OSError as e:
-        return f"{name}: no folder for the bundle ({e})"
+        return f"{name}: no folder for the bundle ({e})", 1
     with tmp as d:
         bundle = pathlib.Path(d) / "memory.bundle"
         with bundle.open("wb") as fh:
             r = job(name, memdir, "memory-sync", memdir, bare, branch, *(["--lock"] if lock else []),
                     "--rules=" + ",".join(memory_paths.rules_names()), out=fh, timeout=BUNDLE_TIMEOUT_S, cap=MAX_BUNDLE)
-        err = r.stderr.strip()[-300:]
+        err = memory_paths.quoted(r.stderr, memory_paths.SAID)   # the project's own text
         if r.returncode == EX_SANDBOX:
-            return f"{name}: the sandbox refused; memory not synced ({err})"
+            return f"{name}: the sandbox refused; memory not synced ({err})", 1
         if r.returncode != 0:
-            return f"{name}: the memory sync job failed ({err})"
+            return f"{name}: the memory sync job failed ({err})", r.returncode
         if r.stderr.strip():
-            sys.stderr.write(r.stderr)   # what the job left out of the commit, said once
+            print(memory_paths.quoted(r.stderr, 300), file=sys.stderr)   # what the job left out of the commit, said once
         why = fetch_bundle(bare, bundle, branch) if bundle.stat().st_size else None
         if why is None or why.startswith(REFUSED):
             refusal_alert(name, why)
-        return f"{name}: {why}" if why else None
+        return (f"{name}: {why}", 1) if why else (None, 0)
 
 
 def by_name(project: str) -> tuple[str, dict] | None:
@@ -427,6 +517,13 @@ def _not_in_index(name: str) -> int:
 def main(argv: list[str]) -> int:
     if argv[:1] == ["run-as"] and len(argv) >= 5 and argv[3] == "--":
         return run_as_cli(argv[1], argv[2], argv[4:])
+    if argv[:1] == ["memory-remote"] and len(argv) == 2:
+        remote, why = memory_remote(pathlib.Path(argv[1]))
+        if why:
+            print(why, file=sys.stderr)
+            return memory_paths.REMOTE_BAD
+        print(remote)
+        return 0
     lock = "--lock" in argv
     argv = [a for a in argv if a != "--lock"]
     if len(argv) != 2 or argv[0] not in ("sandboxed-project", "sync-memory"):

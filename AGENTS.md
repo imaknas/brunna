@@ -234,9 +234,16 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
 ## Called by hooks/other scripts: don't run these by hand
 
 - `bin/git-safe-push.sh`: on a diverged push, pulls and retries automatically; only a real content conflict fails for a
-  person to look at, and it never uses any strategy to guess which side to keep
+  person to look at, and it never uses any strategy to guess which side to keep. The memory branch goes by name to its own
+  remote (never `remote.pushDefault`: notes are private; in a project's `.agent-memory` only to the platform's memory repo,
+  by its URL), and its conflicting merge is undone
+- `bin/memory_health.py`: how each project's last memory syncs went (`.state/memory-sync.json`); a project whose notes don't
+  reach the hub is told at its next session start, and the hourly sync alerts one that keeps failing. `bin/memory-pull.sh` is
+  the session-start pull
 - `bin/git-sync-memory.sh`: for the session-end / pre-compaction hooks; commits **only** `memory/` and `STATE.md` and
-  never touches the project's real code. This hook must never be changed to `git add -A` in any project (it would
+  never touches the project's real code. Whatever runs git in an `.agent-memory` asks first that it is its own checkout of
+  the memory branch (`memory_checkout` in `bin/hubpaths.sh`, `memory_paths.is_checkout`): in a plain folder git works on
+  the project's repo. This hook must never be changed to `git add -A` in any project (it would
   commit the user's real work that is not ready yet along with it)
 - `bin/with-lock.sh`: keeps several sessions from colliding on the same git repo
 - `bin/gen-index-roster.sh`: mechanically regenerates the project roster block of `index.md` (between
@@ -413,8 +420,9 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   project's worktrees, two branches changing the same file, and the number of commits made directly on main without
   the gate (information only). `bin/prune-worktrees [--yes]` cleans up merged, clean worktrees (with their branches,
   **run by a person**). Separately, the platform job `brunna/prune-worktrees` (nightly at 04:30, `--auto`)
-  automatically cleans up orphan worktrees that **no session has open** (with a session open it never touches them,
-  even when idle): idle ≥ 2 days, it deletes only dependencies that can be rebuilt (the folder stays, and session start
+  automatically cleans up orphan worktrees in the coding agents' own worktree folders that **no session has open** (with a
+  session open it never touches them, even when idle; worktrees the user made elsewhere it never touches, and one holding a settings file a session's start wrote it keeps for a
+  person's `prune-worktrees`): idle ≥ 2 days, it deletes only dependencies that can be rebuilt (the folder stays, and session start
   reminds to rebuild); only at ≥ 14 days does it remove the worktree (the branch stays); rules in the `bin/worktrees.py`
   header
 - **config pipeline** (`docs/design/new-user.md` 3.7): config = `brunna.json`, the registry, `mirror-list.txt`,

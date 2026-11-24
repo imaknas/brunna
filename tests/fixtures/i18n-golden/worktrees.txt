@@ -1,10 +1,41 @@
 === prune yes=False
 可以刪:proj feat-a(<TMP>/a,1.5 天沒動)
 留著(還沒合併):proj feat-b
+留著:proj feat-c(<TMP>/c):有還沒 commit 的改動,或 git 判斷不了
+留著:proj feat-gone(<TMP>/gone):它的資料夾不在
+留著:proj feat-hid(<TMP>/hid):git 被設定成不看 a.txt, b.txt,裡面的修改看不到
+留著:proj feat-busy(<TMP>/busy):有程式正在裡面工作:editor(7)
+留著:proj feat-seen(<TMP>/seen):有程式正在裡面工作
+留著:proj feat-env(<TMP>/secret):有 ignore 的檔案不在可重建清單:.env, build, dist…
+留著:proj feat-unlisted(<TMP>/unlisted):列不出它被忽略的檔案
+可以刪:proj feat-broken(<TMP>/broken,? 天沒動)
+shut:讀不到它的 worktree(shut: the sandbox refused);一個都沒動
 (只列出來;確定沒有 session 還開在裡面,再加 --yes 真的刪)
 === prune yes=True
 刪:proj feat-a(<TMP>/a,1.5 天沒動)
 留著(還沒合併):proj feat-b
+留著:proj feat-c(<TMP>/c):有還沒 commit 的改動,或 git 判斷不了
+留著:proj feat-gone(<TMP>/gone):它的資料夾不在
+留著:proj feat-hid(<TMP>/hid):git 被設定成不看 a.txt, b.txt,裡面的修改看不到
+留著:proj feat-busy(<TMP>/busy):有程式正在裡面工作:editor(7)
+留著:proj feat-seen(<TMP>/seen):有程式正在裡面工作
+留著:proj feat-env(<TMP>/secret):有 ignore 的檔案不在可重建清單:.env, build, dist…
+留著:proj feat-unlisted(<TMP>/unlisted):列不出它被忽略的檔案
+刪:proj feat-broken(<TMP>/broken,? 天沒動)
+proj feat-broken:git worktree remove 失敗:fatal: cannot remove
+shut:讀不到它的 worktree(shut: the sandbox refused);一個都沒動
+=== prune, who is working where not known
+留著:proj feat-a(<TMP>/a):查不到有沒有程式正在裡面工作
+留著(還沒合併):proj feat-b
+留著:proj feat-c(<TMP>/c):有還沒 commit 的改動,或 git 判斷不了
+留著:proj feat-gone(<TMP>/gone):它的資料夾不在
+留著:proj feat-hid(<TMP>/hid):git 被設定成不看 a.txt, b.txt,裡面的修改看不到
+留著:proj feat-busy(<TMP>/busy):查不到有沒有程式正在裡面工作
+留著:proj feat-seen(<TMP>/seen):查不到有沒有程式正在裡面工作
+留著:proj feat-env(<TMP>/secret):查不到有沒有程式正在裡面工作
+留著:proj feat-unlisted(<TMP>/unlisted):查不到有沒有程式正在裡面工作
+留著:proj feat-broken(<TMP>/broken):查不到有沒有程式正在裡面工作
+shut:讀不到它的 worktree(shut: the sandbox refused);一個都沒動
 === auto dry_run=True: deps
 proj idle .venv(閒置 3.0 天,12.5 MB)
 === auto dry_run=True: removed
@@ -19,15 +50,21 @@ proj old-ok(閒置 20.0 天,12.5 MB;branch 留著)
 === auto dry_run=False: skipped
 proj old-env:有 ignore 的檔案不在可重建清單(.env, build, dist…),留著
 proj old-fail:git worktree remove 失敗:fatal: cannot remove
+=== auto, who is working where not known
+notes: 查不到哪些程式在哪些資料夾裡工作;一個都沒動
+=== auto, no runtime with worktree folders
+notes: 裝好的 coding agent 都不把 worktree 放在專案裡,所以不會自動清理(`bin/prune-worktrees` 會列出來)
 === marker
 .venv → 重建:uv sync
 === prune-worktrees --auto (dry_run=True)
 會刪依賴:d1 .venv
 會移除 worktree:r1
 跳過:s1
+注意:n1
 共會釋放 7.5 MB(dry-run,沒有動任何東西)
 === prune-worktrees --auto (dry_run=False)
 已刪依賴:d1 .venv
 已移除 worktree:r1
 跳過:s1
+注意:n1
 共已釋放 7.5 MB

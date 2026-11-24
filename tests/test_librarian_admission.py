@@ -162,6 +162,162 @@ class Admission(unittest.TestCase):
         return self.lib._("{project}: admission undid the model's only edit (anchors that do not resolve)",
                           project="demo")
 
+    # --- somebody's merge, begun while the run goes on -------------------------------------------------------------
+    def begin(self):
+        """a person's revert (or a merge: it is told by its files): STATE.md as they left it, another file staged"""
+        (self.d / ".git" / "REVERT_HEAD").write_text(self.head() + "\n")
+        (self.d / "STATE.md").write_text("a person's\n")
+        (self.d / "theirs.md").write_text("half done\n")
+        self.git(self.d, "add", "theirs.md")
+
+    def untouched(self, head, digest=()):
+        self.assertEqual((self.d / "STATE.md").read_text(), "a person's\n")
+        self.assertEqual(self.git(self.d, "status", "--porcelain"), " M STATE.md\nA  theirs.md\n")
+        self.assertTrue((self.d / ".git" / "REVERT_HEAD").exists())
+        self.assertFalse((self.d / ".git" / "agent-hub-op.lock").exists())
+        self.assertEqual(self.head(), head)
+        self.assertEqual(self.pushed(), 0)
+        self.assertNotEqual((self.state / "demo.sha").read_text().strip(), head, "tried again the next night")
+        self.assertIn("under way", self.log())
+        self.assertEqual(list(digest), [])
+        self.assertEqual(self.review_log(), "")
+
+    def blocked_at(self, where):
+        """the person begins right before this step of process()"""
+        real = getattr(self.lib, where)
+
+        def step(*a, **k):
+            if not (self.d / ".git" / "REVERT_HEAD").exists():
+                self.begin()
+            return real(*a, **k)
+        return mock.patch.object(self.lib, where, step)
+
+    def test_nothing_is_written_over_a_merge_begun_before_any_step(self):
+        for where, text, hook in (("quarantine_stray", GOOD_AND_BAD, False), ("admit_anchors", ONLY_BAD, False),
+                                  ("commit_state", GOOD_AND_BAD, False)):
+            with self.subTest(where):
+                self.setUp()
+                with self.blocked_at(where):
+                    digest = self.process(text, hook=hook)
+                self.untouched(self.head(), digest)
+                self.assertEqual(self.subjects(), ["new note", "init"])
+
+    def test_the_admission_commit_is_not_made_over_one_either(self):
+        with mock.patch.object(self.lib, "admit_anchors", lambda *a: self.begin() or ["x"]):
+            digest = self.process(GOOD_AND_BAD, hook=True)
+        self.untouched(self.head(), digest)
+        self.assertEqual(self.subjects(), [HOOK_SUBJECT, "new note", "init"])
+
+    def test_a_failed_call_restores_nothing_over_one(self):
+        def llm(*a, **k):
+            self.begin()
+            return 1, None, ""
+        with mock.patch.object(self.lib, "llm", llm):
+            self.lib.process("demo", self.d, [], [])
+        self.untouched(self.head())
+
+    def test_no_model_is_started_in_one(self):
+        """one begun between the pull and the call"""
+        self.begin_after_pull()
+        with mock.patch.object(self.lib, "llm", side_effect=AssertionError("started")):
+            self.lib.process("demo", self.d, [], [])
+        self.untouched(self.head())
+
+    def begin_after_pull(self):
+        real = self.lib.stale_anchors
+
+        def then(*a):
+            self.begin()
+            return real(*a)
+        p = mock.patch.object(self.lib, "stale_anchors", then)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def test_the_completion_versions_write_nothing_over_one(self):
+        self.begin_after_pull()
+        answer = {"structured_output": {"state_updated": True, "edits": []}}
+        with mock.patch.dict(self.lib.COMPLETION, {"state": True}), \
+                mock.patch.object(self.lib, "_edits_call", lambda *a, **k: (0, answer, "x", "the model's\n")):
+            self.lib.process("demo", self.d, [], [])
+        self.untouched(self.head())
+        with mock.patch.object(self.lib, "_edits_call", lambda *a, **k: (0, answer, "x", "the model's\n")), \
+                self.assertRaises(self.lib.memory_paths.Blocked):
+            self.lib.todo_by_edits("demo", self.d, "problems")
+        self.assertEqual((self.d / "STATE.md").read_text(), "a person's\n")
+
+    def test_a_merge_from_before_is_left_and_said_by_the_pull(self):
+        self.begin()
+        self.lib.process("demo", self.d, [], [])
+        self.assertEqual((self.d / "STATE.md").read_text(), "a person's\n")
+        self.assertIn("git pull failed, skip", self.log())
+
+    def test_a_lock_that_cannot_be_had_leaves_the_project_and_names_it(self):
+        (self.d / ".git" / "agent-hub-op.lock").mkdir()
+        with mock.patch.object(self.lib.memory_paths, "LOCK_WAIT_S", 0):
+            self.lib.process("demo", self.d, [], [])
+        self.assertIn(f"rmdir '{(self.d / '.git').resolve() / 'agent-hub-op.lock'}'", self.log())
+        self.assertNotIn("changed memory files", self.log())
+
+    def test_the_owner_is_told_once_for_a_project_and_when_it_is_over(self):
+        told = []
+        alert = __import__("alert")
+        with mock.patch.object(alert, "once", lambda key, p, ok, ids=None: told.append((key, bool(p), ids)) or True), \
+                mock.patch.object(alert, "open_keys", lambda prefix: [k for k, p, _i in told[-1:] if p]), \
+                mock.patch.object(self.lib.memory_paths, "LOCK_WAIT_S", 0):
+            (self.d / ".git" / "agent-hub-op.lock").mkdir()
+            for _i in range(2):
+                self.lib.process("demo", self.d, [], [])
+            (self.d / ".git" / "agent-hub-op.lock").rmdir()
+            for _i in range(2):
+                with mock.patch.object(self.lib, "llm", self.model(BEFORE, False)):
+                    self.lib.process("demo", self.d, [], [])
+        self.assertEqual(told, [("memory-copy-blocked:demo", True, ["blocked"])] * 2 + [("memory-copy-blocked:demo", False, [])])
+
+    def test_what_could_not_be_committed_is_left_for_the_next_night(self):
+        real = self.lib.quarantine_stray
+
+        def index_held(*a):
+            got = real(*a)
+            (self.d / ".git" / "index.lock").write_text("")
+            return got
+        with mock.patch.object(self.lib, "quarantine_stray", index_held):
+            digest = self.process(GOOD_AND_BAD, hook=False)
+        self.assertEqual(self.subjects(), ["new note", "init"])
+        self.assertNotEqual((self.state / "demo.sha").read_text().strip(), self.head())
+        self.assertIn("could not be committed", self.log())
+        self.assertEqual((digest, self.review_log(), self.pushed()), ([], "", 0))
+
+    def test_only_state_md_is_committed_and_no_hook_runs(self):
+        hooks = self.tmp / "hooks"
+        hooks.mkdir()
+        ran = self.tmp / "ran"
+        for h in ("pre-commit", "commit-msg", "post-commit", "post-checkout"):
+            (hooks / h).write_text(f"#!/bin/sh\necho {h} >>'{ran}'\n")
+            (hooks / h).chmod(0o755)
+        real = self.lib.quarantine_stray
+
+        def staged_elsewhere(*a):
+            got = real(*a)
+            (self.d / "memory" / "other.md").write_text("somebody's\n")
+            self.git(self.d, "add", "memory/other.md")
+            self.git(self.d, "config", "core.hooksPath", str(hooks))
+            return got
+        with mock.patch.object(self.lib, "quarantine_stray", staged_elsewhere):
+            self.process(GOOD_AND_BAD, hook=False)
+        self.assertEqual(self.git(self.d, "show", "--format=%s", "--name-only", "HEAD").split("\n"),
+                         ["librarian: update STATE.md", "", "STATE.md", ""])
+        self.assertEqual(self.git(self.d, "status", "--porcelain"), "A  memory/other.md\n")
+        self.assertFalse(ran.exists(), ran.read_text() if ran.exists() else "")
+        self.assertEqual(self.pushed(), 1)
+
+    def test_one_project_left_does_not_stop_the_run(self):
+        done = []
+        with mock.patch.object(self.lib, "_process", lambda proj, *a: done.append(proj) or (_ for _ in ()).throw(
+                self.lib.memory_paths.Blocked("under way")) if proj == "a" else done.append(proj)):
+            for proj in ("a", "b"):
+                self.lib.process(proj, self.d, [], [])
+        self.assertEqual(done, ["a", "b"])
+
     def test_hook_committed_mixed_edit_gets_admission_on_top(self):
         digest = self.process(GOOD_AND_BAD, hook=True)
         admitted = GOOD_AND_BAD.replace("⚓`core/settings.py`", "`core/settings.py`")

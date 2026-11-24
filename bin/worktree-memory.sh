@@ -106,15 +106,17 @@ case "$event" in
       fi
       # whether linked here or written above: never a file to commit
       if [ -e "$f" ] || [ -L "$f" ]; then
-        grep -qxF "$f" "$common/info/exclude" 2>/dev/null || echo "$f" >>"$common/info/exclude"
+        grep -qxF "$f" "$common/info/exclude" 2>/dev/null || exclude_add "$common/info/exclude" "$f"
       fi
     done
     # the .agent-memory/ rule only matches a directory; the symlink needs its own exclude (info/exclude is shared by
     # all worktrees)
-    grep -qxF ".agent-memory" "$common/info/exclude" 2>/dev/null || echo ".agent-memory" >>"$common/info/exclude"
+    grep -qxF ".agent-memory" "$common/info/exclude" 2>/dev/null || exclude_add "$common/info/exclude" ".agent-memory"
     # the main checkout's, by name: what sits here could have been changed since it was looked at, and this folder may be out
-    # where others can write
-    (cd "$main/.agent-memory" && "$HUB/bin/with-lock.sh" git pull -q) >/dev/null 2>&1
+    # where others can write. Only a memory checkout (a plain folder's git is the user's repo's, and the pull moved its
+    # main)
+    (memory_checkout "$main/.agent-memory" && cd "$main/.agent-memory" \
+      && "$HUB/bin/with-lock.sh" "$HUB/bin/memory-pull.sh") >/dev/null 2>&1
     instr=$("$HUB/bin/py" "$HUB/bin/hub-runtime" --runtime claude instructions-file "$PWD" 2>/dev/null)
     if [ -n "$linked" ] && [ -n "$instr" ] && [ -f "$instr" ]; then
       hub_say "(this session is in a git worktree of {main}. Memory is linked to the main checkout's .agent-memory;
@@ -131,7 +133,9 @@ case "$event" in
     fi
     ;;
   end)
-    [ -e "$main/.agent-memory" ] && cd "$main/.agent-memory" && "$HUB/bin/with-lock.sh" "$HUB/bin/git-sync-memory.sh"
+    # (a plain folder is checked again by the sync, but with-lock runs git before it). How it went is recorded for the
+    # next session's start (memory_health.py)
+    [ -e "$main/.agent-memory/.git" ] && "$HUB/bin/py" "$HUB/bin/memory_health.py" sync "$main/.agent-memory"
     ;;
 esac
 exit 0

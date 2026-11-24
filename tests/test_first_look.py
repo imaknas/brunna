@@ -81,6 +81,15 @@ class FirstLook(unittest.TestCase):
         self.assertEqual(rc, 1)
         self.assertEqual(self.state(), PLACEHOLDER)
 
+    def test_a_merge_under_way_there_is_not_written_over(self):
+        gd = self.ws / ".agent-memory" / ".git"
+        gd.mkdir()
+        (gd / "MERGE_HEAD").write_text("x\n")
+        rc, out, calls = self.run_main({"state": "# STATE\n\n## Tasks\n\n- (none)\n", "summary": "x"})
+        self.assertEqual(rc, 1, out)
+        self.assertEqual(self.state(), PLACEHOLDER)
+        self.assertFalse(any("git-sync-memory.sh" in " ".join(map(str, c)) for c in calls))
+
     def test_no_model_writes_nothing(self):
         rc, out, calls = self.run_main(ready=False)
         self.assertEqual(rc, 0)

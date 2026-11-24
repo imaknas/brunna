@@ -37,6 +37,7 @@ sys.path.insert(0, str(BIN))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import isolation  # noqa: E402
+import memory_paths  # noqa: E402
 import project_git  # noqa: E402
 
 _ = i18n.domain(__file__)
@@ -157,7 +158,9 @@ def run(project: str, ws: pathlib.Path, point: str, prompt: str, allow: list[str
                 if prefix == "" and rel.startswith(".agent-memory/"):
                     continue
                 hidden = any(part.startswith(".") for part in rel.removeprefix(".agent-memory/").split("/"))
-                if not ok or hidden or not any(fnmatch.fnmatch(rel, g) for g in allow):
+                # a merge somebody is in the middle of there isn't written over
+                begun = bool(prefix) and memory_paths.begun(mem)
+                if not ok or hidden or begun or not any(fnmatch.fnmatch(rel, g) for g in allow):
                     refused.append(rel)
                     continue
                 take.append(path)

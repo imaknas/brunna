@@ -118,6 +118,16 @@ class ProposeApply(unittest.TestCase):
         return subprocess.run([sys.executable, str(BIN / script), *args], input=stdin, env=self.env, cwd=self.tmp,
                               capture_output=True, text=True, timeout=300)
 
+    def test_a_merge_under_way_in_the_notes_is_not_written_over(self):
+        (self.ws / ".agent-memory" / ".git" / "REVERT_HEAD").write_text(sh("git", "rev-parse", "HEAD", cwd=self.ws / ".agent-memory") + "\n")
+        r = self.run_("hubbus", "send", "--from", "agent-hub", "--to", "demo", "--type", "question", "--text", "which cache should we use?")
+        mid = r.stdout.strip().split()[-1]
+        r = self.run_("propose_apply.py", "mailbox", "demo", mid)
+        out = json.loads(r.stdout.strip().splitlines()[-1])
+        self.assertEqual(out["applied"], [], out)
+        self.assertTrue([p for p in out["refused"] if p.startswith(".agent-memory/memory/")], out)
+        self.assertEqual(sorted(p.name for p in (self.ws / ".agent-memory" / "memory").iterdir()), ["README.md"])
+
     def test_any_cli_agent_handles_a_letter(self):
         r = self.run_("hubbus", "send", "--from", "agent-hub", "--to", "demo", "--type", "question", "--text", "which cache should we use?")
         self.assertEqual(r.returncode, 0, r.stderr)

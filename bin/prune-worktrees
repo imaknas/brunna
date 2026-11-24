@@ -2,12 +2,16 @@
 """Clean up worktrees that are already merged into main and clean.
 
   prune-worktrees [--project P]          only list what can be deleted (for people)
-  prune-worktrees [--project P] --yes    really delete, branch included (a person has checked no session is open in it)
-  prune-worktrees --auto [--dry-run]     the nightly automatic cleanup (platform job brunna/prune-worktrees):
+  prune-worktrees [--project P] --yes    really delete, branch included (a person has checked no session is open in it).
+                                         Kept, with the reason printed: one with uncommitted changes, files git is told
+                                         not to look at, ignored files that can't be rebuilt or a process in it
+  prune-worktrees --auto [--dry-run]     the nightly automatic cleanup (platform job brunna/prune-worktrees), only in the
+                                         coding agents' own worktree folders:
                                          idle ≥ 2 days: only delete dependencies that can be rebuilt (.venv etc.,
                                          the folder stays);
                                          idle ≥ 14 days, no process inside, and every ignored file can be rebuilt:
-                                         only then remove the worktree (the branch stays). Rules and reasons in the
+                                         only then remove the worktree (the branch stays); one a session's start left
+                                         its settings file in is kept (--yes looks into it). Rules and reasons in the
                                          header of bin/worktrees.py
 """
 import pathlib
@@ -30,6 +34,8 @@ if "--auto" in args:
         print(_("Would remove worktree: {line}", line=line) if dry else _("Removed worktree: {line}", line=line))
     for line in res["skipped"]:
         print(_("Skipped: {line}", line=line))
+    for line in res.get("notes") or []:
+        print(_("Note: {line}", line=line))
     left = hubconf.prune_private_tmp(dry_run=dry)
     for line in left["removed"]:
         print(_("Would remove a run's leftovers: {line}", line=line) if dry else _("Removed a run's leftovers: {line}", line=line))
@@ -41,6 +47,6 @@ if "--auto" in args:
         print(_("The private temp folder could not be read, nothing pruned there: {why}", why=left["unreadable"]))
     print(_("Would free {mb} MB in total (dry-run, nothing was touched)", mb=res['freed_mb']) if dry
           else _("Freed {mb} MB in total", mb=res['freed_mb']))
-    sys.exit(0)
+    sys.exit(1 if res.get("in_use_unknown") else 0)   # nothing could be cleaned up: the job failed, and alerts as any other
 proj = args[args.index("--project") + 1] if "--project" in args else None
 sys.exit(worktrees.prune(proj, "--yes" in args))

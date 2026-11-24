@@ -78,8 +78,10 @@ PY
   # so reading the local file directly could give old content the librarian already pushed but this machine has not
   # pulled yet. Pull once before reading; if that fails (offline, the hub machine not reachable yet), carry on as if
   # nothing happened rather than fail the whole script.
-  if [ -d "$state_dir" ]; then
-    git -C "$state_dir" pull -q 2>/dev/null || true
+  # Only a memory checkout: in a plain folder the pull would move the project's own branch.
+  # Nothing is moved under a merge or the like somebody is in the middle of there.
+  if memory_checkout "$state_dir"; then
+    (cd "$state_dir" && ! memory_under_way && memory_ff) >/dev/null 2>&1 || true
   fi
   if [ -f "$state_file" ]; then
     cat "$state_file"

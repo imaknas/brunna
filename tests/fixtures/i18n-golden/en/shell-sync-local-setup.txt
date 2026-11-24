@@ -50,7 +50,7 @@ $ sync-local-setup.sh <TMP>/ws/old
 sync-local-setup: the memory remote is now called memory (it was mini)
 sync-local-setup: CLAUDE.local.md aligned
 sync-local-setup: hooks aligned
-sync-local-setup: ⚠️ AGENT.md updated, but the commit/push failed; the next session start tries again
+sync-local-setup: .agent-memory is not a checkout of agent-memory; AGENT.md left as it is
 sync-local-setup: .agent-memory/ added to .git/info/exclude
 sync-local-setup: CLAUDE.local.md added to .git/info/exclude
 sync-local-setup: .claude/settings.local.json added to .git/info/exclude

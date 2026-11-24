@@ -278,6 +278,7 @@ class Librarian(RepoCase):
         lib = load("librarian_admit_t", "librarian.py")
         d = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        subprocess.run(["git", "init", "-q", str(d)], check=True, capture_output=True)   # a copy: written under its lock
         before = "- Old ⚓`nowhere/old.py` stays (it is the stale note's business).\n"
         (d / "STATE.md").write_text(before + "- Job ⚓`src/job.py#run_job`, parser ⚓`src/feature.py`,\n"
                                     "  core ⚓`core/job.py`, cache ⚓`data/`, bad ⚓`src/job.py:3`.\n\n"

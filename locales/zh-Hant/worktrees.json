@@ -10,5 +10,16 @@
  "{label} {dep} (idle {days} {days:day|days}, {mb} MB)": "{label} {dep}(閒置 {days} 天,{mb} MB)",
  "{label}: its ignored files could not be listed; kept": "{label}:列不出它被忽略的檔案;保留",
  "{label}: removing {dep} failed: {err}": "{label}:刪除 {dep} 失敗:{err}",
- "{project}: its worktrees could not be read ({why}); none touched": "{project}:讀不到它的 worktree({why});一個都沒動"
+ "{project}: its worktrees could not be read ({why}); none touched": "{project}:讀不到它的 worktree({why});一個都沒動",
+ "its folder is not there": "它的資料夾不在",
+ "git is told not to look at {files}, so edits in them can't be seen": "git 被設定成不看 {files},裡面的修改看不到",
+ "it has changes that are not committed, or git can't tell": "有還沒 commit 的改動,或 git 判斷不了",
+ "whether a process is working in it could not be found out": "查不到有沒有程式正在裡面工作",
+ "a process is working in it: {users}": "有程式正在裡面工作:{users}",
+ "a process is working in it": "有程式正在裡面工作",
+ "its ignored files could not be listed": "列不出它被忽略的檔案",
+ "ignored files not on the rebuildable list: {files}": "有 ignore 的檔案不在可重建清單:{files}",
+ "Kept: {project} {branch} ({path}): {why}": "留著:{project} {branch}({path}):{why}",
+ "who is working in which folder could not be found out; none was touched": "查不到哪些程式在哪些資料夾裡工作;一個都沒動",
+ "no installed coding agent keeps its worktrees in the projects, so none is cleaned up by itself (`bin/prune-worktrees` lists them)": "裝好的 coding agent 都不把 worktree 放在專案裡,所以不會自動清理(`bin/prune-worktrees` 會列出來)"
 }

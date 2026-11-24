@@ -65,9 +65,36 @@ def harden_copy(repo: pathlib.Path) -> None:
 
 
 def pull_copy(repo: pathlib.Path, **kw) -> subprocess.CompletedProcess:
-    """git pull in a memory copy, hardened first (kw: subprocess.run's, e.g. where the output goes)."""
-    harden_copy(pathlib.Path(repo))
-    return subprocess.run(["git", *NO_SYMLINKS, "pull", "-q"], cwd=repo, **kw)
+    """git pull in a memory copy, hardened first (kw: subprocess.run's, e.g. where the output goes). One with a commit that
+    never went out (a failed push) is merged, whatever pull.rebase says; this merge, when it conflicts, is undone, so the copy
+    isn't left half merged. A conflict and a merge somebody else left there are told (alert)."""
+    import memory_paths
+    repo = pathlib.Path(repo)
+
+    def git(*args):
+        return subprocess.run(["git", *NO_SYMLINKS, *memory_paths.GIT, *args], cwd=repo, **kw)
+    blocked = memory_paths.under_way(repo)
+    if not blocked:
+        harden_copy(repo)
+    r = git("fetch", "-q")
+    if r.returncode == 0 and not blocked:
+        theirs = subprocess.run(["git", "-C", str(repo), "rev-parse", "-q", "--verify", "@{u}^{commit}"], capture_output=True,
+                                text=True).stdout.strip()
+        r = git("merge", "-q", "--no-edit", theirs or "@{u}")
+        blocked = r.returncode != 0 and (memory_paths.undo_conflict(repo, theirs, r.returncode) is not None
+                                         or memory_paths.under_way(repo))
+    elif blocked:
+        r = subprocess.CompletedProcess(r.args, 1, r.stdout, r.stderr)
+    try:
+        import alert
+        key = f"memory-copy-merge:{repo.name}"
+        if blocked or (r.returncode == 0 and key in alert.open_keys(key)):
+            alert.once(key, [_("{project}: the librarian's copy of its notes conflicts with the memory repo, so they are not "
+                               "tidied up: merge them in {path}", project=repo.name, path=repo)] if blocked else [],
+                       _("{project}: the librarian's copy of its notes is up to date again", project=repo.name))
+    except Exception:   # a broken alert doesn't change the pull
+        pass
+    return r
 
 
 def legacy_paths(name: str | None = None) -> dict[str, list[str]] | list[str]:
