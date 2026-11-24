@@ -302,7 +302,9 @@ class PrivateTmpPrune(unittest.TestCase):
         self.addCleanup(self.d.chmod, 0o700)
         got = hubconf.prune_private_tmp()
         self.assertTrue(got["unreadable"])
-        env = {**os.environ, "AGENT_HUB_SECRETS": str(self.tmp), "AGENT_HUB_ROOT": str(ROOT), "AGENT_HUB_LANG_UI": "en", "HOME": str(self.tmp), "AGENT_HUB_CONFIG": str(self.tmp / "none"),
+        hub = self.tmp / "hub"   # a repo of its own: in this checkout it would go through every worktree the machine has
+        subprocess.run(["git", "init", "-q", "-b", "main", str(hub)], check=True, timeout=30)
+        env = {**os.environ, "AGENT_HUB_SECRETS": str(self.tmp), "AGENT_HUB_ROOT": str(hub), "AGENT_HUB_LANG_UI": "en", "HOME": str(self.tmp), "AGENT_HUB_CONFIG": str(self.tmp / "none"),
                "AGENT_HUB_DATA": str(self.tmp / "none"), "AGENT_HUB_STATE": str(self.tmp / "state")}
         r = subprocess.run([sys.executable, str(BIN / "prune-worktrees"), "--auto", "--dry-run"], capture_output=True, text=True, timeout=60, env=env)
         self.assertEqual(r.returncode, 0, r.stderr)
