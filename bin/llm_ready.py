@@ -4,6 +4,8 @@ the reason, instead of failing on every item it would have handled).
 
   llm_ready.unsupported(point) -> str | None    None: it can be called (a call may still fail: no login, no key, a
                                                 network error; those are real failures). Otherwise the reason it is off
+  llm_ready.librarian() -> str | None            the same for the nightly tidy-up (either of its versions will do)
+  llm_ready.job(name) -> str | None              the same for a scheduled job that does nothing without a model
 
 What counts as "can be called" follows bin/llm.py's dispatch: a `shape: completion` point needs {settings}'s llm section
 (providers) or a runtime with the completion interface; any other point needs a runtime with agent runs ({settings}
@@ -30,6 +32,21 @@ def declaration(point: str) -> dict:
         return (yaml.safe_load((hubconf.ROOT / "contracts" / "llm-points.yaml").read_text())["points"] or {}).get(point) or {}
     except (OSError, KeyError, TypeError, ValueError, ImportError):
         return {}
+
+
+def librarian() -> str | None:
+    """Why the nightly tidy-up (digest, STATE.md, to-dos) can't run here, or None. {settings} librarian.completion.state
+    picks its version (librarian.PARTS); unset, whichever one this machine can run."""
+    agent, completion = "librarian-state", "librarian-state-edits"
+    on = ((hubconf.get("librarian") or {}).get("completion") or {}).get("state")
+    if isinstance(on, bool):
+        return unsupported(completion if on else agent)
+    return None if unsupported(agent) is None else unsupported(completion)
+
+
+def job(name: str) -> str | None:
+    return {f"{hubconf.hub_project()}/librarian": librarian,
+            "consolidate/consolidate-memory": lambda: unsupported("consolidate")}.get(name, lambda: None)()
 
 
 def unsupported(point: str) -> str | None:

@@ -63,6 +63,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
 import hublib  # noqa: E402
 import i18n  # noqa: E402
+import job_off  # noqa: E402
 import memlock  # noqa: E402
 import todo_tokens  # noqa: E402
 
@@ -620,8 +621,11 @@ def main() -> int:
     import llm_ready
     if (off := llm_ready.unsupported("consolidate")):
         # no model to call (e.g. no coding agent): the feature is off, said once; the date files stay as they are
-        log(_("consolidation is off: {reason}. The date files stay as they are until a model is set up", reason=off))
+        why = _("consolidation is off: {reason}. The date files stay as they are until a model is set up", reason=off)
+        log(why)
+        job_off.off(why)
         return 0
+    job_off.clear()
     import llm
     model = llm.model_for("consolidate")   # computed only there, platform-wide (hub.json llm.points can override)
     due = [s for s in cands if not s.get("skip")]

@@ -344,6 +344,7 @@ exit 0
 
 === no coding agent
 exit 0
+consolidation is off: runtime none has no agent runs (brunna.json runtime.default; to use this feature, install a coding agent that supports it). The date files stay as they are until a model is set up
 
 === log file
 [<T>] === consolidate start (dry-run, 1 due, at most 3 this time) ===

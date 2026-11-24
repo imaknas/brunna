@@ -25,6 +25,7 @@ import subprocess
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
 import names  # noqa: E402
+import job_off  # noqa: E402
 import i18n  # noqa: E402
 
 _ = i18n.domain(__file__)
@@ -459,6 +460,16 @@ def store_alerts() -> list[tuple[str, str]]:
     return out
 
 
+def tidy_up_off() -> str | None:
+    """Why the nightly tidy-up has no model to run on (llm_ready.librarian), or None. What can't be told is not said here:
+    doctor and the job itself say it."""
+    try:
+        import llm_ready
+        return llm_ready.librarian()
+    except Exception:
+        return None
+
+
 def main() -> None:
     import hubconf  # imported further down too: put first so the whole function sees it
     now = datetime.datetime.now()
@@ -469,6 +480,7 @@ def main() -> None:
     alive = scheduler_alive()
 
     alerts, rows, report_blocks = [], [], []
+    tidy_off = tidy_up_off()
     sm = hubconf.service_manager()
     # scheduler.py writes its log only when a job runs, but saves its state file on every tick -- use that file's
     # mtime to tell whether the scheduler is still running (going by the log raises false alarms in night hours with
@@ -509,6 +521,11 @@ def main() -> None:
                                 "notifications in {settings} alerts): it cannot alert when the scheduler stops")))
 
     alerts += store_alerts()
+    # nothing for the nightly tidy-up to run on: what brunna is for doesn't happen, though every job runs. Off is not red,
+    # but never "Healthy" either. A reason an alert above already gave (no checked copy) is not said twice
+    if tidy_off and not any(tidy_off in text for _level, text in alerts):
+        alerts.append(("notify", _("The nightly tidy-up is off, so there is no digest, and STATE.md and todo.md are not "
+                                   "updated: {reason}. brunna doctor says what to do", reason=tidy_off)))
 
     # no alert channel at all: one setup reminder, not red (a feature that is off does not turn the page red)
     if not hubconf.get("alerts"):
@@ -601,11 +618,15 @@ def main() -> None:
             # a success on the next tick cancels it; remind only when the last run failed
             alerts.append(("bad", _("{name} failed on its last run (exit {code}); log: .logs/{log}-<date>.log", name=name,
                                     code=run.get("code", "?"), log=name.replace('/', '__'))))
+        off = None if result.startswith("failed") or result == "running" else job_off.last(name)
+        if off:
+            result, last = "off", off.get("at", "")[5:16].replace("T", " ")
+            detail = "; ".join(x for x in [detail, off["reason"]] if x)
         if "trigger" in job:
             detail = "; ".join(x for x in [detail, *event_detail(job, state, now, alerts)] if x)
-        cls = {"ok": "ok", "running": "run", "found": "warn"}.get(result, "bad" if result.startswith("failed") else "")
+        cls = {"ok": "ok", "running": "run", "found": "warn", "off": "warn"}.get(result, "bad" if result.startswith("failed") else "")
         label = {"ok": _("succeeded"), "running": _("running"), "failed": _("failed"),
-                 "found": _("problems found")}.get(result.split(" ")[0], result or "—")
+                 "found": _("problems found"), "off": _("off")}.get(result.split(" ")[0], result or "—")
         dot = f"<i class='dot c{hue(name.split('/')[0])}'></i>" if "/" in name else "<i class='dot none'></i>"
         rows.append(
             f"<tr class='job{' off' if not job.get('enabled', True) else ''}'>"
@@ -753,7 +774,8 @@ def main() -> None:
 
     def tile(n, label: str, cls: str = "") -> str:
         return f"<div class='tile {cls}'><b>{esc(str(n))}</b><span>{esc(label)}</span></div>"
-    pill = (f"<span class='pill ok'><i class=dot></i>{_('Healthy')}</span>" if not problems else
+    pill = (f"<span class='pill warn'><i class=dot></i>{_('Nightly tidy-up off')}</span>" if tidy_off and not problems else
+            f"<span class='pill ok'><i class=dot></i>{_('Healthy')}</span>" if not problems else
             f"<span class='pill bad'><i class=dot></i>{esc(_('{n} {n:problem|problems}', n=len(problems)))}</span>")
     tiles = (tile(len(needs), _("need you"), "hot" if needs else "")
              + tile(letters, _("letter open") if letters == 1 else _("letters open"))
@@ -846,6 +868,7 @@ h1{font-size:21px;line-height:1.2;margin:0;font-weight:650}
 background:var(--surface);border:1px solid var(--line);font-size:13px;color:var(--mut);white-space:nowrap}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;flex:none;background:var(--dim)}
 .pill.ok .dot,.dot.good{background:var(--ok)} .pill.bad .dot{background:var(--bad)} .pill.bad{color:var(--bad)}
+.pill.warn .dot{background:var(--warn)} .pill.warn{color:var(--warn)}
 .dot.c1{background:var(--c1)}.dot.c2{background:var(--c2)}.dot.c3{background:var(--c3)}
 .dot.c4{background:var(--c4)}.dot.c5{background:var(--c5)}.dot.c6{background:var(--c6)}.dot.none{background:transparent}
 .links{margin:10px 0 18px;color:var(--dim);font-size:13px}

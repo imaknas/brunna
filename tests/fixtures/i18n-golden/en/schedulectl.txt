@@ -18,7 +18,8 @@ Usage:
                                   in the user's desktop session: under SSH the keychain can't be read and claude is logged out.
                                   With no service manager (a container) it runs right here, in the foreground.
                                   An event job runs with no events and its cursor stays: a manual run is a test. While a
-                                  tick is running a job in the foreground it waits 30 seconds, then gives up
+                                  tick is running a job in the foreground it waits 30 seconds, then gives up. A job that is
+                                  off here (no model) is not started: it says why, exits 1 and leaves its scheduled run
   schedulectl events <name>       an event job's cursor and the events waiting for it (and the ones the loop chain holds
                                   back): why it didn't run, what its next run gets
   schedulectl skip <name>         move an event job's cursor to the bus head: the events waiting are dropped for good (a
@@ -51,7 +52,8 @@ Usage:
                                   in the user's desktop session: under SSH the keychain can't be read and claude is logged out.
                                   With no service manager (a container) it runs right here, in the foreground.
                                   An event job runs with no events and its cursor stays: a manual run is a test. While a
-                                  tick is running a job in the foreground it waits 30 seconds, then gives up
+                                  tick is running a job in the foreground it waits 30 seconds, then gives up. A job that is
+                                  off here (no model) is not started: it says why, exits 1 and leaves its scheduled run
   schedulectl events <name>       an event job's cursor and the events waiting for it (and the ones the loop chain holds
                                   back): why it didn't run, what its next run gets
   schedulectl skip <name>         move an event job's cursor to the bus head: the events waiting are dropped for good (a

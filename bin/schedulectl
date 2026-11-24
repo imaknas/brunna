@@ -17,7 +17,8 @@ Usage:
                                   in the user's desktop session: under SSH the keychain can't be read and claude is logged out.
                                   With no service manager (a container) it runs right here, in the foreground.
                                   An event job runs with no events and its cursor stays: a manual run is a test. While a
-                                  tick is running a job in the foreground it waits 30 seconds, then gives up
+                                  tick is running a job in the foreground it waits 30 seconds, then gives up. A job that is
+                                  off here (no model) is not started: it says why, exits 1 and leaves its scheduled run
   schedulectl events <name>       an event job's cursor and the events waiting for it (and the ones the loop chain holds
                                   back): why it didn't run, what its next run gets
   schedulectl skip <name>         move an event job's cursor to the bus head: the events waiting are dropped for good (a
@@ -246,6 +247,10 @@ def cmd_run(name):
     job = next((j for j in all_jobs() if j["name"] == name), None)
     if job is None:
         sys.exit(_("Neither schedule.yaml nor the project registry has '{name}'", name=name))
+    import llm_ready
+    if (off := llm_ready.job(name)):   # it would do nothing: said now, in the terminal, and the day's run is not used up
+        print(_("{name} is off here, so nothing was started: {reason}. Its scheduled run stays", name=name, reason=off))
+        return 1
     env = run_env(job)
     # recorded before it starts: if the state can't be written (a tick holds it), nothing runs twice; taken back if
     # the start fails, so the day's scheduled run isn't lost
@@ -415,7 +420,7 @@ def cmd_models():
                 where, model = f"⚠️ {e}", "?"
         else:
             model = llm.model_for(name, spec)
-            where = "hub.json llm.points" if (pins.get(name) or {}).get("model") else _("group {group}", group=group)
+            where = f"{hubconf.config_path().name} llm.points" if (pins.get(name) or {}).get("model") else _("group {group}", group=group)
         print(f"{name:24} {model or _('(tool default)'):16} {where}")
     tiered = tier_jobs()
     if tiered:

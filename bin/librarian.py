@@ -46,6 +46,7 @@ import edits  # noqa: E402
 import hubconf  # noqa: E402
 import hublib  # noqa: E402
 import i18n  # noqa: E402
+import job_off  # noqa: E402
 import llm_ready  # noqa: E402
 import memlock  # noqa: E402
 import prompts  # noqa: E402
@@ -957,12 +958,15 @@ def main() -> int:
               points=", ".join(PARTS[part][1] for part, on in COMPLETION.items() if on)))
     # no model to call (e.g. no coding agent): the feature is off, said once; the notes wait for a model, the
     # checkpoints stay where they are
-    if (off := llm_ready.unsupported(PARTS["state"][COMPLETION["state"]])):
-        log(_("the librarian is off: {reason}. STATE.md and index.md are not updated; the memory notes wait until a "
-              "model is set up (nothing is lost)", reason=off))
+    if (off := llm_ready.librarian()):
+        why = _("the librarian is off: {reason}. STATE.md and index.md are not updated; the memory notes wait until a "
+                "model is set up (nothing is lost)", reason=off)
+        log(why)
+        job_off.off(why)
         hublib.digest_append("projects", "")
         log("=== librarian run end (total cost today: $0) ===")
         return 0
+    job_off.clear()
     # quarantine only keeps evidence; cleared automatically after 14 days
     cutoff = datetime.datetime.now().timestamp() - 14 * 86400
     for q in (STATE_DIR / "stray").glob("*") if (STATE_DIR / "stray").is_dir() else []:

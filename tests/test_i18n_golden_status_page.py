@@ -119,7 +119,12 @@ class StatusPage(unittest.TestCase):
             cfg["alerts"] = o["alerts"] if isinstance(o["alerts"], dict) else {"discord": {}}
         if o.get("backup_module", True):
             cfg["modules"] = {"backup": True}
+        if o.get("runtime"):
+            cfg["runtime"] = {"default": o["runtime"]}
         (cfg_dir / "hub.json").write_text(json.dumps(cfg))
+        if o.get("off"):   # alpha/daily's last run was off (bin/job_off.py)
+            (state / "jobs-off").mkdir()
+            (state / "jobs-off" / "alpha__daily.json").write_text(json.dumps({"reason": o["off"], "at": iso(-2 * H)}))
         if o["secrets"]:
             for f in ("discord-token", "discord-alert-channel"):
                 (secrets / f).write_text("x")
@@ -202,7 +207,7 @@ class StatusPage(unittest.TestCase):
                "AGENT_HUB_SECRETS": str(secrets), "AGENT_HUB_STATE": str(state), "AGENT_HUB_HOME": "",
                "AGENT_HUB_LANG_UI": golden_lang.LANG, "HOME": str(tmp)}
         with mock.patch.dict(os.environ, env), mock.patch.dict(sys.modules):
-            for m in ("hubconf", "i18n", "completion", "runtime_store"):   # completion.USAGE and the store follow STATE
+            for m in ("hubconf", "i18n", "completion", "runtime_store", "job_off", "llm_ready"):   # completion.USAGE and the store follow STATE
                 sys.modules.pop(m, None)
             sys.modules.update(mods)
             spec = importlib.util.spec_from_file_location("gsp_golden", ROOT / "bin" / "gen-status-page.py")
@@ -244,6 +249,8 @@ class StatusPage(unittest.TestCase):
                                                                  backup_module=False)),
             ("an alert on ntfy could not be sent", quiet_options(alerts={"ntfy": {"topic": "t"}}, secrets=False, failures={
                 "secrets": {"at": iso(-H), "text": "HTTP 500"}})),
+            # no model: the jobs run and nothing is broken, yet the nightly tidy-up doesn't happen: off, never "Healthy"
+            ("newcomer with no model", quiet_options(runtime="none", off="the librarian is off")),
             # a fresh install or a restore before its first install: no platform run starts, said in red
             ("no checked copy of the coding agent", quiet_options(store=False)),
         ]

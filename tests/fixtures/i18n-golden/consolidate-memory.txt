@@ -343,6 +343,7 @@ exit 0
 
 === no coding agent
 exit 0
+回頭清理停用:執行環境 none 沒有跑 agent(brunna.json runtime.default;要這個功能就裝一個有的 coding agent)。日期檔保持原樣,等設好模型再整理
 
 === log file
 [<T>] === consolidate start(dry-run, 到期 1 個,這次最多 3 個)===

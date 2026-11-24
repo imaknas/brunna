@@ -219,5 +219,8 @@
  "Cannot read which skills wait for review: {e}": "無法讀取哪些 skills 在等審:{e}",
  "Cannot read the platform credentials' state: {e}": "讀不到平台憑證的狀態:{e}",
  "This project's question {id} waits for my answer: show it to me with its options, and once I have answered, act on it and close it as your rules say.": "這個專案的問題 {id} 在等我回答:把問題和選項給我看;我回答之後,照你的規則處理並結案。",
- "About my open to-do {id} in {project}: tell me what it needs from me, and once I say it is done, report it as your rules say.": "關於我在 {project} 還沒完成的待辦 {id}:告訴我它需要我做什麼;我說做完之後,照你的規則回報。"
+ "About my open to-do {id} in {project}: tell me what it needs from me, and once I say it is done, report it as your rules say.": "關於我在 {project} 還沒完成的待辦 {id}:告訴我它需要我做什麼;我說做完之後,照你的規則回報。",
+ "off": "關著",
+ "Nightly tidy-up off": "每晚整理沒開",
+ "The nightly tidy-up is off, so there is no digest, and STATE.md and todo.md are not updated: {reason}. brunna doctor says what to do": "每晚的整理是關著的,所以沒有摘要,STATE.md 和 todo.md 也不會更新:{reason}。怎麼處理看 brunna doctor"
 }
