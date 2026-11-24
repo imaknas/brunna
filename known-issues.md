@@ -58,6 +58,11 @@
 - **Nobody notices when the scheduler stops**: it is the only trigger for every job, and it also generates the status
   page. `scheduler-watchdog.py` watches it independently from the service manager; when the watchdog itself is not
   watching, the status page shows red.
+- **A heartbeat written at the start says a program starts, not that it works**: a tick that crashed every time wrote a
+  fresh heartbeat every 15 minutes, so the watchdog and doctor called a dead scheduler healthy. What is watched is a
+  completion (`bin/tick_record.py` counts the ticks that began and didn't complete; a long one is not among them), and a
+  state file that can't be read is never taken for a fresh install's, which would run every job at once: the scheduler
+  goes on from the copy it keeps, or counts the jobs due now as run.
 
 - **In a shell script, backticks in a double-quoted prompt are executed as commands**: a format example in the prompt
   (a to-do line between backticks) was eaten by bash (the log showed only `-: command not found`), and the model never saw it

@@ -134,6 +134,8 @@ class StatusPage(unittest.TestCase):
                                                "beta/poll2.last_ok": iso(-20 * datetime.timedelta(minutes=1))}))
             t = (NOW - o["tick_age"]).timestamp()
             os.utime(sched_state, (t, t))
+        if o.get("ticks"):   # which ticks completed (bin/tick_record.py)
+            (hub / ".state" / "scheduler-tick.json").write_text(json.dumps(o["ticks"]))
         (hub / ".logs" / "scheduler.log").write_text(LOG)
         backup = hub / ".state" / "backup"
         backup.mkdir()
@@ -183,7 +185,9 @@ class StatusPage(unittest.TestCase):
             return f
         channels = list(o["alerts"]) if isinstance(o["alerts"], dict) else ["discord"] if o["alerts"] else []
         mods = {
-            "scheduler": fake("scheduler", all_jobs=lambda: (o["jobs"], {"errors": o["reg_errors"]})),
+            "scheduler": fake("scheduler", all_jobs=lambda: (o["jobs"], {"errors": o["reg_errors"],
+                                                                                  "broken": o.get("broken", {})}),
+                              broken_state_lines=lambda now: o.get("state_lines", {})),
             # as bin/alert.py: with no channel set up there are no failed sends (tests/test_alert_channels.py)
             "alert": fake("alert", failures=raises(RuntimeError("alerts file unreadable")) if o["failures"] is None
                           else lambda: o["failures"] if channels else {}, configured=lambda: channels),
@@ -253,6 +257,15 @@ class StatusPage(unittest.TestCase):
             ("newcomer with no model", quiet_options(runtime="none", off="the librarian is off")),
             # a fresh install or a restore before its first install: no platform run starts, said in red
             ("no checked copy of the coding agent", quiet_options(store=False)),
+            # each tick crashes (the state file is fresh all the same), and what isn't scheduled says why
+            ("ticks that do not complete", quiet_options(
+                ticks={"running": False, "unfinished": 3, "since": iso(-2 * H), "completed": iso(-2 * H),
+                       "error": "RuntimeError('boom')"}, reg_errors={"(registry)": ["no"]},
+                broken={"alpha/x": {"why": "time can't be used"}, "(registry)": {"why": "no"}}, state_lines={"f": "the record could not be read"})),
+            # a tick that has run for two hours, and one that completed two hours ago with nothing since
+            ("a long tick", quiet_options(ticks={"running": True, "unfinished": 0, "completed": iso(-2 * H)})),
+            ("no tick after one that completed", quiet_options(
+                ticks={"running": False, "unfinished": 0, "completed": iso(-2 * H)})),
         ]
         for name, o in variants:
             pages = self.build(base / name.split(",")[0].replace(" ", "-"), o)

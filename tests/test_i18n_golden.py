@@ -303,6 +303,10 @@ class Golden(unittest.TestCase):
             "release": {"version": "v0.3.0", "release": "v0.3.0", "error": "Could not resolve host: example.org"}}))
         # a second coding agent, which lacks the wake and the session ports (each says for itself)
         self.valid_cfg(runtime={"default": "claude", "installed": ["claude", "acp"]})
+        # a scheduler that starts, and whose ticks crash
+        self.heartbeat(0)
+        (self.tmp / "state" / "scheduler-tick.json").write_text(json.dumps(
+            {"running": False, "unfinished": 2, "error": "RuntimeError('boom')"}))
         out.append(self.agenthub("doctor", label="two coding agents", sc={"sm": None, "plan": {}, "hooks": "githooks"}))
         self.check("agenthub-doctor", "\n".join(out))
 

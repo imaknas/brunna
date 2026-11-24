@@ -1926,11 +1926,17 @@ def cmd_doctor(argv: list[str]) -> int:
         doctor_git_platform(add)
     hb = hubconf.STATE / "scheduler-heartbeat"
     if hb.exists():
-        age = (datetime.datetime.now() - datetime.datetime.fromtimestamp(hb.stat().st_mtime)).total_seconds() / 60
+        age = (datetime.datetime.now().timestamp() - hb.stat().st_mtime) / 60   # as times: no daylight saving in it
         shown = f"{age:.0f}"   # what the message prints: "0" is "just ticked", and the plural follows the shown number
-        add("ok" if age <= 35 else "bad", _("the scheduler just ticked") if shown == "0" else
-            _("the scheduler last ticked {age:.0f} {age:minute|minutes} ago", age=float(shown)),
-            "" if age <= 35 else _("bin/schedulectl status; see .logs/scheduler-stderr.log"))
+        import tick_record
+        if (undone := tick_record.not_completing(tick_record.read(hubconf.STATE / "scheduler-tick.json"))) and age <= 35:
+            add("bad", _("the scheduler starts, but its ticks don't complete: {n} in a row ({error})", n=undone["n"],
+                         error=undone["error"][:160]),
+                _("bin/schedulectl status; see .logs/scheduler-stderr.log"))
+        else:
+            add("ok" if age <= 35 else "bad", _("the scheduler just ticked") if shown == "0" else
+                _("the scheduler last ticked {age:.0f} {age:minute|minutes} ago", age=float(shown)),
+                "" if age <= 35 else _("bin/schedulectl status; see .logs/scheduler-stderr.log"))
     elif scheduled:
         add("warn", _("the scheduler has not ticked yet"),
             _("it ticks within 15 minutes of installing; if it still hasn't ticked, see .logs/scheduler-stderr.log"))

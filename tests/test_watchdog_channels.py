@@ -76,7 +76,7 @@ class Watchdog(unittest.TestCase):
             self.assertNotIn("resumed_at", st, "the first check only records the gap")
             clocks[7] += 3600   # an hour asleep: boottime moved, monotonic didn't
             m.resumed(st, now)
-            self.assertEqual(st["resumed_at"], now.isoformat(timespec="seconds"))
+            self.assertEqual(datetime.datetime.fromisoformat(st["resumed_at"]).timestamp(), now.timestamp())
         tick_before = now - datetime.timedelta(hours=2)
         self.assertTrue(m.in_resume_grace(st, tick_before, now + datetime.timedelta(minutes=10)))
         self.assertFalse(m.in_resume_grace(dict(st), now + datetime.timedelta(minutes=1),

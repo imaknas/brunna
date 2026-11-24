@@ -44,10 +44,14 @@ sent
 ---
 🧪 brunna scheduler watchdog test message (settings are correct)
 <diag>
+---
+🚨 The brunna scheduler starts, but its ticks don't complete: 3 in a row, none since 10-30 16:00. Jobs may not be running (the backup too); .logs/scheduler.log and .logs/scheduler-stderr.log say why.
+<diag>
 === no alerts
 exit 0; printed: 
 === no alerts log
-[2026-10-30 17:00:00] no alerts set up (hub.json has no alerts), only logging: the scheduler has never ticked
+[2026-10-30 17:00:00] no alerts set up (hub.json has no alerts), only logging: the scheduler's ticks don't complete (3 in a row, none since 2026-10-30 07:00:00)
+[2026-10-30 17:00:00] no alerts set up (hub.json has no alerts), only logging: the scheduler's last tick was 2026-10-30 08:00:00; it has stopped
 
 === no secrets
 exit 1; printed: scheduler-watchdog: hub.json alerts has no channel this watchdog can send on (Discord, ntfy, email, macOS); no alert can be sent if the scheduler stops
@@ -56,6 +60,7 @@ exit 1; printed: scheduler-watchdog: hub.json alerts has no channel this watchdo
 [2026-10-30 17:00:00] the scheduler stopped 540 minutes ago, notified
 [2026-10-30 17:00:00] recovered, notified
 [2026-10-30 17:00:00] the scheduler stopped a long time ago, notified
+[2026-10-30 17:00:00] the scheduler's ticks don't complete (3 in a row), notified
 [2026-10-30 17:00:00] discord send failed
 [2026-10-30 17:00:00] failed: no alert channel could send
 [2026-10-30 17:00:00] failed: no alert channel could send

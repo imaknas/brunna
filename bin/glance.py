@@ -24,6 +24,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
+import tick_record  # noqa: E402
 
 _ = i18n.domain(__file__)
 STATE_DIR = hubconf.STATE   # the main checkout's .state, as the scheduler and the status page write it
@@ -67,7 +68,10 @@ def mail() -> dict:
 
 def scheduler(now: datetime.datetime) -> dict:
     tick = datetime.datetime.fromtimestamp(HEARTBEAT.stat().st_mtime) if HEARTBEAT.exists() else None
-    return {"last_tick": _iso(tick), "alive": bool(tick) and now - tick <= STALE_TICK}
+    alive = bool(tick) and now.timestamp() - tick.timestamp() <= STALE_TICK.total_seconds()
+    if (undone := tick_record.not_completing(tick_record.read(HEARTBEAT.with_name("scheduler-tick.json")))):
+        tick, alive = undone["completed"], False   # it starts, but nothing of it completes
+    return {"last_tick": _iso(tick), "alive": alive}
 
 
 def jobs_failed() -> list[dict]:

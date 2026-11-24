@@ -351,11 +351,13 @@ def edit_state(fn):
         if not mine:
             sys.exit(_("The scheduler's state is held by a tick in progress (a job running in the foreground, or this "
                        "command was started by one); nothing was changed. Try again after the tick"))
-        state = json.loads(state_file.read_text()) if state_file.exists() else {}
-        out = fn(state)
-        tmp = state_file.with_suffix(".tmp")
-        tmp.write_text(json.dumps(state, indent=2))
-        tmp.replace(state_file)
+        sched, now = scheduler_module(), datetime.datetime.now()
+        try:   # as a tick reads and saves it: one that vanished or can't be read is not a fresh install's
+            state = sched.load_state(all_jobs, now, now.date().isoformat(), state_file)
+            out = fn(state)
+            sched.save_state(state, state_file)
+        except sched.StateNotSaved as e:
+            sys.exit(_("The scheduler's state can't be saved ({error}); nothing was changed", error=e))
     return out
 
 
@@ -379,7 +381,7 @@ def event_job(name):
 def cmd_events(name):
     job = event_job(name)
     state_file = HUB / ".state" / "scheduler-last-run.json"
-    state = json.loads(state_file.read_text()) if state_file.exists() else {}
+    state = scheduler_module().peek_state(state_file)
     print(_("{name}: {when}", name=name, when=describe_when(job)))
     if f"{name}.event_seq" not in state:
         print(_("No cursor yet: the next tick starts it at the bus head"))

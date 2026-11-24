@@ -338,5 +338,6 @@
  "no such feature: {names}. Give names from the list, separated by commas, none, or press Enter": "沒有這個功能:{names}。請打清單裡的名稱(用逗號分開)、none,或按 Enter",
  "which optional features to turn on (available: {modules}; none for none of them)": "要打開哪些選用功能(可選:{modules};都不要就打 none)",
  "off, because the platform starts {default}: {features} ({others} has them)": "因為平台啟動的是 {default},這些功能關著:{features}({others} 有)",
- "point {settings} runtime.default at one that has them": "把 {settings} 的 runtime.default 改成有的那個"
+ "point {settings} runtime.default at one that has them": "把 {settings} 的 runtime.default 改成有的那個",
+ "the scheduler starts, but its ticks don't complete: {n} in a row ({error})": "排程器有啟動,但 tick 都沒跑完:連續 {n} 次({error})"
 }

@@ -44,10 +44,14 @@ last line
 ---
 🧪 brunna 排程器看門狗測試訊息(設定正確)
 <diag>
+---
+🚨 brunna 排程器有啟動,但 tick 都沒跑完:連續 3 次,10-30 16:00 之後一次都沒有。job 可能都沒在跑(備份也是);原因看 .logs/scheduler.log 跟 .logs/scheduler-stderr.log。
+<diag>
 === no alerts
 exit 0; printed: 
 === no alerts log
-[2026-10-30 17:00:00] 沒設定警報(hub.json 沒有 alerts),只記錄:排程器最後 tick 從來沒有,停了
+[2026-10-30 17:00:00] 沒設定警報(hub.json 沒有 alerts),只記錄:排程器的 tick 都沒跑完(連續 3 次,2026-10-30 07:00:00 之後一次都沒有)
+[2026-10-30 17:00:00] 沒設定警報(hub.json 沒有 alerts),只記錄:排程器最後 tick 2026-10-30 08:00:00,停了
 
 === no secrets
 exit 1; printed: scheduler-watchdog:hub.json 的 alerts 沒有看門狗能用的管道(Discord、ntfy、email、macOS);排程器停了也發不出警報
@@ -56,6 +60,7 @@ exit 1; printed: scheduler-watchdog:hub.json 的 alerts 沒有看門狗能用的
 [2026-10-30 17:00:00] 排程器停了 540 分鐘,已通知
 [2026-10-30 17:00:00] 恢復,已通知
 [2026-10-30 17:00:00] 排程器停了 很久,已通知
+[2026-10-30 17:00:00] 排程器的 tick 都沒跑完(連續 3 次),已通知
 [2026-10-30 17:00:00] discord 送出失敗
 [2026-10-30 17:00:00] 失敗:沒有任何警報管道送得出去
 [2026-10-30 17:00:00] 失敗:沒有任何警報管道送得出去

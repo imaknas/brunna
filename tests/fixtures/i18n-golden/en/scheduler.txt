@@ -37,8 +37,28 @@ Scheduled job b/nodetail has been failing since <TS> (see the log)
 [exit None]
 [<TS>] The scheduled-job alert was not sent: RuntimeError('discord down')
 === registry unreadable
-[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {'(registry)': ["RuntimeError('boom')"]}})]
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {'(registry)': ["RuntimeError('boom')"]}, 'broken': {'(registry)': {'group': '(registry)', 'why': 'RuntimeError'}}})]
 [<TS>] The project registry can't be read (RuntimeError('boom')); this tick runs only schedule.yaml
+=== registry unreadable, with its last index
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {'(registry)': ["RuntimeError('boom')"]}, 'broken': {'(registry)': {'group': '(registry)', 'why': 'RuntimeError'}}, 'refused': {}})]
+[<TS>] The project registry can't be read (RuntimeError('boom')); this tick runs it as it was last read
+=== fields that can't be used
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {}, 'broken': {'a': {'group': '(schedule.yaml)', 'why': "time can't be used (a time is a quoted HH:MM, a date YYYY-MM-DD)"}, '(entry 2 of schedule.yaml)': {'group': '(schedule.yaml)', 'why': "it isn't a mapping"}, 'b': {'group': '(schedule.yaml)', 'why': "days_of_month can't be used (a list of days or months)"}, 'c': {'group': '(schedule.yaml)', 'why': 'it has no command'}, 'd': {'group': '(schedule.yaml)', 'why': "max_attempts_per_day can't be used (a number)"}, 'e': {'group': '(schedule.yaml)', 'why': "after can't be used (a list of job names)"}, '(entry 7 of schedule.yaml)': {'group': '(schedule.yaml)', 'why': 'it has no name'}}, 'refused': {}})]
+[<TS>] job 'a' isn't scheduled: time can't be used (a time is a quoted HH:MM, a date YYYY-MM-DD)
+[<TS>] job '(entry 2 of schedule.yaml)' isn't scheduled: it isn't a mapping
+[<TS>] job 'b' isn't scheduled: days_of_month can't be used (a list of days or months)
+[<TS>] job 'c' isn't scheduled: it has no command
+[<TS>] job 'd' isn't scheduled: max_attempts_per_day can't be used (a number)
+[<TS>] job 'e' isn't scheduled: after can't be used (a list of job names)
+[<TS>] job '(entry 7 of schedule.yaml)' isn't scheduled: it has no name
+=== schedule.yaml isn't a list
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {}, 'broken': {'(schedule.yaml)': {'group': '(schedule.yaml)', 'why': 'it must be a list under jobs:'}}, 'refused': {}})]
+[<TS>] schedule.yaml can't be used, none of its jobs run (it must be a list under jobs:)
+=== told
+('scheduler-broken:old', [], 'Everything of old can be scheduled again')
+('scheduler-broken:p', ['p/a: no time', 'p/b: no time', 'p/c: no time', 'p/d: no time', 'p/e: no time', 'p/f: no time', 'p/g: no time'], 'Everything of p can be scheduled again')
+('scheduler-state:old', [], "The scheduler's record of what ran is readable again")
+('scheduler-state:scheduler-last-run.broken-20261030-120000.json', ["The scheduler's record of what ran (scheduler-last-run.json) could not be read at <TS>. It went on from the copy it keeps; without a usable one, the jobs due at that moment were counted as run. The broken file is kept as <TMP>/state/scheduler-last-run.broken-20261030-120000.json"], "The scheduler's record of what ran is readable again")
 === scheduler.log
 [<TS>] job 'gone/job' FAILED (exit -1), background process gone without a result
 [<TS>] running job 'ok': echo fine
@@ -51,3 +71,13 @@ Scheduled job b/nodetail has been failing since <TS> (see the log)
 [<TS>] running job 'bg' (background): echo bg
 [<TS>] The scheduled-job alert was not sent: RuntimeError('discord down')
 [<TS>] The project registry can't be read (RuntimeError('boom')); this tick runs only schedule.yaml
+[<TS>] The project registry can't be read (RuntimeError('boom')); this tick runs it as it was last read
+[<TS>] job 'a' isn't scheduled: time can't be used (a time is a quoted HH:MM, a date YYYY-MM-DD)
+[<TS>] job '(entry 2 of schedule.yaml)' isn't scheduled: it isn't a mapping
+[<TS>] job 'b' isn't scheduled: days_of_month can't be used (a list of days or months)
+[<TS>] job 'c' isn't scheduled: it has no command
+[<TS>] job 'd' isn't scheduled: max_attempts_per_day can't be used (a number)
+[<TS>] job 'e' isn't scheduled: after can't be used (a list of job names)
+[<TS>] job '(entry 7 of schedule.yaml)' isn't scheduled: it has no name
+[<TS>] schedule.yaml can't be used, none of its jobs run (it must be a list under jobs:)
+[<TS>] scheduler-last-run.json could not be read; going on from its copy

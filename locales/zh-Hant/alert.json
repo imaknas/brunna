@@ -5,5 +5,9 @@
  "The platform found a problem for {project} to fix (an alert; the owner is not told yet):": "平台發現一個要由 {project} 修的問題(這是 alert,還沒告訴擁有者):",
  "When it's fixed the platform sees it and closes this letter itself. Not fixed within a day, it goes to the owner.": "修好後平台會自己看到並收掉這封信。一天內沒修好，就會轉給擁有者。",
  "fixed: the platform no longer sees the problem": "已修好：平台不再看到這個問題",
- "{project} has not fixed this (the platform's agents were told first):": "{project} 還沒修好這個問題(平台的 agent 先被告知了):"
+ "{project} has not fixed this (the platform's agents were told first):": "{project} 還沒修好這個問題(平台的 agent 先被告知了):",
+ "This letter's problem has changed:": "這封信說的問題變了:",
+ "new in it: {names}": "新增:{names}",
+ "no longer in it: {names}": "已經沒有:{names}",
+ "now: {problem}": "現在:{problem}"
 }

@@ -100,10 +100,19 @@ class Watchdog(unittest.TestCase):
                     with mock.patch("builtins.print") as p:
                         mod.main()
                         out.append(("--test printed", " ".join(str(a) for c in p.call_args_list for a in c.args)))
+                mod.WATCH_STATE.unlink()
+                hb.write_text("")           # it ticks, but the ticks don't complete
+                os.utime(hb, (now.timestamp(), now.timestamp()))
+                mod.TICK_RECORD.write_text(json.dumps({"unfinished": 3, "completed": "2026-10-30T16:00:00"}))
+                mod.main(), mod.main()
             out.append(("sent", "\n---\n".join(sent)))
             for name, kw in (("no alerts", {"alerts": False}), ("no secrets", {"secrets": False})):
                 sub = tmp / name.replace(" ", "-")
                 m2 = self.load(sub, **kw)
+                if name == "no alerts":
+                    (sub / "hub" / ".state" / "scheduler-heartbeat").write_text("")
+                    os.utime(sub / "hub" / ".state" / "scheduler-heartbeat", (old, old))
+                    m2.TICK_RECORD.write_text(json.dumps({"unfinished": 3, "completed": "2026-10-30T07:00:00"}))
                 with mock.patch("builtins.print") as p, mock.patch.object(m2.datetime, "datetime", FakeDT):
                     rc = m2.main()
                 printed = " ".join(str(a) for c in p.call_args_list for a in c.args)

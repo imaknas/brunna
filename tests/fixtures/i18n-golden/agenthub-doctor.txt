@@ -215,11 +215,12 @@ $ agenthub doctor    # two coding agents
 ✗ 排程器、看門狗:HOME(<TMP>/home)不是這個帳號的家目錄:平台不碰這個帳號的背景服務(從這裡安裝,會換掉帳號裡真正在跑的那一個)
     → 自己每 15 分鐘排程 `<TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py`(例如 crontab 加一行 `*/15 * * * * <TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py`)
 ✓ 開了 sandbox 的專案自己的服務跟 job:隔離執行(seatbelt: own-writes-only, isolated-reads, declared-port-only, no-mounts)
-! 排程器還沒 tick 過,這台也沒有服務管理員在跑它(看上面排程器那一行)
+✗ 排程器有啟動,但 tick 都沒跑完:連續 2 次(RuntimeError('boom'))
+    → bin/schedulectl status;看 .logs/scheduler-stderr.log
 ✓ 背景服務、專案設定:跟 config 一致
 · 沒裝 gitleaks:平台推送只用內建規則掃描
     → 裝 gitleaks(8.19 以上)掃得更廣
 · acp 的 session 不能請平台推送(brunna push):它沒有只讓沙盒專案的 session 寫一個資料夾的方法(brunna push 請求)
 
-1 個問題、3 個提醒
+2 個問題、2 個提醒
 --- stderr

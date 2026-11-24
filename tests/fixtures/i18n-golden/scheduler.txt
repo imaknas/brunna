@@ -37,8 +37,28 @@ fine
 [exit None]
 [<TS>] 排程 job 的警報沒發出去:RuntimeError('discord down')
 === registry unreadable
-[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {'(registry)': ["RuntimeError('boom')"]}})]
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {'(registry)': ["RuntimeError('boom')"]}, 'broken': {'(registry)': {'group': '(registry)', 'why': 'RuntimeError'}}})]
 [<TS>] 專案登錄讀不了,這個 tick 只跑 schedule.yaml:RuntimeError('boom')
+=== registry unreadable, with its last index
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {'(registry)': ["RuntimeError('boom')"]}, 'broken': {'(registry)': {'group': '(registry)', 'why': 'RuntimeError'}}, 'refused': {}})]
+[<TS>] 專案登錄讀不了(RuntimeError('boom')),這個 tick 照上次讀到的跑
+=== fields that can't be used
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {}, 'broken': {'a': {'group': '(schedule.yaml)', 'why': 'time 不能用(時間是加引號的 HH:MM,日期是 YYYY-MM-DD)'}, '(schedule.yaml 的第 2 項)': {'group': '(schedule.yaml)', 'why': '不是一個 mapping'}, 'b': {'group': '(schedule.yaml)', 'why': 'days_of_month 不能用(要是日子或月份的清單)'}, 'c': {'group': '(schedule.yaml)', 'why': '沒有 command'}, 'd': {'group': '(schedule.yaml)', 'why': 'max_attempts_per_day 不能用(要是數字)'}, 'e': {'group': '(schedule.yaml)', 'why': 'after 不能用(要是 job 名字的清單)'}, '(schedule.yaml 的第 7 項)': {'group': '(schedule.yaml)', 'why': '沒有 name'}}, 'refused': {}})]
+[<TS>] job 'a' 沒有排進去:time 不能用(時間是加引號的 HH:MM,日期是 YYYY-MM-DD)
+[<TS>] job '(schedule.yaml 的第 2 項)' 沒有排進去:不是一個 mapping
+[<TS>] job 'b' 沒有排進去:days_of_month 不能用(要是日子或月份的清單)
+[<TS>] job 'c' 沒有排進去:沒有 command
+[<TS>] job 'd' 沒有排進去:max_attempts_per_day 不能用(要是數字)
+[<TS>] job 'e' 沒有排進去:after 不能用(要是 job 名字的清單)
+[<TS>] job '(schedule.yaml 的第 7 項)' 沒有排進去:沒有 name
+=== schedule.yaml isn't a list
+[exit ([], {'alias': {}, 'renames': {}, 'skipped': [], 'errors': {}, 'broken': {'(schedule.yaml)': {'group': '(schedule.yaml)', 'why': 'jobs: 底下要是一個清單'}}, 'refused': {}})]
+[<TS>] schedule.yaml 不能用,裡面的 job 都不跑(jobs: 底下要是一個清單)
+=== told
+('scheduler-broken:old', [], 'old 又都排得進去了')
+('scheduler-broken:p', ['p/a: no time', 'p/b: no time', 'p/c: no time', 'p/d: no time', 'p/e: no time', 'p/f: no time', 'p/g: no time'], 'p 又都排得進去了')
+('scheduler-state:old', [], '排程器「跑過什麼」的紀錄又讀得了')
+('scheduler-state:scheduler-last-run.broken-20261030-120000.json', ['排程器「跑過什麼」的紀錄(scheduler-last-run.json)在 <TS> 讀不了。它從自己留的副本接著跑;沒有能用的副本時,當下該跑的 job 都算跑過了。壞掉的檔案留在 <TMP>/state/scheduler-last-run.broken-20261030-120000.json'], '排程器「跑過什麼」的紀錄又讀得了')
 === scheduler.log
 [<TS>] job 'gone/job' FAILED (exit -1), background process gone without a result
 [<TS>] running job 'ok': echo fine
@@ -51,3 +71,13 @@ fine
 [<TS>] running job 'bg' (background): echo bg
 [<TS>] 排程 job 的警報沒發出去:RuntimeError('discord down')
 [<TS>] 專案登錄讀不了,這個 tick 只跑 schedule.yaml:RuntimeError('boom')
+[<TS>] 專案登錄讀不了(RuntimeError('boom')),這個 tick 照上次讀到的跑
+[<TS>] job 'a' 沒有排進去:time 不能用(時間是加引號的 HH:MM,日期是 YYYY-MM-DD)
+[<TS>] job '(schedule.yaml 的第 2 項)' 沒有排進去:不是一個 mapping
+[<TS>] job 'b' 沒有排進去:days_of_month 不能用(要是日子或月份的清單)
+[<TS>] job 'c' 沒有排進去:沒有 command
+[<TS>] job 'd' 沒有排進去:max_attempts_per_day 不能用(要是數字)
+[<TS>] job 'e' 沒有排進去:after 不能用(要是 job 名字的清單)
+[<TS>] job '(schedule.yaml 的第 7 項)' 沒有排進去:沒有 name
+[<TS>] schedule.yaml 不能用,裡面的 job 都不跑(jobs: 底下要是一個清單)
+[<TS>] scheduler-last-run.json could not be read; going on from its copy

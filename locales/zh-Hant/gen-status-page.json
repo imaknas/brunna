@@ -222,5 +222,7 @@
  "About my open to-do {id} in {project}: tell me what it needs from me, and once I say it is done, report it as your rules say.": "關於我在 {project} 還沒完成的待辦 {id}:告訴我它需要我做什麼;我說做完之後,照你的規則回報。",
  "off": "關著",
  "Nightly tidy-up off": "每晚整理沒開",
- "The nightly tidy-up is off, so there is no digest, and STATE.md and todo.md are not updated: {reason}. brunna doctor says what to do": "每晚的整理是關著的,所以沒有摘要,STATE.md 和 todo.md 也不會更新:{reason}。怎麼處理看 brunna doctor"
+ "The nightly tidy-up is off, so there is no digest, and STATE.md and todo.md are not updated: {reason}. brunna doctor says what to do": "每晚的整理是關著的,所以沒有摘要,STATE.md 和 todo.md 也不會更新:{reason}。怎麼處理看 brunna doctor",
+ "The scheduler starts, but its ticks do not complete: {n} in a row since {since}: {error}. See .logs/scheduler.log and .logs/scheduler-stderr.log": "排程器有啟動,但 tick 都沒跑完:{since} 起連續 {n} 次:{error}。看 .logs/scheduler.log 跟 .logs/scheduler-stderr.log",
+ "{name} is not scheduled: {why}": "{name} 沒有排進去:{why}"
 }

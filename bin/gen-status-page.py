@@ -27,6 +27,7 @@ import hubconf  # noqa: E402
 import names  # noqa: E402
 import job_off  # noqa: E402
 import i18n  # noqa: E402
+import tick_record  # noqa: E402
 
 _ = i18n.domain(__file__)
 _c = i18n.domain(__file__, content=True)
@@ -168,6 +169,14 @@ def next_run(job: dict, state: dict, now: datetime.datetime) -> str:
             return _("today (waiting for the next tick, or out of retries)")
         return fmt_dt(due)
     return _("never again")
+
+
+def said_or_dash(say, *args) -> str:
+    """describe_when or next_run, or a dash for a job whose fields or record it can't say (the page must not break)."""
+    try:
+        return say(*args)
+    except (TypeError, ValueError, AttributeError, KeyError, IndexError):
+        return "—"
 
 
 def event_detail(job: dict, state: dict, now: datetime.datetime, alerts: list) -> list[str]:
@@ -475,7 +484,11 @@ def main() -> None:
     now = datetime.datetime.now()
     import scheduler  # schedule.yaml + the project registry, the same list the scheduler uses
     jobs, reg_info = scheduler.all_jobs()
-    state = json.loads(STATE.read_text()) if STATE.exists() else {}
+    try:
+        state = json.loads(STATE.read_text()) if STATE.exists() else {}
+    except (OSError, ValueError):   # the next tick goes on from its copy (scheduler.load_state)
+        state = {}
+    state = state if isinstance(state, dict) else {}
     runs, last_tick = scheduler_runs()
     alive = scheduler_alive()
 
@@ -484,9 +497,15 @@ def main() -> None:
     sm = hubconf.service_manager()
     # scheduler.py writes its log only when a job runs, but saves its state file on every tick -- use that file's
     # mtime to tell whether the scheduler is still running (going by the log raises false alarms in night hours with
-    # no jobs)
+    # no jobs). Once a tick ended, only a completed one counts (tick_record.py); a tick that runs now is told by the file
+    # it saves, however long it takes, and so is a scheduler from before the record
+    ticks = tick_record.read(STATE.with_name("scheduler-tick.json"))
+    undone = tick_record.not_completing(ticks)
     tick = datetime.datetime.fromtimestamp(STATE.stat().st_mtime) if STATE.exists() else None
-    stale = tick is None or now - tick > datetime.timedelta(minutes=40)
+    if ticks and not ticks.get("running"):
+        tick = tick_record.at(ticks, "completed") or tick
+    # as times: daylight saving moves the clock's readings by an hour
+    stale = tick is None or now.timestamp() - tick.timestamp() > 40 * 60
     if sm is None:
         # nothing to load it into: one line, red only while nothing runs it (a cron line that ticks is fine)
         if stale:
@@ -502,6 +521,16 @@ def main() -> None:
     elif stale:
         alerts.append(("bad", _("The scheduler's last tick was {tick:%m/%d %H:%M}, over 40 minutes ago", tick=tick) if tick
                        else _("The scheduler's state file is missing")))
+    if undone:
+        alerts.append(("bad", _("The scheduler starts, but its ticks do not complete: {n} in a row since {since}: {error}. "
+                                "See .logs/scheduler.log and .logs/scheduler-stderr.log", n=undone["n"],
+                                since=f"{undone['since']:%m/%d %H:%M}" if undone["since"] else "?",
+                                error=undone["error"][:160])))
+    for name, rec in sorted((reg_info.get("broken") or {}).items()):
+        if name not in reg_info["errors"]:   # an entry listed below says it already
+            alerts.append(("bad", _("{name} is not scheduled: {why}", name=name[:100], why=rec["why"][:300])))
+    for line in scheduler.broken_state_lines(now).values():
+        alerts.append(("bad", line))
 
     # The scheduler's watchdog (scheduler-watchdog.py, a separate launchd job): this page is produced by the scheduler
     # itself, so it stops updating when the scheduler stops -- the one that actually raises the alarm is the watchdog,
@@ -632,9 +661,9 @@ def main() -> None:
             f"<tr class='job{' off' if not job.get('enabled', True) else ''}'>"
             f"<td class=name>{dot}<b>{esc(name)}</b>{' <span class=tag>Claude</span>' if is_agent else ''}"
             f"{'<div class=sub>' + esc(detail) + '</div>' if detail else ''}</td>"
-            f"<td class=when>{esc(describe_when(job))}</td>"
+            f"<td class=when>{esc(said_or_dash(describe_when, job))}</td>"
             f"<td class=last><span class='st {cls}'>{esc(label)}</span> <span class=sub>{esc(last)}</span></td>"
-            f"<td class=next data-l='{esc(_('Next'))}'>{esc(next_run(job, state, now))}</td></tr>")
+            f"<td class=next data-l='{esc(_('Next'))}'>{esc(said_or_dash(next_run, job, state, now))}</td></tr>")
         if is_agent:
             reps = agent_reports(aname)
             if reps:

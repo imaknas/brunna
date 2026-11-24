@@ -288,7 +288,8 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
   the state on the next tick; details in the `scheduler.py` header. When background jobs have an order between them
   (they touch the same thing), add `after: [job]`; don't rely on staggered times alone
 - **The scheduler watchdog** `bin/scheduler-watchdog.py` (`local.brunna-scheduler-watchdog`, every 5 minutes):
-  sends Discord when the scheduler has not ticked for more than 35 minutes. It deliberately depends on neither the
+  sends Discord when the scheduler has not ticked for more than 35 minutes, or when its ticks begin and don't complete
+  (`.state/scheduler-tick.json`, `bin/tick_record.py`). It deliberately depends on neither the
   scheduler nor the platform's Python; the Discord settings are in the secrets directory (not in version control), and
   when they are missing the status page shows red
 - **The schedule status page** (service `local.status-page`, by default listening only on 127.0.0.1:18790; to view it

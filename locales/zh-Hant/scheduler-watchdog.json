@@ -22,5 +22,9 @@
  "failed: no alert channel could send": "失敗:沒有任何警報管道送得出去",
  "{channel} send failed": "{channel} 送出失敗",
  "scheduler-watchdog: {settings} alerts has no channel this watchdog can send on (Discord, ntfy, email, macOS); no alert can be sent if the scheduler stops": "scheduler-watchdog:{settings} 的 alerts 沒有看門狗能用的管道(Discord、ntfy、email、macOS);排程器停了也發不出警報",
- "the machine just woke up; waiting for the scheduler's first tick before judging it": "機器剛睡醒;等排程器先跑一次再判斷"
+ "the machine just woke up; waiting for the scheduler's first tick before judging it": "機器剛睡醒;等排程器先跑一次再判斷",
+ "the watchdog's state can't be written: {error}": "看門狗的狀態寫不了:{error}",
+ "no alerts set up ({settings} has no alerts), only logging: the scheduler's ticks don't complete ({n} in a row, none since {since})": "沒設定警報({settings} 沒有 alerts),只記錄:排程器的 tick 都沒跑完(連續 {n} 次,{since} 之後一次都沒有)",
+ "{prefix} The brunna scheduler starts, but its ticks don't complete: {n} in a row, none since {since}. Jobs may not be running (the backup too); .logs/scheduler.log and .logs/scheduler-stderr.log say why.": "{prefix} brunna 排程器有啟動,但 tick 都沒跑完:連續 {n} 次,{since} 之後一次都沒有。job 可能都沒在跑(備份也是);原因看 .logs/scheduler.log 跟 .logs/scheduler-stderr.log。",
+ "the scheduler's ticks don't complete ({n} in a row), notified": "排程器的 tick 都沒跑完(連續 {n} 次),已通知"
 }

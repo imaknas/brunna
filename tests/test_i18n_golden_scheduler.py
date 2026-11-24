@@ -253,8 +253,31 @@ class Golden(unittest.TestCase):
             out.append(("failing_problems", "\n".join(m.failing_problems(failing, now))))
             with mock.patch.object(alert, "once", side_effect=RuntimeError("discord down")):
                 out.append(("alert broken", call(m.alert_failing)))
-            with mock.patch.object(registry, "refresh", side_effect=RuntimeError("boom")):
+            index = self.tmp / "index.json"
+            with mock.patch.object(registry, "refresh", side_effect=RuntimeError("boom")), \
+                    mock.patch.object(hubconf, "REGISTRY_INDEX", index):
                 out.append(("registry unreadable", call(m.all_jobs, True)))
+                index.write_text(json.dumps({"projects": {}}))
+                out.append(("registry unreadable, with its last index", call(m.all_jobs, True)))
+            m.SCHEDULE.write_text("jobs:\n- name: a\n  time: 13:00\n  command: echo a\n- [x]\n- name: b\n  time: '13:00'\n"
+                                  "  command: echo b\n  days_of_month: 5\n- {name: c, time: '13:00'}\n"
+                                  "- {name: d, time: '13:00', command: x, max_attempts_per_day: two}\n"
+                                  "- {name: e, time: '13:00', command: x, after: 5}\n- {command: x}\n")
+            with mock.patch.object(registry, "refresh", lambda: {"projects": {}, "errors": {}}):
+                out.append(("fields that can't be used", call(m.all_jobs, True)))
+            m.SCHEDULE.write_text("jobs: {a: 1}\n")
+            with mock.patch.object(registry, "refresh", lambda: {"projects": {}, "errors": {}}):
+                out.append(("schedule.yaml isn't a list", call(m.all_jobs, True)))
+            m.SCHEDULE.unlink()
+            told = []
+            with mock.patch.object(alert, "once", lambda *a, **k: told.append(a)), \
+                    mock.patch.object(alert, "open_keys", lambda p: [p + "old"]), \
+                    mock.patch.object(alert, "failures", dict):
+                m.alert_broken({f"p/{n}": {"group": "p", "why": "no time"} for n in "abcdefg"})
+                m.STATE_FILE.write_text("")
+                call(m.load_state, jobs, now, "2026-10-30")
+                m.alert_broken_state(now)
+            out.append(("told", "\n".join(repr(a) for a in told).replace(str(self.tmp), "<TMP>")))
         out.append(("scheduler.log", (m.LOG_DIR / "scheduler.log").read_text()))
         self.check("scheduler", out)
 

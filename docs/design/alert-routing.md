@@ -73,7 +73,14 @@ The mailbox lane's further points, adopted:
 As built (`alert.route`, `alert._agent`): `scheduler-job:<project>/<job>` goes to that project when it is a registered
 project, else to brunna (its own jobs and the modules'), except `OWNER_JOBS` (the bridge); `PLATFORM_KEYS`
 (update-runtimes, session versions, completion tools) to brunna; everything else to the owner, the git fence's
-findings and every safety refusal included (security findings are the owner's). A letter is a `request` with a fixed id per opening; a changed list goes to its thread as `info`; fixed,
+findings and every safety refusal included (security findings are the owner's). So is
+`scheduler-state:<file>` (the record of what ran couldn't be read). `scheduler-broken:<project>` (jobs of it that can't be
+scheduled) goes as `scheduler-job:` does, with the jobs' names and the rule each breaks, never the field's value. Both are
+one key per ordinary project, whose id is the project: one letter lists what fails, bounded, and neither one more job nor a
+renamed one is another. The platform's, the modules' and schedule.yaml's are told by name, so a second one is news.
+`scheduler-broken:(schedule.yaml)` and `(registry)` are the owner's, and so is any key whose route can't be told. The state files never
+decide whether a notice goes out: one that can't be read goes on from its copy or the log, one that can't be written leaves
+an empty marker file, so nothing is lost and nothing told twice (`bin/alert.py`'s header). A letter is a `request` with a fixed id per opening; a changed list goes to its thread as `info`; fixed,
 the platform takes the letter back (`done --withdraw`). A day unsettled, or a letter that can't be sent: the owner is
 told, prefixed with which project was told first, and from then on it is an ordinary owner alert (its daily reminder,
 its recovery to the assistant, the letter taken back). A problem the owner was told of before routing stays the

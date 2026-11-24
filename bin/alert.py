@@ -30,12 +30,20 @@ A failure to send does not pass silently (2026-10-24): recorded in .state/alerts
 red, and it is tried again next time; cleared once a send succeeds. With no channel set up at all there is nothing that
 failed: nothing is recorded, and the status page shows one setup reminder instead (docs/design/new-user.md 2: a feature
 that is off does not turn the page red).
+
+Its state files never decide whether an alert goes out. Each is synced and renamed into place, with a copy beside it;
+one that can't be read goes on from the copy, else from alerts-log.jsonl (what was told stays told), else from nothing.
+One that can't be written (a full disk) doesn't keep anything from being sent, nor from being remembered as sent: an
+empty file beside it (alerts-told.…, its name which problem, its date when) needs no space, and goes once the state can be
+written again.
 """
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
+import pathlib
 import smtplib
 import subprocess
 import sys
@@ -44,6 +52,7 @@ import urllib.parse
 import hubconf
 import names  # noqa: E402
 import i18n
+import tick_record
 
 _ = i18n.domain(__file__)
 
@@ -206,7 +215,7 @@ def send(text: str, notice: dict | None = None, plain: bool = True) -> bool:
     return bool(results) and all(results)
 
 
-def _log(key: str, state: str, ok: bool) -> None:
+def _log(key: str, state: str, ok: bool, letter: str | None = None) -> None:
     """One line per notice tried, kept (how many reached the owner, of which kind, and when: what tells whether the
     alerts got quieter). A log that can't be written changes nothing; a test never writes the live one."""
     if ("unittest" in sys.modules and LOG == _LIVE_LOG) or not configured():   # no channel: retried every tick, nothing told
@@ -214,7 +223,7 @@ def _log(key: str, state: str, ok: bool) -> None:
     try:
         with LOG.open("a") as f:
             f.write(json.dumps({"at": datetime.datetime.now().isoformat(timespec="seconds"), "key": key, "state": state,
-                                "sent": ok}, ensure_ascii=False) + "\n")
+                                "sent": ok, **({"letter": letter} if letter else {})}, ensure_ascii=False) + "\n")
     except OSError:
         pass
 
@@ -231,15 +240,186 @@ def probe() -> bool:
     return True
 
 
+def _copy(path: pathlib.Path) -> pathlib.Path:
+    return path.with_name(f"{path.stem}.copy.json")
+
+
 def _load(path) -> dict:
+    """The state. One that can't be read goes on from the copy _save keeps beside it, when that is of the same save (a
+    version from before the copy writes the file alone); SENT without one from the log."""
     try:
-        return json.loads(path.read_text())
-    except (OSError, ValueError):
+        return _dict(path)
+    except FileNotFoundError:   # nothing yet, or cleared on purpose
         return {}
+    except (OSError, ValueError):
+        pass
+    try:
+        if abs(path.stat().st_mtime - _copy(path).stat().st_mtime) <= SAME_SAVE_S:
+            return _dict(_copy(path))
+    except (OSError, ValueError):
+        pass
+    return _told_by_log() if path == SENT else {}
 
 
-def _save(path, data: dict) -> None:
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=1))
+SAME_SAVE_S = 60
+
+
+def _dict(path: pathlib.Path) -> dict:
+    d = json.loads(path.read_text())
+    if not isinstance(d, dict):
+        raise ValueError(path.name)
+    return d
+
+
+def _save(path, data: dict) -> bool:
+    """Whether it was written; never raises: what was sent was sent, whatever happens to the record of it."""
+    text = json.dumps(data, ensure_ascii=False, indent=1)
+    try:
+        tick_record.save(path, text)
+        tick_record.save(_copy(path), text)
+    except OSError as e:
+        try:
+            print(f"alert: {path.name} can't be written ({e})", file=sys.stderr)
+        except OSError:
+            pass
+        return False
+    return True
+
+
+def _told_by_log() -> dict:
+    """SENT as the log has it: the keys whose last notice was a problem, told at that time. Which problem the log doesn't
+    say: "unknown", taken as the one there is now (once), so what was told is not told again all at once."""
+    if "unittest" in sys.modules and LOG == _LIVE_LOG:
+        return {}
+    out: dict[str, dict] = {}
+    try:
+        lines = LOG.read_text(errors="replace").splitlines()
+    except OSError:
+        return {}
+    for line in lines:
+        try:
+            rec = json.loads(line)
+            key, at, state = rec["key"], rec["at"], rec["state"]
+            datetime.datetime.fromisoformat(at)
+            if not rec["sent"] or not isinstance(key, str):
+                continue
+        except (KeyError, TypeError, ValueError):
+            continue
+        if state in ("resolved", "letter-resolved"):
+            out.pop(key, None)
+        elif state in ("letter", "letter-update"):
+            was = out.get(key) or {}
+            out[key] = {"unknown": True, "problems": ["?"], "at": at, "to": route(key), "opened": was.get("opened") or at,
+                        "letter": rec["letter"] if isinstance(rec.get("letter"), str) else was.get("letter")}
+        else:
+            out[key] = {"unknown": True, "problems": ["?"], "at": at,
+                        **({"escalated": True, "to": route(key)} if route(key) != "owner" else {})}
+    return out
+
+
+MARK = "alerts-told."   # a marker's name: MARK, the key, its problem's hash, "owner"/"escalated"/a letter's time, dots between
+
+
+def _hash(ident: list) -> str:
+    return hashlib.sha256(json.dumps(ident, ensure_ascii=False).encode()).hexdigest()[:16]
+
+
+def _mark_key(key: str) -> str:
+    """key as it stands in a marker's name; one too long for a file name as its start and a hash."""
+    q = urllib.parse.quote(key, safe="")
+    return q if len(q) <= 150 else f"{q[:100]}%-{_hash([key])}"
+
+
+def _markers(key: str | None = None) -> list[tuple[str, str, str, pathlib.Path, float]]:
+    """(key, hash, kind, file, its date) of the notices told while SENT couldn't be written; a key's newest first."""
+    out = []
+    for p in SENT.parent.glob(MARK + "*"):
+        parts = p.name[len(MARK):].rsplit(".", 2)
+        if len(parts) == 3 and (key is None or parts[0] == _mark_key(key)):
+            try:
+                out.append((urllib.parse.unquote(parts[0]), parts[1], parts[2], p, p.stat().st_mtime))
+            except OSError:
+                continue
+    return sorted(out, key=lambda m: m[4], reverse=True)
+
+
+def _letter_id(key: str, opened: str) -> str:
+    return f"alert-{''.join(c if c.isascii() and c.isalnum() else '-' for c in key)[:60]}-{opened}"
+
+
+def _record(key: str, record: dict) -> None:
+    """Remember what was just told about key: in SENT (read again: sending takes a while, and other runs write it too), else
+    as a marker."""
+    old = [m[3] for m in _markers(key)]
+    if not _save(SENT, {**_load(SENT), key: record}):
+        opened = str(record.get("letter") or "")[-14:]
+        kind = "escalated" if record.get("escalated") else opened if record.get("to") and opened.isdigit() else "owner"
+        mark = SENT.with_name(f"{MARK}{_mark_key(key)}.{_hash(sorted(record.get('ids', record['problems'])))}.{kind}")
+        try:
+            mark.touch()
+            at = datetime.datetime.fromisoformat(record["at"]).timestamp()
+            os.utime(mark, (at, at))
+        except OSError:   # not even that: told again at the next run, rather than never
+            return
+        old = [p for p in old if p != mark]
+    for p in old:
+        try:
+            p.unlink()
+        except OSError:
+            pass
+
+
+def _time(rec: dict, key: str) -> str | None:
+    """A time in a record (local, as all of them are); None when it has none or it can't be read."""
+    try:
+        t = datetime.datetime.fromisoformat(rec[key])
+        return rec[key] if t.tzinfo is None else t.astimezone().replace(tzinfo=None).isoformat()
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _last(key: str, problems: list[str], ids: list[str] | None, ident: list[str]) -> dict | None:
+    """What was last told about key: SENT's record, or the marker that stands for it; None when nothing was. A field that
+    can't be used is left out."""
+    last = _load(SENT).get(key)
+    if isinstance(last, list):   # old format: only the list of problems
+        last = {"problems": last, "at": None}
+    if not isinstance(last, dict):
+        last = None
+    marks = _markers(key)
+    # SENT written after the marker (by a version that doesn't know them): that is the newer word
+    if marks and last and (said := _time(last, "at")) and datetime.datetime.fromisoformat(said).timestamp() > marks[0][4] + 1:
+        for m in marks:
+            try:
+                m[3].unlink()
+            except OSError:   # it stays void by its date
+                pass
+        marks = []
+    now_rec = {"problems": sorted(problems), **({"ids": ident} if ids is not None else {})}
+    if marks:
+        _key, said, kind, _path, when = marks[0]
+        last = {"at": datetime.datetime.fromtimestamp(when).isoformat(timespec="seconds"),
+                **(now_rec if said == _hash(ident) else {"problems": [] if said == _hash([]) else ["?"]})}
+        if kind == "escalated":
+            last |= {"escalated": True, "to": route(key)}
+        elif kind != "owner":
+            try:
+                opened = datetime.datetime.strptime(kind, "%Y%m%d%H%M%S").isoformat(timespec="seconds")
+                last |= {"to": route(key), "letter": _letter_id(key, kind), "opened": opened}
+            except ValueError:
+                pass
+        _record(key, last)   # SENT may be writable again: then the marker goes
+    elif last and last.get("unknown"):
+        last = {k: v for k, v in last.items() if k != "unknown"} | (now_rec if problems else {})
+        if problems:
+            _record(key, last)
+    if last is None:
+        return None
+    for k in ("problems", "ids"):
+        if k in last and not (isinstance(last[k], list) and all(isinstance(x, str) for x in last[k])):
+            del last[k]
+    last.setdefault("problems", [])
+    return {**last, "at": _time(last, "at"), **({"opened": _time(last, "opened")} if "opened" in last else {})}
 
 
 def record_failure(key: str, text: str, notice: dict | None = None) -> None:
@@ -260,7 +440,7 @@ def clear_failure(key: str) -> None:
 def failures() -> dict:
     """Alerts that could not be sent and have not been resent successfully yet (for the status page). With no channel
     set up, none: what was recorded before applied to channels that are gone."""
-    return _load(FAILED) if configured() else {}
+    return {k: v for k, v in _load(FAILED).items() if isinstance(v, dict)} if configured() else {}
 
 
 ESCALATE = datetime.timedelta(hours=24)   # an agent's letter not settled by then: the owner hears of it, once
@@ -272,14 +452,26 @@ PLATFORM_KEYS = ("runtime-held-", "runtime-checks-", "runtime-install-", "runtim
 # not here on purpose: git-fence (what it finds in a project's git is a security finding) and every safety refusal
 # (memory-sync-refused, memory-copy-refused, tool-servers): the owner's
 JOB_KEY = "scheduler-job:"
+BROKEN_KEY = "scheduler-broken:"   # + a project (or module) with a job the scheduler can't use
 # the platform's jobs that keep the mailbox running: their failure can't go through it
 OWNER_JOBS = ("hubbus-bridge",)
 
 
 def route(key: str) -> str:
-    """Who is told first: "owner", or the project whose agents can fix it (the platform's own: hubconf.hub_project())."""
-    if key.startswith(JOB_KEY):
-        job = key[len(JOB_KEY):]
+    """Who is told first: "owner", or the project whose agents can fix it (the platform's own: hubconf.hub_project()). The
+    owner whenever that can't be told: an alert about what it is told from must not be lost on it."""
+    try:
+        return _route(key)
+    except Exception:
+        return "owner"
+
+
+def _route(key: str) -> str:
+    # the owner's own file; a registry that can't be read is what says whose the rest is
+    if key in (BROKEN_KEY + "(schedule.yaml)", BROKEN_KEY + "(registry)"):
+        return "owner"
+    if key.startswith((JOB_KEY, BROKEN_KEY)):
+        job = key[len(JOB_KEY if key.startswith(JOB_KEY) else BROKEN_KEY):]
         project, _sep, name = job.partition("/")
         if name in OWNER_JOBS:
             return "owner"
@@ -328,8 +520,29 @@ def _withdraw(letter: str | None) -> bool:
     return ok or ALREADY_CLOSED in "".join(out)
 
 
-def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last: dict | None, sent: dict,
-           now: datetime.datetime) -> bool:
+MAX_UPDATES = 3   # of what a letter lists, in its thread: a notice starts no run, and a project that renames its jobs stops
+
+
+def _more(key: str, to: str, problems: list[str], last: dict, letter: str, names: list[str], now: datetime.datetime) -> None:
+    """What was added to the names a letter lists, and what is gone from them: a notice in its thread, never a new letter."""
+    had, done = last.get("names"), last.get("updates", 0)
+    if not isinstance(had, list) or not isinstance(done, int) or done >= MAX_UPDATES or sorted(names) == sorted(map(str, had)):
+        return
+
+    def some(xs: set) -> str:
+        return ", ".join([str(x)[:60] for x in sorted(xs, key=str)[:10]] + (["…"] if len(xs) > 10 else []))
+    added, gone = set(names) - set(had), set(had) - set(names)
+    text = [_("This letter's problem has changed:")] + ([_("new in it: {names}", names=some(added))] if added else []) \
+        + ([_("no longer in it: {names}", names=some(gone))] if gone else []) + [_("now: {problem}", problem=p) for p in problems]
+    ok = _hubbus("send", "--from", hubconf.hub_project(), "--to", to, "--type", "info", "--reply-to", letter,
+                 "--text", "\n".join(text))
+    _log(key, "letter-update", ok, letter)
+    if ok:
+        _record(key, {**last, "problems": sorted(problems), "names": sorted(names), "updates": done + 1})
+
+
+def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last: dict | None,
+           now: datetime.datetime, names: list[str] | None = None) -> bool:
     """alert.once for a problem the platform's agents fix: a request letter to that project instead of the owner's
     channels; changes go to its thread as info (no new request: one open letter per key, a project's dispatch budget is
     small); a day unsettled → the owner, once, and from then on as any owner alert; fixed → the letter is taken back.
@@ -341,9 +554,14 @@ def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last:
             clear_failure(key)
             return True
         opened = last.get("opened")
-        return not (opened and now - datetime.datetime.fromisoformat(opened) >= ESCALATE)
+        if opened and now - datetime.datetime.fromisoformat(opened) >= ESCALATE:
+            return False
+        if names is not None and letter:
+            _more(key, to, problems, last, letter, names, now)
+        return True
     record = {"problems": sorted(problems), **({"ids": ident} if ids is not None else {}),
-              "at": now.isoformat(timespec="seconds"), "to": to}
+              "at": now.isoformat(timespec="seconds"), "to": to,
+              **({"names": sorted(names)} if names is not None and problems else {})}
     if problems and letter and last.get("opened") \
             and now - datetime.datetime.fromisoformat(last["opened"]) >= ESCALATE:
         return False   # a list that keeps changing is still unsettled: a day on, the owner
@@ -353,7 +571,7 @@ def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last:
         state = "letter-update"
         record |= {"letter": letter, "opened": last.get("opened")}
     elif problems:
-        letter = f"alert-{''.join(c if c.isascii() and c.isalnum() else '-' for c in key)[:60]}-{now:%Y%m%d%H%M%S}"
+        letter = _letter_id(key, f"{now:%Y%m%d%H%M%S}")
         ok = _hubbus("send", "--from", hubconf.hub_project(), "--to", to, "--type", "request", "--id", letter,
                      "--text", _letter_text(to, problems))
         state = "letter"
@@ -362,11 +580,10 @@ def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last:
         # taken back; one its recipient already closed can't be, and is gone either way. Any other failure: tried again
         # next run (the record keeps its problems until it goes)
         ok, state = _withdraw(last.get("letter")), "letter-resolved"
-    _log(key, state, ok)
+    _log(key, state, ok, letter if problems else None)
     if not ok:
         return state != "letter"   # a failed update or take-back is tried again; a letter that never went: the owner
-    sent[key] = record
-    _save(SENT, sent)
+    _record(key, record)
     clear_failure(key)
     return True
 
@@ -374,25 +591,27 @@ def _agent(key: str, to: str, problems: list[str], ids, ident, last_ident, last:
 def open_keys(prefix: str) -> list[str]:
     """The keys under this prefix whose problems were last sent and not resolved since (a caller that splits one alert
     into many finds the ones it must close)."""
-    return sorted(k for k, v in _load(SENT).items() if k.startswith(prefix) and isinstance(v, dict) and v.get("problems"))
+    keys = {k for k, v in _load(SENT).items() if isinstance(v, dict) and v.get("problems")}
+    for key, said, _kind, _path, _when in reversed(_markers()):   # told while SENT couldn't be written: newer than it
+        keys = keys - {key} if said == _hash([]) else keys | {key}
+    return sorted(k for k in keys if k.startswith(prefix))
 
 
-def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = None) -> bool:
+def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = None, names: list[str] | None = None) -> bool:
     """Send what changed about one alert. Returns whether these problems are with whoever must hear them: sent now, or
     told before (open and unchanged, a reminder included, or a letter that stands). False when they couldn't be
-    delivered (no channel, a failed send, a test's held state): a check then exits as broken, not with FOUND."""
+    delivered (no channel, a failed send, a test's held state): a check then exits as broken, not with FOUND.
+    names: what one problem lists when its id stays the same whatever that is (a project's jobs): while it is with a
+    project's agents, what is added to them and what is gone is said in its letter's thread, MAX_UPDATES times."""
     if ids is not None and len(ids) != len(problems):
         raise ValueError(f"alert.once({key!r}): {len(ids)} ids for {len(problems)} problems")
     if _held():
         return False
     now = datetime.datetime.now()
-    sent = _load(SENT)
-    last = sent.get(key)
-    if isinstance(last, list):  # old format: only the list of problems
-        last = {"problems": last, "at": None}
     # what the problems are: their ids when the caller names them, else their wording (a record from before ids
     # compares by wording once, then carries them)
     ident = sorted(ids) if ids is not None else sorted(problems)
+    last = _last(key, problems, ids, ident)
     last_ident = sorted((last or {}).get("ids") if ids is not None and "ids" in (last or {})
                         else (last or {}).get("problems", []))
     to = route(key)
@@ -400,7 +619,7 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
     escalated = bool((last or {}).get("escalated")) or bool(to != "owner" and (last or {}).get("problems")
                                                              and "to" not in (last or {}))
     if to != "owner" and not escalated:
-        if _agent(key, to, problems, ids, ident, last_ident, last, sent, now):
+        if _agent(key, to, problems, ids, ident, last_ident, last, now, names):
             return True
         # the owner is told: the letter couldn't go, or a day passed unsettled. From now on it is the owner's alert
         escalated = True
@@ -423,8 +642,8 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
         text = "✅ " + ok_text
     # a retry is the same notice, to a channel that can tell (`at`): its time stays with the failure until it has gone out
     wanted = sorted(problems)
-    unsent = _load(FAILED).get(key, {}).get("notice") or {}
-    notice_at = unsent["at"] if unsent.get("ids", unsent.get("problems")) == ident \
+    unsent = (failed_one := _load(FAILED).get(key)) and isinstance(failed_one, dict) and failed_one.get("notice") or {}
+    notice_at = unsent["at"] if unsent.get("at") and unsent.get("ids", unsent.get("problems")) == ident \
         else now.astimezone().isoformat(timespec="seconds")
     notice = {"key": key, "at": notice_at, "state": "open" if problems else "resolved"}
     if problems:
@@ -438,11 +657,11 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
     ok = send(text, notice, plain=bool(problems))
     _log(key, "reminder" if ident == last_ident else notice["state"], ok)
     if ok:
-        sent[key] = {"problems": wanted, **({"ids": ident} if ids is not None else {}), "at": now.isoformat(timespec="seconds"),
-                     **({"escalated": True, "to": to, "letter": (last or {}).get("letter")} if escalated and problems else {})}
+        _record(key, {"problems": wanted, **({"ids": ident} if ids is not None else {}),
+                      "at": now.isoformat(timespec="seconds"),
+                      **({"escalated": True, "to": to, "letter": (last or {}).get("letter")} if escalated and problems else {})})
         if escalated and not problems:
             _withdraw((last or {}).get("letter"))
-        _save(SENT, sent)
         clear_failure(key)
     else:
         record_failure(key, text, {"problems": wanted, **({"ids": ident} if ids is not None else {}), "at": notice_at})
