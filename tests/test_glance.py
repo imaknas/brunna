@@ -61,6 +61,26 @@ class Glance(unittest.TestCase):
         example = json.loads((ROOT / "contracts" / "fixtures" / "glance.v1.example.json").read_text())
         self.assertEqual(contracts.check_json(SCHEMA, example), [])
 
+    def test_a_newer_release(self):
+        """update only when the check found one (upgrade.pending): the tags and whether it carries a security fix"""
+        self.set_up()
+        self.assertNotIn("update", self.glance())
+        code = ("import json, sys; sys.path.insert(0, sys.argv[1]); import glance, upgrade; "
+                "upgrade.pending = lambda: {'current': 'v0.22.0', 'latest': 'v0.23.0', 'security': sys.argv[2] == 'y', "
+                "'since': 'x'}; g = glance.glance(); print(json.dumps(g)); print(glance.text(g))")
+        for security, first in (("n", "brunna v0.23.0 is out"), ("y", "Security update: brunna v0.23.0 is out")):
+            r = subprocess.run([sys.executable, "-c", code, str(ROOT / "bin"), security], env=self.env, cwd=self.tmp,
+                               capture_output=True, text=True, timeout=120)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            g = json.loads(r.stdout.splitlines()[0])
+            self.assertEqual(contracts.check_json(SCHEMA, g), [])
+            self.assertEqual(g["update"], {"current": "v0.22.0", "latest": "v0.23.0", "security": security == "y"})
+            self.assertTrue(r.stdout.splitlines()[-1].startswith(first), r.stdout)
+            self.assertIn("Run brunna upgrade yourself", r.stdout.splitlines()[-1])
+            self.assertTrue(r.stdout.splitlines()[-1].endswith("(not for an agent to run)"), r.stdout)
+            self.assertEqual(g["health"]["alerts"], [], "nothing is broken")
+        self.assertNotEqual(contracts.check_json(SCHEMA, {**g, "update": {**g["update"], "latest": "v1.0.0 and more"}}), [])
+
     def test_not_set_up_touches_nothing(self):
         self.assertEqual(self.glance(), {"v": 1, "set_up": False})
         self.assertEqual(list((self.tmp / "bus").iterdir()), [], "no bus made")

@@ -62,7 +62,16 @@ class Golden(unittest.TestCase):
                 "gated": surface.lines({"needs_you": 0, "health": "ok"}, [], 30, NOW, gated_open=2),
                 "gated, one": surface.lines({"needs_you": 0, "health": "ok"}, [], 30, NOW, gated_open=1),
             }
-            out = {"lines": cases, "labels": surface.labels(), "commands": surface.commands(inbox=True),
+            up = {"current": "v0.22.0", "latest": "v0.23.0", "security": False, "since": ""}
+            cases |= {
+                "a release": surface.lines({"needs_you": 0, "health": "ok"}, [], 30, NOW, update=up),
+                "a security release": surface.lines({"needs_you": 0, "health": "ok"}, [], 30, NOW, update={**up, "security": True}),
+                "a security release, and needs": surface.lines({"needs_you": 2, "health": "ok"}, [], 30, NOW,
+                                                               update={**up, "security": True}),
+            }
+            out = {"lines": cases, "labels": surface.labels(),
+                   "label, a release": surface.labels(up)["update"],
+                   "label, a security release": surface.labels({**up, "security": True})["update"], "commands": surface.commands(inbox=True),
                    "item prompts": [gsp.item_prompt("todo", "garden-app", "task-garden-app-1"),
                                     gsp.item_prompt("question", "garden-app", "m11180900-ab12")],
                    "usage": surface._("usage: brunna surface --runtime <name> --session <id> --cwd <folder> [--json]"),

@@ -16,6 +16,16 @@
   ],
   "gated, one": [
    "brunna · 1 封信在等別的 session:這個 session 的版本沒通過平台的 sandbox 檢查"
+  ],
+  "a release": [
+   "brunna · v0.23.0 出了"
+  ],
+  "a security release": [
+   "brunna · 安全更新 v0.23.0 出了"
+  ],
+  "a security release, and needs": [
+   "brunna · 2 件事要你處理",
+   "安全更新 v0.23.0 出了"
   ]
  },
  "labels": {
@@ -31,6 +41,8 @@
   "read_only": "這些在 Sage 那邊處理;這裡只顯示。",
   "unreadable": "這裡讀不到要你處理的事。"
  },
+ "label, a release": "brunna v0.23.0 出了(這台是 v0.22.0)。請自己在終端機執行 brunna upgrade",
+ "label, a security release": "安全更新:brunna v0.23.0 出了(這台是 v0.22.0)。請自己在終端機執行 brunna upgrade",
  "commands": [
   {
    "name": "inbox",

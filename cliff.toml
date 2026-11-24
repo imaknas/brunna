@@ -34,12 +34,15 @@ commit_preprocessors = [
   { pattern = 'entries with\nimpl: command together', replace = 'entries with `impl: command` together' },
 ]
 commit_parsers = [
-  { message = "^feat", group = "<!-- 0 -->New" },
-  { message = "^fix", group = "<!-- 1 -->Fixed" },
-  { message = "^perf", group = "<!-- 2 -->Faster" },
-  { message = "^revert", group = "<!-- 3 -->Reverted" },
+  # any commit with a Security: footer, whatever its type (CONTRIBUTING.md); machines look for this heading
+  # (bin/upgrade.py SECURITY)
+  { footer = "^Security:", group = "<!-- 0 -->Security" },
+  { message = "^feat", group = "<!-- 1 -->New" },
+  { message = "^fix", group = "<!-- 2 -->Fixed" },
+  { message = "^perf", group = "<!-- 3 -->Faster" },
+  { message = "^revert", group = "<!-- 4 -->Reverted" },
   # a breaking change of any other type (refactor!, build!…) is listed too: an upgrade has to know about it
-  { message = "^[a-z]+(\\([^)]*\\))?!:", group = "<!-- 4 -->Changed (breaking)" },
+  { message = "^[a-z]+(\\([^)]*\\))?!:", group = "<!-- 5 -->Changed (breaking)" },
   { message = ".*", skip = true },
 ]
 tag_pattern = "v[0-9].*"

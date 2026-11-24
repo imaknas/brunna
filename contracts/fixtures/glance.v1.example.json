@@ -67,5 +67,10 @@
  "status_page": {
   "url": "http://127.0.0.1:18790/",
   "local_to": "hub"
+ },
+ "update": {
+  "current": "v0.22.0",
+  "latest": "v0.23.0",
+  "security": false
  }
 }

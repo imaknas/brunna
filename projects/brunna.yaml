@@ -182,6 +182,15 @@ jobs:
   background: true
   cwd: hub
   run: bin/py bin/session_versions.py
+# whether a newer brunna release is out (bin/upgrade.py --release-check): one ls-remote, only for a checkout that follows
+# releases; the reminders and a security release's one notice to the owner come from its record. updates.check: false
+# in the settings turns it off
+- name: release-check
+  at: "08:30"
+  max_attempts_per_day: 1
+  background: true
+  cwd: hub
+  run: bin/py bin/upgrade.py --release-check
 - name: registry-updates         # manifest.update letters from projects: validated, then applied or returned (zero LLM)
   every: 15m
   cwd: hub

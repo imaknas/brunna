@@ -25,6 +25,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import tick_record  # noqa: E402
+import upgrade  # noqa: E402
 
 _ = i18n.domain(__file__)
 STATE_DIR = hubconf.STATE   # the main checkout's .state, as the scheduler and the status page write it
@@ -121,6 +122,8 @@ def glance() -> dict:
            "needs_you": (snap or {}).get("needs_you") or [],
            "mail": mail(), "scheduler": scheduler(now), "jobs_failed": jobs_failed(), "status_page": status_page()}
     out["health"] = health(snap, out["scheduler"]["alive"])
+    if up := upgrade.pending():
+        out["update"] = upgrade.public(up)
     if snap and snap.get("needs_you_error"):
         out["needs_you_error"] = snap["needs_you_error"]
     return out
@@ -142,6 +145,9 @@ def text(g: dict) -> str:
     lines += [f"  {'⚠️' if a['level'] == 'bad' else '🔔'} {a['text'][:140]}" for a in h["alerts"][:10]]
     if not g["scheduler"]["alive"]:
         lines.append(_("The scheduler has not ticked since {at}", at=g["scheduler"]["last_tick"] or "-"))
+    if g.get("update"):
+        # an agent may read this too
+        lines.append(_("{line} (not for an agent to run)", line=upgrade.line(g["update"])))
     return "\n".join(lines)
 
 

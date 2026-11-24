@@ -16,6 +16,16 @@
   ],
   "gated, one": [
    "brunna · 1 letter waits for another session: this session's version failed the platform's sandbox check"
+  ],
+  "a release": [
+   "brunna · v0.23.0 is out"
+  ],
+  "a security release": [
+   "brunna · security update v0.23.0 is out"
+  ],
+  "a security release, and needs": [
+   "brunna · 2 need you",
+   "security update v0.23.0 is out"
   ]
  },
  "labels": {
@@ -31,6 +41,8 @@
   "read_only": "Settled on the assistant's side; shown here only.",
   "unreadable": "What needs you could not be read here."
  },
+ "label, a release": "brunna v0.23.0 is out (this machine has v0.22.0). Run brunna upgrade yourself, in a terminal",
+ "label, a security release": "Security update: brunna v0.23.0 is out (this machine has v0.22.0). Run brunna upgrade yourself, in a terminal",
  "commands": [
   {
    "name": "inbox",

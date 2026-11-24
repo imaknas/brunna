@@ -300,7 +300,7 @@ class Golden(unittest.TestCase):
         self.heartbeat(None)   # nothing runs the scheduler here: doctor must not say it ticks soon
         out.append(self.agenthub("doctor", label="no service manager, unnamed assistant", sc={
             "sm": None, "plan": {}, "hooks": "githooks",
-            "release": {"version": "v0.3.0", "release": "v0.3.0", "error": "Could not resolve host: example.org"}}))
+            "release": {"version": "v0.3.0", "release": "v0.3.0", "error": "Could not resolve host: a text of the remote's"}}))
         # a second coding agent, which lacks the wake and the session ports (each says for itself)
         self.valid_cfg(runtime={"default": "claude", "installed": ["claude", "acp"]})
         # a scheduler that starts, and whose ticks crash

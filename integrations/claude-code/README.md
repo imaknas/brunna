@@ -4,10 +4,11 @@ A Claude Code mod that shows brunna inside the session you already have open (do
 
 - **The band** above the prompt, only while something needs you: how many items wait for you, whether the platform has
   a problem, a letter this session has held too long without handling it, or letters that wait for another session
-  because this session's tool version failed the platform's sandbox check. Its button opens the pane.
+  because this session's tool version failed the platform's sandbox check. Its button opens the pane. A newer brunna
+  release gets a quiet line of its own when nothing else is there; one with a security fix stands beside the count.
 - **The "needs you" pane**: your open to-dos and questions across projects, newest first, and the platform's alerts. An
   item of this session's own project has a button that fills the prompt box with the platform's words for asking the
-  agent about it; you edit and send it. An item only your own terminal can settle shows its `brunna` command, with a
+  agent about it; you edit and send it. A newer brunna release is a line with the `brunna upgrade` command to copy. An item only your own terminal can settle shows its `brunna` command, with a
   button that copies it. Items of other projects are read-only here, and the whole pane is read-only when your owner
   side is the assistant.
 - **`/inbox`** fills the prompt box with the request to read and handle this project's letters; **`/brunna`** opens the

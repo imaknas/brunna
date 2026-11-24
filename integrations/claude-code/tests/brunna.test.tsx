@@ -55,7 +55,7 @@ const PANE = {
 
 type Seen = { runs: string[][]; cwds: string[]; envs: Record<string, string>[]; filled: string[]; registered: string[] }
 
-function engine(on: any, surface: object = SURFACE): Seen {
+function engine(on: any, surface: object = SURFACE, glance: object = GLANCE): Seen {
   const seen: Seen = { runs: [], cwds: [], envs: [], filled: [], registered: [] }
   on('env.get', () => ({ value: '/home/alex' }))
   on('session.surfaces', () => ({ value: ['terminal'] }))
@@ -75,7 +75,7 @@ function engine(on: any, surface: object = SURFACE): Seen {
     seen.runs.push([...e.argv])
     seen.envs.push({ ...(e.init?.env ?? {}) })
     seen.cwds.push(e.init?.cwd ?? '')
-    const out = e.argv[1] === 'surface' ? surface : GLANCE
+    const out = e.argv[1] === 'surface' ? surface : glance
     return { value: { exitCode: 0, stdout: JSON.stringify(out), stderr: '', isStdoutTruncated: false,
       isStderrTruncated: false } }
   })
@@ -144,6 +144,44 @@ test('the pane is read-only when the owner side is the assistant', async ($, on)
   const ui = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect(await ui.find({ key: 'ask:garden-app/task-1' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Shown here only/ })).toBeDefined()
+  await ui.unmount()
+})
+
+const UPDATE = { current: 'v0.22.0', latest: 'v0.23.0', security: false }
+const OUT = { ...SURFACE, owner: { ...SURFACE.owner, needs_you: 0 }, lines: ['brunna · v0.23.0 is out'], update: UPDATE,
+  quiet: true, labels: { ...SURFACE.labels, update: 'brunna v0.23.0 is out (this machine has v0.22.0).' } }
+
+test('a newer release: a quiet band line that opens the pane', async ($, on) => {
+  engine(on, OUT)
+  await started($, on)
+  for (const surface of ['terminal', 'desktop', 'vscode', 'mobile'] as const) {
+    const ui = await $.ui.mount({ ...BAND, surface })
+    expect((await ui.find({ type: 'Text', text: /is out/ }))?.text).toBe('brunna · v0.23.0 is out')
+    expect(await ui.find({ key: 'open' })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+test('a newer release: the pane shows the line and the command to copy, and runs nothing', async ($, on) => {
+  const seen = engine(on, OUT, { ...GLANCE, update: UPDATE })
+  await started($, on)
+  await $.command.run(run('brunna'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /brunna v0\.23\.0 is out/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^brunna upgrade$/ }))?.text).toBe('brunna upgrade')
+  expect(await ui.find({ key: 'copy:update' })).toBeDefined()
+  await ui.press({ key: 'copy:update' })
+  await ui.unmount()
+  expect(seen.runs.every(r => r[1] === 'surface' || r[1] === 'glance')).toBe(true)
+  expect(seen.filled).toEqual([])
+})
+
+test('no newer release: the pane says nothing of one', async ($, on) => {
+  engine(on)
+  await started($, on)
+  await $.command.run(run('brunna'))
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'copy:update' })).toBeUndefined()
   await ui.unmount()
 })
 

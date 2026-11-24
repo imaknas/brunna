@@ -21,7 +21,9 @@ releases). Anything else is treated as a development checkout and refused, never
 are not on the remote, uncommitted changes to tracked files, or a linked worktree. Update those with git.
 
 `brunna doctor` says when a newer release is out. It asks the remote at most once a day (`git ls-remote`, 5 seconds at
-most, no prompts) and otherwise reads what the last check recorded.
+most, no prompts) and otherwise reads what the last check recorded. The daily job `brunna/release-check` does the same
+lookup and is what the reminders come from; what it contacts and how to turn it off:
+[install.md](install.md#the-daily-look-for-a-new-release).
 
 Your data is in the instance directory, not in the repo, so moving the code does not touch it. Data formats are
 versioned contracts, and newer code reads the older versions. Going back across a contract version is different: the

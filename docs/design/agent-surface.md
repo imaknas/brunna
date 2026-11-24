@@ -213,6 +213,8 @@ The surface layer has three parts:
     and types only; a letter's text is read through `/inbox`, by the agent.
   - **`owner`** folds in what the band needs from glance (the count, the owner side and the health state), so the
     minute's poll is this one command.
+  - **`update`**, **`quiet`** (11-25): a newer brunna release (as glance's `update`), and whether the only line is that
+    one, so an adapter may dim it. The pane's sentence about it is `labels.update`.
   - **`lines`**: the display text, written by the platform in the interface language. Adapters draw these lines and
     glance's `prompt` texts, and never compose wording of their own.
 - **Offer**: `commands` in the same output. The platform fixes the list; an adapter registers only the names it knows

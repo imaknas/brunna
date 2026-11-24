@@ -57,6 +57,12 @@ revert. A breaking change adds `!` and explains itself in a `BREAKING CHANGE:` p
 from these titles with [git-cliff](https://git-cliff.org/) (`cliff.toml`), so the description should say what the
 change makes different for a user.
 
+A commit that fixes something a user should upgrade for quickly, a way past a protection brunna promises, also ends with a
+`Security:` footer, whatever its type. It is listed first in the changelog, under `### Security`, and machines that run an
+older release tell their owner of it (bin/upgrade.py reads only whether that heading is there). The title and the
+footer are public before most people have upgraded: they say what is protected ("a project's letters can't be sent in
+another's name"), never how to attack it.
+
 ## Releasing
 
 Versions follow the commits: `feat` raises the minor version, `fix` and `perf` the patch, `!` the major

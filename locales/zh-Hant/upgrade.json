@@ -36,7 +36,6 @@
  "the in-step commands have not run for this commit on this machine (a git pull or checkout by hand?): brunna upgrade runs them": "這台機器還沒為這個 commit 跑過對齊的步驟(手動 git pull 或 checkout 過?):brunna upgrade 會跑",
  "run the in-step commands now?": "現在跑對齊的步驟?",
  "brunna upgrade{opt} installs it": "brunna upgrade{opt} 就會裝上",
- "no answer from {remote} within {n} seconds": "{remote} {n} 秒內沒有回應",
  "brunna {version} (no remote: not checked for newer releases)": "brunna {version}(沒有 remote:沒查有沒有新版)",
  "the checkout moved to {version} after brunna upgrade last brought this machine in step (at {old}): the Python packages, services, scheduler and hooks may be stale": "上次 brunna upgrade 讓這台機器對齊之後(在 {old}),checkout 移到了 {version}:Python 套件、服務、排程器跟 hook 可能是舊的",
  "⚠️ Breaking changes (read these first):": "⚠️ 不相容的改動(先看這些):",
@@ -53,5 +52,16 @@
  "{question} [y/N] ": "{question} [y/N] ",
  "no release tags": "沒有 release tag",
  "{ref} is older than {oldest}, which can't read what this version has written (it was renamed to brunna in v0.7)": "{ref} 比 {oldest} 舊,讀不懂這個版本寫下的東西(v0.7 改名成 brunna)",
- "the oldest release to go back to is {oldest}: brunna upgrade --to {oldest}": "最舊能回到 {oldest}:brunna upgrade --to {oldest}"
+ "the oldest release to go back to is {oldest}: brunna upgrade --to {oldest}": "最舊能回到 {oldest}:brunna upgrade --to {oldest}",
+ "brunna {latest} is out with a security fix (this machine has {current}). Tell the user; they run `brunna upgrade` themselves. Don't run it.": "brunna {latest} 出了,有安全修正(這台是 {current})。告訴使用者;`brunna upgrade` 由他們自己執行,你不要執行。",
+ "brunna {latest} is out (this machine has {current}). Tell the user; they run `brunna upgrade` themselves. Don't run it.": "brunna {latest} 出了(這台是 {current})。告訴使用者;`brunna upgrade` 由他們自己執行,你不要執行。",
+ "the notice about brunna {latest} is closed: this machine is past it, or a newer release replaced it": "brunna {latest} 的通知結案了:這台已經更新過,或有更新的 release 取代它",
+ "could not check for newer releases: {error}": "查不到有沒有新的 release:{error}",
+ "brunna {version} (the check for newer releases is off: updates.check in {settings})": "brunna {version}(沒有查新的 release:{settings} 的 updates.check 關著)",
+ "Security update: brunna {latest} is out (this machine has {current}). Run brunna upgrade yourself, in a terminal": "安全更新:brunna {latest} 出了(這台是 {current})。請自己在終端機執行 brunna upgrade",
+ "brunna {latest} is out (this machine has {current}). Run brunna upgrade yourself, in a terminal": "brunna {latest} 出了(這台是 {current})。請自己在終端機執行 brunna upgrade",
+ "the notice about brunna {latest} is closed: the check for newer releases is off (updates.check)": "brunna {latest} 的通知結案了:查新 release 的功能關掉了(updates.check)",
+ "the record of the check for newer releases can't be written": "查新 release 的記錄寫不進去",
+ "no answer within {n} seconds": "{n} 秒內沒有回應",
+ "no answer": "沒有回應"
 }

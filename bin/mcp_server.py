@@ -316,6 +316,33 @@ def notice(project: str | None, name: str) -> str:
     return "\n\n" + _("📬 {n} {n:letter is|letters are} still open; look with inbox first.", n=n) if n else ""
 
 
+def person_there(client: "Client | None") -> bool:
+    """Whether a person works in this client: its session is on record (a headless one records none), or, with no session
+    a runtime can name, the client said it can ask its user (elicitation). A script's client is neither."""
+    import runtime_ports
+    sid = runtime_ports.current_session()
+    if not sid:
+        return bool(client and client.elicitation)
+    f = hubconf.session_file(sid, runtime_ports.SESSION_RECORD)
+    return bool(f and runtime_ports._read_record(f))
+
+
+def release_out(client: "Client | None") -> str:
+    """Appended to inbox's answer: a newer brunna release, for the user (upgrade.session_line: once a day for all
+    sessions together). Nothing for a lease, for a client no person is at (it would take the day's telling), or where the
+    platform's state can't be read or written (a sandbox)."""
+    if os.environ.get("HUB_LLM_POINT") or os.environ.get("HUBBUS_LEASE"):
+        return ""
+    try:
+        if not person_there(client):
+            return ""
+        import upgrade
+        said = upgrade.session_line()
+    except Exception:
+        said = None
+    return f"\n\n{said}" if said else ""
+
+
 def instructions(project: str | None, why: str) -> str:
     text = INSTRUCTIONS.read_text()
     if not project:
@@ -679,7 +706,8 @@ def call(project: str | None, why: str, name: str, args: dict, client: "Client |
         ok, out = hubbus_cli(project, *cmd)
         # a session's `inbox` says what letters are itself; a platform run's doesn't (hubbus.mail_command)
         platform = os.environ.get("HUB_LLM_POINT") or os.environ.get("HUBBUS_LEASE")
-        return ok, f"{_hubbus().header(n, project)}\n\n{out}" if n and platform else out
+        out = f"{_hubbus().header(n, project)}\n\n{out}" if n and platform else out
+        return ok, out + (release_out(client) if ok else "")
     return hubbus_cli(project, *cmd)
 
 

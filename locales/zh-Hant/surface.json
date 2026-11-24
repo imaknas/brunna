@@ -20,5 +20,7 @@
  "Run `brunna inbox` and handle the letters as your rules say.": "執行 `brunna inbox`,照你的規則處理這些信。",
  "What needs you, and the platform's health": "要你處理的事,和平台狀態",
  "usage: brunna surface --runtime <name> --session <id> --cwd <folder> [--json]": "用法:brunna surface --runtime <名稱> --session <id> --cwd <資料夾> [--json]",
- "not served here ({why})": "這裡沒有服務({why})"
+ "not served here ({why})": "這裡沒有服務({why})",
+ "security update {latest} is out": "安全更新 {latest} 出了",
+ "{latest} is out": "{latest} 出了"
 }

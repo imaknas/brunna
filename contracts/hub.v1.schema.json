@@ -355,6 +355,10 @@
       "properties": {"url": {"type": "string"}},
       "description": "where the status page is reached from other machines (a tailnet or VPN URL); brunna glance reports it, and without it the page counts as local to the hub machine"
     },
+    "updates": {
+      "type": "object",
+      "properties": {"check": {"type": "boolean", "default": true, "description": "look once a day whether a newer brunna release is out (docs/install.md): a git ls-remote of the checkout's own remote; false turns off the job brunna/release-check, doctor's lookup and the reminders"}}
+    },
     "runtime": {
       "type": "object",
       "properties": {

@@ -149,7 +149,7 @@ $ agenthub doctor    # no service manager, unnamed assistant
 ✓ python ok
 ✓ config:都合格
 ✓ 語言:介面 zh-Hant,筆記和專案狀態 zh-Hant(要改:brunna init --lang <介面>[,<筆記>])
-✓ brunna v0.3.0(<TS> 查不到有沒有新版:Could not resolve host: example.org;doctor 一天後再試)
+✓ brunna v0.3.0(<TS> 查不到有沒有新版:沒有回應;doctor 一天後再試)
 ! 上次 brunna upgrade 讓這台機器對齊之後(在 v0.1.0),checkout 移到了 v0.3.0:Python 套件、服務、排程器跟 hook 可能是舊的
     → brunna upgrade
 ✓ owner 端:助理(owner_side: assistant)

@@ -138,6 +138,12 @@ class ClaudeCodeMod(unittest.TestCase):
         self.assertIn("readOnly = s?.owner.side === 'assistant'", self.src)
         self.assertIn("command[0] === 'brunna'", self.src)
 
+    def test_a_newer_release_is_shown_and_copied_only(self):
+        """The command is a constant, drawn and copied; what is run stays brunna's two answers (the tests above)."""
+        self.assertIn("const UPGRADE = 'brunna upgrade'", self.src)
+        self.assertEqual(len(re.findall(r"\bUPGRADE\b", self.src)), 3)
+        self.assertIn("$.ui.copy({ text: UPGRADE, ", self.src)
+
     def test_contract_majors(self):
         self.assertIn("const SURFACE_V = 1", self.src)
         self.assertIn("const GLANCE_V = 1", self.src)

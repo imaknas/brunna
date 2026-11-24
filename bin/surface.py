@@ -29,6 +29,7 @@ import glance  # noqa: E402
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import runtime_ports  # noqa: E402
+import upgrade  # noqa: E402
 
 _ = i18n.domain(__file__)
 _c = i18n.domain(__file__, content=True)
@@ -115,9 +116,10 @@ def open_letters(hb, project: str) -> int:
         raise Unreadable(str(db)) from e
 
 
-def labels() -> dict:
-    """The words an adapter draws around the data (its pane, its button), in the interface language, so it composes none."""
-    return {"open": _("needs you"), "title": _("brunna: needs you"), "empty": _("Nothing needs you."),
+def labels(update: dict | None = None) -> dict:
+    """The words an adapter draws around the data (its pane, its button), in the interface language, so it composes none.
+    update (upgrade.pending()): the pane's line about it."""
+    return {**({"update": upgrade.line(update)} if update else {}), "open": _("needs you"), "title": _("brunna: needs you"), "empty": _("Nothing needs you."),
             "refresh": _("refresh"), "todo": _("to-do"), "question": _("question"), "ask": _("ask here"),
             "copy": _("copy"), "health": _("Platform health"),
             "read_only": _("Settled on the assistant's side; shown here only."),
@@ -131,11 +133,15 @@ def _when(ts: str) -> datetime.datetime:
         return datetime.datetime.now().astimezone()   # an unreadable time counts as now: not shown as late
 
 
-def lines(owner: dict, held: list, hold_min: int, now: datetime.datetime, gated_open: int | None = None) -> list[str]:
-    """The band's text, in the interface language: only what needs the owner, as counts and states."""
+def lines(owner: dict, held: list, hold_min: int, now: datetime.datetime, gated_open: int | None = None,
+          update: dict | None = None) -> list[str]:
+    """The band's text, in the interface language: only what needs the owner, as counts and states. A newer brunna
+    release is said when nothing else is, one with a security fix always (after the count)."""
     parts = []
     if owner["needs_you"]:
         parts.append(_("{n} {n:needs|need} you", n=owner["needs_you"]))
+    if update and update["security"]:
+        parts.append(_("security update {latest} is out", latest=update["latest"]))
     if owner["health"] == "problem":
         parts.append(_("the platform has problems"))
     late = [h for h in held if now - _when(h["since"]) >= datetime.timedelta(minutes=hold_min)]
@@ -144,7 +150,19 @@ def lines(owner: dict, held: list, hold_min: int, now: datetime.datetime, gated_
     if gated_open:
         parts.append(_("{n} {n:letter waits|letters wait} for another session: this session's version failed the "
                        "platform's sandbox check", n=gated_open))
+    if update and not parts:
+        parts.append(_("{latest} is out", latest=update["latest"]))
     return [_("brunna · {line}", line=parts[0]), *parts[1:]] if parts else []
+
+
+def band(owner: dict, held: list, hold_min: int, now: datetime.datetime, gated_open: int | None = None) -> dict:
+    """The answer's labels and lines, with the newer brunna release when there is one (update). quiet: the only line is
+    that one, so nothing waits for the owner."""
+    up = upgrade.pending()
+    got = {"labels": labels(up), "lines": lines(owner, held, hold_min, now, gated_open, up)}
+    if up:
+        got |= {"update": upgrade.public(up), "quiet": not up["security"] and not lines(owner, held, hold_min, now, gated_open)}
+    return got
 
 
 def commands(inbox: bool) -> list[dict]:
@@ -184,15 +202,13 @@ def surface(runtime: str, native: str, cwd: str) -> dict:
     own = glance.owner()
     try:
         if runtime_ports.gated(session, rec):
-            return {**not_served("gated"), "project": project, "owner": own, "labels": labels(),
-                    "lines": lines(own, [], held_show_min(hb), now, gated_open=open_letters(hb, project)),
-                    "commands": commands(inbox=False)}
+            return {**not_served("gated"), "project": project, "owner": own,
+                    **band(own, [], held_show_min(hb), now, gated_open=open_letters(hb, project)), "commands": commands(inbox=False)}
         got = mail(hb, project, session)
     except Unreadable:
         return not_served("no_bus_access")
     return {"v": 1, "set_up": True, "served": True, "why_not": None, "project": project, "owner": own,
-            "mail": got, "labels": labels(), "lines": lines(own, got["held"], held_show_min(hb), now),
-            "commands": commands(inbox=True)}
+            "mail": got, **band(own, got["held"], held_show_min(hb), now), "commands": commands(inbox=True)}
 
 
 def languages_from_settings() -> None:

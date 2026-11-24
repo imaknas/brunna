@@ -136,6 +136,32 @@
           }
         }
       }
+    },
+    "update": {
+      "type": "object",
+      "description": "a newer brunna release this machine could upgrade to (absent: none known, or the checkout does not follow releases). Only the user upgrades, in a terminal",
+      "required": [
+        "current",
+        "latest",
+        "security"
+      ],
+      "properties": {
+        "current": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "latest": {
+          "type": "string",
+          "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+$"
+        },
+        "security": {
+          "type": "boolean"
+        }
+      }
+    },
+    "quiet": {
+      "type": "boolean",
+      "description": "with update: the only line is that release's, so nothing waits for the owner and an adapter may draw it dimmed"
     }
   }
 }

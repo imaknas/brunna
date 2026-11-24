@@ -122,6 +122,12 @@ class StatusPage(unittest.TestCase):
         if o.get("runtime"):
             cfg["runtime"] = {"default": o["runtime"]}
         (cfg_dir / "hub.json").write_text(json.dumps(cfg))
+        if o.get("release"):   # a newer brunna release on record, HEAD where the check saw it
+            (hub / ".git").mkdir()
+            (hub / ".git" / "HEAD").write_text("d" * 40 + "\n")
+            (state / "upgrade-check.json").write_text(json.dumps({"update": {
+                "current": "v0.22.0", "latest": "v0.23.0", "security": o["release"] == "security", "since": iso(-D),
+                "head": "d" * 40}}))
         if o.get("off"):   # alpha/daily's last run was off (bin/job_off.py)
             (state / "jobs-off").mkdir()
             (state / "jobs-off" / "alpha__daily.json").write_text(json.dumps({"reason": o["off"], "at": iso(-2 * H)}))
@@ -211,7 +217,7 @@ class StatusPage(unittest.TestCase):
                "AGENT_HUB_SECRETS": str(secrets), "AGENT_HUB_STATE": str(state), "AGENT_HUB_HOME": "",
                "AGENT_HUB_LANG_UI": golden_lang.LANG, "HOME": str(tmp)}
         with mock.patch.dict(os.environ, env), mock.patch.dict(sys.modules):
-            for m in ("hubconf", "i18n", "completion", "runtime_store", "job_off", "llm_ready"):   # completion.USAGE and the store follow STATE
+            for m in ("hubconf", "i18n", "completion", "runtime_store", "job_off", "llm_ready", "upgrade"):   # completion.USAGE and the store follow STATE
                 sys.modules.pop(m, None)
             sys.modules.update(mods)
             spec = importlib.util.spec_from_file_location("gsp_golden", ROOT / "bin" / "gen-status-page.py")
@@ -266,6 +272,9 @@ class StatusPage(unittest.TestCase):
             ("a long tick", quiet_options(ticks={"running": True, "unfinished": 0, "completed": iso(-2 * H)})),
             ("no tick after one that completed", quiet_options(
                 ticks={"running": False, "unfinished": 0, "completed": iso(-2 * H)})),
+            # a newer brunna release: its own line at the top, never a problem (the page stays healthy)
+            ("release out", quiet_options(release="plain")),
+            ("security release out", quiet_options(release="security")),
         ]
         for name, o in variants:
             pages = self.build(base / name.split(",")[0].replace(" ", "-"), o)

@@ -384,6 +384,16 @@ def wake_address_drop(ev, ws):
         f.unlink(missing_ok=True)
 
 
+def release_out(ev, ws):
+    """A newer brunna release, for the user (upgrade.session_line: once a day for all sessions, words only). Only a
+    session on record, which a person works in: a headless run would take the day's one telling with nobody to read it."""
+    f = hubconf.session_file(ev.session, runtime_ports.SESSION_RECORD)
+    if platform_run(os.environ) or not f or not runtime_ports._read_record(f):
+        return None
+    import upgrade
+    return upgrade.session_line()
+
+
 def platform_run(env) -> bool:
     """A run the platform started (a judgment point, an agent job, a lease): it records no presence, keeps no wake
     address and arms no waiter."""
@@ -430,7 +440,7 @@ HANDLERS = {
     # session_record before mail: a session told a letter is on record by then, or the tick in between could judge it closed
     "session_start": [("hub_pull", hub_pull), ("memory_pull", memory_pull), ("local_setup", local_setup), ("rules", rules),
                       ("nudge", nudge), ("memory_notice", memory_notice), ("session_record", session_record), ("mail", mail),
-                      ("wake_address", wake_address)],
+                      ("wake_address", wake_address), ("release_out", release_out)],
     "session_end": [("mail_end", mail_end), ("end_mark", end_mark), ("wake_address_drop", wake_address_drop),
                     ("memory_sync", memory_sync)],
     "pre_compact": [("memory_sync", memory_sync)],
@@ -448,7 +458,8 @@ DENY_HANDLERS = {"guard"}
 AS_PROJECT = {"memory_pull", "local_setup", "nudge"}
 # What runs no git and no script of the folder's. Any other handler, a new one included, runs only where the folder lets it: as
 # the project, or as the user where project_git.user_git_ok says so. The default is no.
-NOT_IN_FOLDER = {"memory_notice", "session_record", "mail", "mail_end", "end_mark", "wake_address", "wake_address_drop", "guard"}
+NOT_IN_FOLDER = {"memory_notice", "session_record", "mail", "mail_end", "end_mark", "wake_address", "wake_address_drop", "guard",
+                 "release_out"}
 # What runs only in the project's memory checkout (project_git.memory_dir), so it can go on where its folder is only a worktree
 MEMORY_ONLY = {"memory_pull", "memory_sync", "rules"}
 
@@ -627,6 +638,8 @@ def worktree(what: str, raw: str, name: str | None = None) -> int:
         steps += [("nudge", lambda: _worktree_nudge(ev, ws, cage))] if what == "nudge" else []
         steps += [("memory_notice", lambda: memory_notice(ev, ws))] if what == "start" else []
         steps += [("mail", lambda: mail(ev, ws))]
+    if what == "start" and not refused:
+        steps += [("release_out", lambda: release_out(ev, ws))]
     for name, fn in steps:
         try:
             out = fn()

@@ -77,6 +77,20 @@ alert say it is about to expire; do the same two steps again.
   - an alert channel: Discord, ntfy, email or macOS notifications;
   - Docker, for `bin/linux-test`.
 
+## The daily look for a new release
+
+On a checkout at a release, brunna looks once a day whether a newer one is out (the job `brunna/release-check`; `brunna
+doctor` does the same lookup when the last is older than a day). It asks the checkout's own git remote, the place you
+installed from, for its tags (`git ls-remote`) and, when there is a newer release, fetches that one tag into a
+temporary folder to read whether its changelog lists a security fix. Git sends nothing of yours, and nothing that is fetched is run or checked out.
+A checkout on `main` or with work of its own isn't looked up by the job.
+
+A newer release then shows in `brunna glance`, on the status page, in the Claude Code and herdr mods, and in one line to
+one of your agent sessions a day (the agent is told to tell you, never to upgrade). A release with a security fix also goes
+to your alert channels, once. Nothing upgrades by itself: you run `brunna upgrade`.
+
+To turn it all off, in `brunna.json`: `"updates": {"check": false}`. `brunna upgrade --check` still looks when you run it.
+
 ## A machine that sleeps
 
 An always-on machine is recommended, not required. On a laptop, or a desktop set to sleep, brunna catches up when

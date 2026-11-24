@@ -844,6 +844,14 @@ def main() -> None:
                      f"{alert_list(notices, 'notify')}</section>" if notices else "")
                   or f"<section class='card wide'><div class=empty><i class='dot good'></i>"
                      f"{_('Nothing needs attention')}</div></section>")
+    try:
+        import upgrade
+        update = upgrade.pending()   # a newer brunna release: not an alert (nothing is broken), its own line
+    except Exception as e:   # a broken record does not affect the rest of the page
+        update, update_html = None, f"<div class=sub>{esc(repr(e))}</div>\n"
+    else:
+        update_html = (f"<div class='update {'bad' if update['security'] else 'warn'}'><i class=dot></i>"
+                       f"<span>{esc(upgrade.line(update))}</span></div>\n" if update else "")
     generated = _("the hub machine · generated {now:%Y-%m-%d %H:%M} · refreshes every 5 minutes · schedules are defined "
                   "in the project registry (projects/) and schedule.yaml", now=now)
     page = f"""<!doctype html><html lang="{hubconf.lang_ui()}"><head><meta charset="utf-8">
@@ -851,7 +859,7 @@ def main() -> None:
 <title>{_('Schedule status')}</title><style>{STATUS_CSS}</style></head><body><main>
 <header class=top><div class=brand>{MARK}<div><div class=name>brunna</div><h1>{_('Schedule status')}</h1></div></div>{pill}</header>
 <nav class=links><a href="digest.html">{_('Digest')}</a> · <a href="todo.html">{_('To-do')}</a> · <a href="reflect/">{_('Weekly review')}</a></nav>
-<div class=tiles>{tiles}</div>
+{update_html}<div class=tiles>{tiles}</div>
 <div class=grid>{needs_card}{mail_card}{alert_html}</div>
 <h2>{_('Scheduled jobs')}<span class=sub>{len(jobs)}</span></h2>
 <div class=tbl><table class=jobs><thead><tr><th>{_('Job')}</th><th>{_('When')}</th><th>{_('Last')}</th><th>{_('Next')}</th></tr></thead>
@@ -901,6 +909,8 @@ background:var(--surface);border:1px solid var(--line);font-size:13px;color:var(
 .pill.warn .dot{background:var(--warn)} .pill.warn{color:var(--warn)}
 .dot.c1{background:var(--c1)}.dot.c2{background:var(--c2)}.dot.c3{background:var(--c3)}
 .dot.c4{background:var(--c4)}.dot.c5{background:var(--c5)}.dot.c6{background:var(--c6)}.dot.none{background:transparent}
+.update{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:13px}
+.update .dot{background:var(--warn)} .update.bad{color:var(--bad)} .update.bad .dot{background:var(--bad)}
 .links{margin:10px 0 18px;color:var(--dim);font-size:13px}
 .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
 .tile{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:12px 14px;min-width:0}

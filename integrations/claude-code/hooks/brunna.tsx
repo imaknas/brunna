@@ -2,7 +2,8 @@
 //
 // Display only. It runs one read-only program, `brunna`, for two answers: `brunna surface --json` (this session's view,
 // contract session-surface.v1) once a minute, and `brunna glance --json` (glance.v1) when its pane opens or is
-// refreshed. It draws what they say and composes no wording of its own, except the one line for a contract it doesn't
+// refreshed. It draws what they say and composes no wording of its own, except the `brunna upgrade` command it shows for a
+// newer release (shown and copied, never run) and the one line for a contract it doesn't
 // know. It puts nothing into the model's context: no prompt.submit hook, no tool, no agent, and its two commands return
 // no text. A press or a command only fills the prompt box with the platform's words, for the person to send; nothing is
 // ever submitted, approved or run for them. With this mod gone, broken or disabled, nothing brunna guarantees changes.
@@ -17,6 +18,8 @@ const RUN_MS = 20_000
 // The contract majors this mod reads; on any other it draws MISMATCH and nothing else.
 const SURFACE_V = 1
 const GLANCE_V = 1
+// What the person types for a newer brunna release (labels.update says which is out); shown and copied, never run.
+const UPGRADE = 'brunna upgrade'
 const MISMATCH = "brunna and its Claude Code mod don't match"
 // The commands it may register: the platform lists what it offers, this mod registers only these names.
 const ALLOWED = ['inbox', 'brunna'] as const
@@ -103,6 +106,8 @@ function surfaceOf(out: Record<string, unknown>): Surface | null {
       health: str(owner.health),
     },
     commands,
+    update: isObj(out.update),
+    quiet: out.quiet === true,
   }
 }
 
@@ -149,7 +154,7 @@ async function loadNeeds($: Engine): Promise<void> {
       items.sort((a, b) => (a.since < b.since ? 1 : a.since > b.since ? -1 : 0)) // newest first
       const health = isObj(out.health) ? out.health : {}
       const alerts = (Array.isArray(health.alerts) ? health.alerts : []).map(a => (isObj(a) ? str(a.text) : '')).filter(Boolean)
-      next = { kind: 'items', items, alerts }
+      next = { kind: 'items', items, alerts, update: isObj(out.update) }
     }
   }
   await update($, needs, () => next)
@@ -205,10 +210,10 @@ export const register: Register = on => {
     if (v?.kind !== 'surface' || v.surface.lines.length === 0) return next(e)
     const s = v.surface
     const open = s.labels.open
-    const wants = s.owner.needs_you > 0 || s.owner.health === 'problem'
+    const wants = s.owner.needs_you > 0 || s.owner.health === 'problem' || s.update
     return (
       <Box flexDirection="row" gap={1}>
-        <Text wrap="truncate-end">{s.lines.join('  ·  ')}</Text>
+        <Text wrap="truncate-end" dimColor={s.quiet}>{s.lines.join('  ·  ')}</Text>
         {wants && open ? <Button key="open" label={open} onPress={() => void openPane($).catch(() => undefined)} /> : null}
       </Box>
     )
@@ -229,6 +234,17 @@ export const register: Register = on => {
         {L.refresh ? <Button key="refresh" label={L.refresh} onPress={() => void loadNeeds($).catch(() => undefined)} /> : null}
         {readOnly && L.read_only ? <Text dimColor>{L.read_only}</Text> : null}
         {n?.kind === 'unreadable' && L.unreadable ? <Text dimColor>{L.unreadable}</Text> : null}
+        {n?.kind === 'items' && n.update && L.update ? (
+          <Box flexDirection="column">
+            <Text>{L.update}</Text>
+            <Box flexDirection="row" gap={1}>
+              <Text dimColor>{UPGRADE}</Text>
+              {L.copy ? (
+                <Button key="copy:update" label={L.copy} onPress={p => void $.ui.copy({ text: UPGRADE, surface: p.surface }).catch(() => undefined)} />
+              ) : null}
+            </Box>
+          </Box>
+        ) : null}
         {n?.kind === 'items' && rows.length === 0 && L.empty ? <Text dimColor>{L.empty}</Text> : null}
         {rows.map(item => {
           const key = `${item.project}/${item.id}`

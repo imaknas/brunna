@@ -10,6 +10,8 @@ export type BrunnaSurface = {
   labels: Record<string, string>
   owner: { needs_you: number; side: string; health: string }
   commands: BrunnaCommand[]
+  update: boolean // a newer brunna release is out: labels.update says which
+  quiet: boolean // the only line is that release's
 }
 
 export type BrunnaView = { kind: 'surface'; surface: BrunnaSurface } | { kind: 'mismatch' } | null
@@ -25,7 +27,7 @@ export type BrunnaItem = {
 }
 
 export type BrunnaNeeds =
-  | { kind: 'items'; items: BrunnaItem[]; alerts: string[] }
+  | { kind: 'items'; items: BrunnaItem[]; alerts: string[]; update: boolean }
   | { kind: 'mismatch' }
   | { kind: 'unreadable' }
   | null

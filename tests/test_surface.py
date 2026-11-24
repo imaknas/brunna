@@ -113,6 +113,37 @@ class Surface(unittest.TestCase):
         self.assertEqual(contracts.check_json(SCHEMA, out), [], out)
         return out
 
+    def test_a_newer_release(self):
+        """Its own quiet line when nothing needs the owner; one with a security fix beside the count, never quiet; the
+        pane's line among the labels; nothing at all without one."""
+        sys.path.insert(0, str(ROOT / "bin"))
+        import datetime
+        from unittest import mock
+        import surface
+        now = datetime.datetime(2026, 11, 25, 9).astimezone()
+        calm, busy = {"needs_you": 0, "health": "ok"}, {"needs_you": 2, "health": "problem"}
+        up = {"current": "v0.22.0", "latest": "v0.23.0", "security": False, "since": "x"}
+        fix = {**up, "security": True}
+
+        def band(owner, update, **kw):
+            with mock.patch.dict(os.environ, {"AGENT_HUB_LANG_UI": "en"}), \
+                    mock.patch.object(surface.upgrade, "pending", lambda: update):
+                return surface.band(owner, [], 30, now, **kw)
+        got = band(calm, up)
+        self.assertEqual((got["lines"], got["quiet"]), (["brunna · v0.23.0 is out"], True))
+        self.assertEqual(got["update"], {"current": "v0.22.0", "latest": "v0.23.0", "security": False})
+        self.assertIn("v0.23.0 is out (this machine has v0.22.0)", got["labels"]["update"])
+        got = band(busy, up)
+        self.assertEqual((got["lines"], got["quiet"]), (["brunna · 2 need you", "the platform has problems"], False))
+        self.assertIn("update", got["labels"], "the pane still shows it")
+        self.assertFalse(band(calm, up, gated_open=1)["quiet"])
+        got = band(busy, fix)
+        self.assertEqual(got["lines"], ["brunna · 2 need you", "security update v0.23.0 is out", "the platform has problems"])
+        got = band(calm, fix)
+        self.assertEqual((got["lines"], got["quiet"]), (["brunna · security update v0.23.0 is out"], False))
+        got = band(calm, None)
+        self.assertEqual((got["lines"], "update" in got, "quiet" in got, "update" in got["labels"]), ([], False, False, False))
+
     def send(self, frm, to, kind, text):
         r = self.run_(str(ROOT / "bin" / "hubbus"), "send", "--from", frm, "--to", to, "--type", kind, "--text", text)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

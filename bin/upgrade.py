@@ -46,9 +46,22 @@ doctor: doctor_lines() says which release this is and whether a newer one is kno
 (written by every fetch here, and by doctor itself). Doctor touches the network only when that record is older than a
 day: one `git ls-remote --tags` with a 5-second limit, no prompts; a failure is recorded too, so an offline machine
 waits once a day, not every run.
+
+`upgrade.py --release-check` (the daily job brunna/release-check): the same lookup, for a checkout that follows releases
+only. A release newer than the checkout's goes into that record as `update` (current, latest, security, since, the commit
+HEAD was at). security: a `### Security` heading in the CHANGELOG.md of a version between the two, read from the tag,
+fetched alone into a throwaway repo in the platform's private temp area (FETCH_TIMEOUT, FETCH_MAX, no prompts; nothing of
+it reaches the hub's repo): nothing of it is run or checked out, and no text of the remote's goes anywhere, an error's
+included (why a lookup failed is one of reason()'s). A fetch that fails leaves it unknown (None), tried again the next day:
+until it is known no session is told and the alert stays as it is.
+pending() is what every place that shows it reads: the record and HEAD, no network and no git, None once HEAD moved.
+What is shown is the two tags, each `v<digits>.<digits>.<digits>` exactly, in the platform's own words; nothing upgrades
+by itself and no agent is told to. `updates.check: false` in the settings turns off the job's and doctor's lookup, and
+the reminders.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import fcntl
 import json
@@ -60,6 +73,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tempfile
 
 BIN = pathlib.Path(__file__).resolve().parent
 if str(BIN) not in sys.path:
@@ -74,7 +88,13 @@ ROOT = hubconf.ROOT
 AVAILABLE, FAILED, USAGE, REFUSED, UNCONFIRMED = 10, 1, 2, 3, 4
 CHECK_EXPIRY = datetime.timedelta(hours=24)
 LS_REMOTE_TIMEOUT = 5
-RELEASE = re.compile(r"^v(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$")
+FETCH_TIMEOUT = 60   # the one tag whose changelog says whether a release carries a security fix
+FETCH_MAX = 128 << 20   # bytes one file that fetch writes may have (its pack)
+OUTPUT_MAX = 4 << 20    # of a remote's answer read
+CHANGELOG_MAX = 4 << 20   # a changelog larger than this isn't read
+TOLD_EVERY = datetime.timedelta(hours=24)   # sessions are told of one release once in this time, all together
+RELEASE = re.compile(r"^v([0-9]{1,9})\.([0-9]{1,9})\.([0-9]{1,9})(?:-([0-9A-Za-z.-]+))?$")
+SECURITY = re.compile(r"^### Security[ \t]*$", re.M)   # cliff.toml's heading
 SECTION = re.compile(r"^## (v\d+\.\d+\.\d+\S*)")
 SHOWN_TYPES = re.compile(r"^(feat|fix|perf|revert)(\([^)]*\))?!?: ")   # what cliff.toml lists
 BREAKING_TITLE = re.compile(r"^[a-z]+(\([^)]*\))?!: ")
@@ -97,8 +117,8 @@ USAGE_TEXT = """usage: brunna upgrade [--to <tag> | --main] [--check] [--yes]
 # ---------- git ----------
 
 def git(*args, env: dict | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, text=True, env=env,
-                          stdin=subprocess.DEVNULL)
+    return subprocess.run(["git", "-C", str(ROOT), *args], capture_output=True, encoding="utf-8",
+                          errors="replace", env=env, stdin=subprocess.DEVNULL)
 
 
 def out(*args) -> str | None:
@@ -129,10 +149,16 @@ def version_key(tag: str | None) -> tuple | None:
     return int(m[1]), int(m[2]), int(m[3]), 0 if m[4] else 1, m[4] or ""
 
 
+def plain(tag) -> bool:
+    """A release's tag, v<digits>.<digits>.<digits> and nothing else: a tag is the remote's data, and only one of this
+    shape is shown."""
+    m = RELEASE.fullmatch(tag) if isinstance(tag, str) else None
+    return bool(m) and not m[4]
+
+
 def newest(tags) -> str | None:
     """The newest release by version order; pre-releases are never the default."""
-    final = [t for t in tags if version_key(t) and not RELEASE.match(t)[4]]
-    return max(final, key=version_key, default=None)
+    return max((t for t in tags if plain(t)), key=version_key, default=None)
 
 
 def remote_name() -> str | None:
@@ -187,20 +213,63 @@ def read_json(f: pathlib.Path) -> dict | None:
 
 
 def write_json(f: pathlib.Path, d: dict) -> None:
-    f.parent.mkdir(parents=True, exist_ok=True)
-    tmp = f.with_name(f.name + ".tmp")
-    tmp.write_text(json.dumps(d, ensure_ascii=False, indent=1) + "\n")
-    tmp.replace(f)
+    f.parent.mkdir(parents=True, exist_ok=True)   # f is in hubconf.STATE, which no sandbox may write
+    fd, tmp = tempfile.mkstemp(prefix=f".{f.name}.", dir=hubconf.STATE)   # its own: the job and doctor write at the same time
+    try:
+        with os.fdopen(fd, "w") as h:
+            h.write(json.dumps(d, ensure_ascii=False, indent=1) + "\n")
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, f)
+    except BaseException:
+        pathlib.Path(tmp).unlink(missing_ok=True)
+        raise
 
 
 def now() -> datetime.datetime:
     return datetime.datetime.now().astimezone()
 
 
+@contextlib.contextmanager
+def record_lock():
+    """One writer of the record at a time (the job, doctor, upgrade: each reads what is there and writes it on). Without a
+    lock file (a full disk) it goes on."""
+    fd = None
+    try:
+        fd = os.open(hubconf.STATE / "upgrade-check.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+    except OSError:
+        pass
+    try:
+        yield
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
 def record_check(remote: str, newest_tag: str | None, error: str | None) -> dict:
-    d = {"checked": now().isoformat(timespec="seconds"), "remote": remote, "newest": newest_tag, "error": error}
-    write_json(check_file(), d)
+    with record_lock():
+        prev = (read_json(check_file()) or {}).get("update")
+        d = {"checked": now().isoformat(timespec="seconds"), "remote": remote, "newest": newest_tag, "error": error}
+        # a lookup that failed says nothing about what is out: what was known stays
+        up = prev if error else update_of(newest_tag, prev)
+        if up:
+            d["update"] = up
+        try:
+            write_json(check_file(), d)
+        except OSError:   # a full disk: what was found is still the answer
+            print(_("the record of the check for newer releases can't be written"), file=sys.stderr)
     return d
+
+
+def record_security(up: dict) -> None:
+    """What the fetch found, into the record as it is now: only where it is still about the same two releases."""
+    with record_lock():
+        rec = read_json(check_file())
+        cur = rec.get("update") if rec else None
+        if isinstance(cur, dict) and all(cur.get(k) == up[k] for k in ("current", "latest", "head")):
+            cur["security"] = up["security"]
+            with contextlib.suppress(OSError):
+                write_json(check_file(), rec)
 
 
 def record_in_step() -> None:
@@ -210,6 +279,12 @@ def record_in_step() -> None:
         return
     write_json(steps_file(), {"commit": sha("HEAD"), "version": describe(), "ref": here_ref(),
                               "at": now().isoformat(timespec="seconds")})
+    with record_lock():
+        rec = read_json(check_file())
+        if rec:   # what is still out, seen from where the checkout is now
+            prev = rec.pop("update", None)
+            up = update_of(rec.get("newest") or (prev.get("latest") if isinstance(prev, dict) else None), prev)
+            write_json(check_file(), {**rec, **({"update": up} if up else {})})
 
 
 def local_mode() -> tuple[str, str]:
@@ -228,6 +303,164 @@ def local_mode() -> tuple[str, str]:
         return "dev", _("{n} {n:commit|commits} here {n:is|are} on no branch of {remote} and no release tag: a development "
                         "checkout", n=n, remote=remote)
     return ("main" if b == "main" else "release"), ""
+
+
+# ---------- a newer release (docs/install.md, "The daily look for a new release") ----------
+
+def checks_on() -> bool:
+    return hubconf.get("updates.check") is not False
+
+
+def security_in(low: str, high: str, git_dir: pathlib.Path | None = None) -> bool | None:
+    """Whether a version after `low` up to `high` has a Security heading in the changelog at the tag `high` (of git_dir:
+    the throwaway repo's; else the checkout's own). None: it isn't there, can't be read, or is over CHANGELOG_MAX."""
+    where = ["--git-dir", str(git_dir)] if git_dir else []
+    spec = f"refs/tags/{high}:CHANGELOG.md"
+    r = git(*where, "cat-file", "-s", spec, env=quiet_env())
+    if r.returncode != 0 or not r.stdout.strip().isdigit() or int(r.stdout) > CHANGELOG_MAX:
+        return None
+    r = git(*where, "cat-file", "blob", spec, env=quiet_env())
+    return any(SECURITY.search(s) for _t, s in between(r.stdout, low, high)) if r.returncode == 0 else None
+
+
+def update_of(latest: str | None, prev) -> dict | None:
+    """The record's `update` when `latest` is newer than the release this checkout is at and it follows releases, else
+    None. What `prev` found out stays while the checkout is at the same release: about the same newer one, and that there
+    is a security fix also for one after it (it is in that one too)."""
+    if not plain(latest) or local_mode()[0] != "release":
+        return None
+    current = newest((out("tag", "--merged", "HEAD", "--list", "v[0-9]*") or "").split())
+    if not current or version_key(latest) <= version_key(current):
+        return None
+    prev = prev if isinstance(prev, dict) and plain(prev.get("latest")) else {}
+    same = prev.get("latest") == latest
+    known = prev.get("security") if prev.get("current") == current and (
+        same or prev.get("security") is True and version_key(prev["latest"]) < version_key(latest)) else None
+    return {"current": current, "latest": latest,
+            "since": same and prev.get("since") or now().isoformat(timespec="seconds"),
+            "security": known if isinstance(known, bool) else security_in(current, latest), "head": sha("HEAD")}
+
+
+def pending(rec: dict | None = None) -> dict | None:
+    """{current, latest, security, since} of the release this machine could upgrade to, or None: from the record alone,
+    and only while HEAD is where the check saw it (a detached HEAD's file holds the commit). security None: not known yet."""
+    up = (rec or read_json(check_file()) or {}).get("update") if checks_on() else None
+    if not isinstance(up, dict) or not plain(up.get("current")) or not plain(up.get("latest")) \
+            or version_key(up["latest"]) <= version_key(up["current"]):
+        return None
+    try:
+        head = (ROOT / ".git" / "HEAD").read_text().strip()
+    except (OSError, ValueError):
+        return None
+    if not head or head != up.get("head"):
+        return None
+    return {"current": up["current"], "latest": up["latest"], "since": str(up.get("since") or ""),
+            "security": up["security"] if isinstance(up.get("security"), bool) else None}
+
+
+def public(up: dict) -> dict:
+    """What a client gets of pending() (glance.v1's and session-surface.v1's `update`): security only when it is known."""
+    return {"current": up["current"], "latest": up["latest"], "security": up["security"] is True}
+
+
+def line(up: dict) -> str:
+    """The one line for the owner (glance, the status page, a session's pane, the alert)."""
+    if up["security"]:
+        return _("Security update: brunna {latest} is out (this machine has {current}). Run brunna upgrade yourself, in a "
+                 "terminal", latest=up["latest"], current=up["current"])
+    return _("brunna {latest} is out (this machine has {current}). Run brunna upgrade yourself, in a terminal",
+             latest=up["latest"], current=up["current"])
+
+
+def told_file() -> pathlib.Path:
+    return hubconf.STATE / "release-told.json"
+
+
+def claim(latest: str, security: bool) -> bool:
+    """Whether a session may be told of this release now: the marker is written before anything is said, under a lock,
+    so of all sessions starting at once one says it. That it carries a security fix is said even when the release alone was
+    already. A marker that can't be read or written: nobody says it."""
+    try:
+        fd = os.open(told_file(), os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0), 0o600)
+    except OSError:
+        return False
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            told = json.loads(os.read(fd, 4096) or b"{}")
+            if told.get("release") == latest and (told.get("security") or not security) and datetime.timedelta(0) <= \
+                    now() - datetime.datetime.fromisoformat(told["at"]) < TOLD_EVERY:
+                return False
+        except (ValueError, KeyError, TypeError, AttributeError):
+            pass   # a marker that says nothing readable is written again
+        os.ftruncate(fd, 0)
+        os.pwrite(fd, json.dumps({"release": latest, "security": security, "at": now().isoformat(timespec="seconds")}).encode(), 0)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def session_line() -> str | None:
+    """What one session is told (hub-event at its start, the MCP server's inbox), at most once per release per
+    TOLD_EVERY for all of them together, once it is known whether it carries a security fix. Words only: the user
+    upgrades, never the agent."""
+    up = pending()
+    if not up or up["security"] is None or not claim(up["latest"], up["security"]):
+        return None
+    if up["security"]:
+        return _("brunna {latest} is out with a security fix (this machine has {current}). Tell the user; they run "
+                 "`brunna upgrade` themselves. Don't run it.", latest=up["latest"], current=up["current"])
+    return _("brunna {latest} is out (this machine has {current}). Tell the user; they run `brunna upgrade` themselves. "
+             "Don't run it.", latest=up["latest"], current=up["current"])
+
+
+ALERT_KEY = "release-"
+
+
+def settle_alert(rec: dict | None = None) -> None:
+    """The owner's one notice of a security release (alert.py, key release-<tag>): sent once, never repeated daily,
+    closed once this machine has it, a newer one replaced it, or the check is off. Left as it is while it isn't known
+    whether the newer release carries a security fix. rec: the record just made (the file may not take it)."""
+    import alert
+    up = pending(rec)
+    if up and up["security"] is None:
+        return
+    key = ALERT_KEY + up["latest"] if up and up["security"] else None
+    for k in sorted({*alert.open_keys(ALERT_KEY), *(k for k in alert.failures() if k.startswith(ALERT_KEY))} - {key}):
+        latest = k.removeprefix(ALERT_KEY)
+        alert.once(k, [], _("the notice about brunna {latest} is closed: this machine is past it, or a newer release "
+                            "replaced it", latest=latest) if checks_on() else
+                   _("the notice about brunna {latest} is closed: the check for newer releases is off (updates.check)",
+                     latest=latest))
+    if key and key not in alert.open_keys(ALERT_KEY):
+        alert.once(key, [line(up)], "")
+
+
+def reason(error) -> str:
+    """Why a lookup failed, from the record: one of these, never a text of the remote's (or of an older record's)."""
+    if error == "timeout":
+        return _("no answer within {n} seconds", n=LS_REMOTE_TIMEOUT)
+    if isinstance(error, str) and re.fullmatch(r"git exit -?[0-9]{1,4}", error):
+        return error
+    return _("no answer")
+
+
+def release_check() -> int:
+    """The daily job. Exit 0 whatever the remote answers: an offline machine is nothing to alert about (doctor says it)."""
+    rec = None
+    if checks_on() and is_checkout() and local_mode()[0] == "release":
+        remote = remote_name()
+        rec = record_check(remote, *ls_remote_newest(remote))
+        up = rec.get("update")
+        if rec["error"]:
+            print(_("could not check for newer releases: {error}", error=reason(rec["error"])))
+        elif up and up["security"] is None:
+            up["security"] = fetched_security(remote, up)
+            record_security(up)
+    settle_alert(rec)
+    return 0
 
 
 # ---------- what changes ----------
@@ -442,6 +675,12 @@ def run_steps(back: str | None, full: bool = True, manual_back: bool = False) ->
         if rc != 0:
             return failed(name, rc, back, manual_back)
     record_in_step()
+    try:
+        settle_alert()
+    except ImportError:   # a tree without alert.py
+        pass
+    except Exception as e:   # the upgrade is done; the daily check settles it
+        print(f"release alert: {e!r}", file=sys.stderr)
     if full and (ROOT / "bin" / "update-runtimes.py").exists():
         # a checked copy of each coding agent in the store (docs/design/runtime-versions.md section 3): a failure here
         # (offline, no npm, no token for the checks) is for doctor to show, never a halted upgrade
@@ -510,6 +749,8 @@ def main(argv: list[str]) -> int:
     if argv[:1] in (["-h"], ["--help"]):
         print(_(USAGE_TEXT), end="")
         return 0
+    if argv == ["--release-check"]:   # the job brunna/release-check (see the header)
+        return release_check()
     a = parse(argv)
     if a is None:
         print(_(USAGE_TEXT), end="", file=sys.stderr)
@@ -658,31 +899,89 @@ def bring_in_step(back: str | None, moved: bool) -> int:
 
 # ---------- doctor ----------
 
-def ls_remote_newest(remote: str) -> tuple[str | None, str | None]:
-    """(newest release tag on the remote, error): one `git ls-remote`, no prompts (its own session, so ssh cannot ask
-    on the terminal), killed after LS_REMOTE_TIMEOUT seconds."""
-    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    if not os.environ.get("GIT_SSH_COMMAND") and not out("config", "--get", "core.sshCommand"):
-        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
-    p = subprocess.Popen(["git", "-C", str(ROOT), "ls-remote", "--tags", "--refs", remote], stdout=subprocess.PIPE,
-                         stderr=subprocess.PIPE, stdin=subprocess.DEVNULL, text=True, env=env, start_new_session=True)
+QUIET = ("-c", "core.askPass=", "-c", "credential.interactive=false")   # with quiet_env: git asks nobody anything
+
+
+def quiet_env() -> dict:
+    """The environment of a git that may reach the remote: no prompt of any kind (terminal, askpass programs, ssh, the
+    credential manager's window), no object fetched on demand, and no other repo named by the caller's environment."""
+    env = {k: v for k, v in os.environ.items() if k not in (
+        "GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR", "GIT_NAMESPACE")}
+    # set and empty: git takes it as the answer to which askpass program to run, before core.askPass and SSH_ASKPASS
+    return env | {"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "SSH_ASKPASS": "", "SSH_ASKPASS_REQUIRE": "never",
+                  "GCM_INTERACTIVE": "never", "GIT_NO_LAZY_FETCH": "1"}
+
+
+def bounded_git(timeout: int, *args) -> tuple[str | None, str]:
+    """(None, its output) of one git command that reaches the remote, or (why it failed, ""): "timeout", "git exit N" or
+    "no answer" (it couldn't be started). In a session of its own (ssh can't ask on the terminal), killed with it after
+    `timeout` seconds. Its output goes to a file, so nothing it leaves running holds the wait; what it says on stderr is
+    the remote's words and is dropped. No file it writes passes FETCH_MAX."""
+    import resource
+
+    def limit():   # in the child
+        hard = resource.getrlimit(resource.RLIMIT_FSIZE)[1]
+        most = FETCH_MAX if hard == resource.RLIM_INFINITY else min(FETCH_MAX, hard)
+        resource.setrlimit(resource.RLIMIT_FSIZE, (most, most))
     try:
-        o, e = p.communicate(timeout=LS_REMOTE_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        try:
-            os.killpg(p.pid, signal.SIGKILL)
-        except OSError:
-            pass
-        p.communicate()
-        return None, _("no answer from {remote} within {n} seconds", remote=remote, n=LS_REMOTE_TIMEOUT)
-    if p.returncode != 0:
-        return None, (e.strip().splitlines() or [f"git ls-remote: exit {p.returncode}"])[-1][:200]
-    return newest(line.split("refs/tags/", 1)[1] for line in o.splitlines() if "refs/tags/" in line), None
+        env = quiet_env()
+        if not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH") and not out("config", "--get", "core.sshCommand"):
+            env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+        with tempfile.TemporaryFile(dir=hubconf.private_tmp()) as got:
+            p = subprocess.Popen(["git", "-C", str(ROOT), *QUIET, *args], stdout=got, stderr=subprocess.DEVNULL,
+                                 stdin=subprocess.DEVNULL, env=env, start_new_session=True, preexec_fn=limit)
+            try:
+                rc = p.wait(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                rc = None
+            if rc is None:
+                with contextlib.suppress(OSError):
+                    os.killpg(p.pid, signal.SIGKILL)
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    p.wait(timeout=2)
+                return "timeout", ""
+            got.seek(0)
+            return (f"git exit {rc}", "") if rc else (None, got.read(OUTPUT_MAX).decode("utf-8", "replace"))
+    except (OSError, subprocess.SubprocessError):
+        return "no answer", ""
+
+
+def ls_remote_newest(remote: str) -> tuple[str | None, str | None]:
+    """(newest release tag on the remote, error): one `git ls-remote`, at most LS_REMOTE_TIMEOUT seconds."""
+    error, o = bounded_git(LS_REMOTE_TIMEOUT, "ls-remote", "--tags", "--refs", remote)
+    if error:
+        return None, error
+    return newest(x.split("refs/tags/", 1)[1] for x in o.splitlines() if "refs/tags/" in x), None
+
+
+def fetched_security(remote: str, up: dict) -> bool | None:
+    """security_in of the newer release, its tag alone and shallow, in a throwaway bare repo: the hub's repo gets no
+    object, ref or FETCH_HEAD, however this ends (a killed run's folder goes with prune_private_tmp). The hub's own config
+    is included for how to reach the remote (its URL, ssh command, credentials), with its hooks off. None: it failed."""
+    tmp = None
+    try:
+        tmp = pathlib.Path(tempfile.mkdtemp(prefix="release-check-", dir=hubconf.private_tmp()))
+        repo = tmp / "repo.git"
+        if git("init", "--quiet", "--bare", "--template=", str(repo), env=quiet_env()).returncode != 0 or \
+                git("config", "--file", str(repo / "config"), "include.path", str(ROOT / ".git" / "config")).returncode != 0:
+            return None
+        tag = f"refs/tags/{up['latest']}"
+        error, _o = bounded_git(FETCH_TIMEOUT, "--git-dir", str(repo), "-c", "core.hooksPath=/dev/null", "-c", "gc.auto=0",
+                                "-c", "maintenance.auto=false", "-c", "fetch.unpackLimit=1", "fetch", "--quiet", "--depth=1",
+                                "--no-tags", "--no-filter", "--no-recurse-submodules", "--refmap=", remote, f"+{tag}:{tag}")
+        return None if error else security_in(up["current"], up["latest"], repo)
+    except OSError:
+        return None
+    finally:
+        if tmp:
+            shutil.rmtree(tmp, ignore_errors=True)
 
 
 def doctor_lines() -> list[tuple[str, str, str]]:
     """(ok|warn, what, how to fix) for agenthub doctor: the release, a newer one when known, and a checkout that moved
-    without its in-step commands. Network only when the record is older than CHECK_EXPIRY (see the header)."""
+    without its in-step commands. Network only when the record is older than CHECK_EXPIRY (see the header), never with updates.check
+    off."""
     if not is_checkout():
         return []
     version, rel, remote = describe(), nearest_release(), remote_name()
@@ -691,13 +990,17 @@ def doctor_lines() -> list[tuple[str, str, str]]:
         age = now() - datetime.datetime.fromisoformat(rec["checked"]) if rec else None
     except (KeyError, TypeError, ValueError):
         age = None
-    if remote and (age is None or age > CHECK_EXPIRY or age < datetime.timedelta(0) or rec.get("remote") != remote):
+    if remote and checks_on() and (age is None or age > CHECK_EXPIRY or age < datetime.timedelta(0) or rec.get("remote") != remote):
         rec = record_check(remote, *ls_remote_newest(remote))
     lines = []
     latest = (rec or {}).get("newest")
+    latest = latest if plain(latest) else None
     when = (rec or {}).get("checked", "")[:16].replace("T", " ")
     if not remote:
         lines.append(("ok", _("brunna {version} (no remote: not checked for newer releases)", version=version), ""))
+    elif not checks_on():
+        lines.append(("ok", _("brunna {version} (the check for newer releases is off: updates.check in {settings})",
+                              version=version), ""))
     elif latest and (version_key(rel) is None or version_key(latest) > version_key(rel)):
         lines.append(("warn", _("brunna {latest} is out; this checkout is at {version} (checked {when})",
                                 latest=latest, version=version, when=when),
@@ -708,7 +1011,7 @@ def doctor_lines() -> list[tuple[str, str, str]]:
     else:
         lines.append(("ok", _("brunna {version} (could not check for newer releases at {when}: {error}; doctor tries "
                               "again after a day)", version=version, when=when,
-                              error=(rec or {}).get("error") or _("no release tags")), ""))
+                              error=reason(rec["error"]) if (rec or {}).get("error") else _("no release tags")), ""))
     done = read_json(steps_file())
     if done and done.get("commit") and done["commit"] != sha("HEAD") and local_mode()[0] != "dev":
         lines.append(("warn", _("the checkout moved to {version} after brunna upgrade last brought this machine in step "

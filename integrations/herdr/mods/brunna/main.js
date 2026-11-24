@@ -191,6 +191,11 @@ export default class Brunna extends View {
     const now = Date.now();
     const need = [...(g.needs_you ?? [])].sort((a, b) => (b.since ?? "").localeCompare(a.since ?? ""));
     const rows = [];
+    const up = g.update;
+    if (up) rows.push(h_flex().mx(8).mt(14).px(10).py(8).gap(8).items_start().rounded(8).bg(t.raised)
+      .child(div().mt(6).child(dot(up.security ? t.blocked : t.accent, 6)))
+      .child(div().flex_1().min_w(0).text_size(12).line_height("17px").text_color(t.muted)
+        .child(`${up.security ? "Security update: " : ""}brunna ${up.latest} is out (you have ${up.current}) · brunna upgrade`)));
     if (need.length) {
       rows.push(this.section(t, "Needs you", "newest first"));
       for (const x of need.slice(0, SHOW)) rows.push(this.item(t, x, now));

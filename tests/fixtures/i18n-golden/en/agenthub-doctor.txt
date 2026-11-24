@@ -149,7 +149,7 @@ $ agenthub doctor    # no service manager, unnamed assistant
 ✓ python ok
 ✓ config: all valid
 ✓ language: interface en, notes and project state en (change: brunna init --lang <interface>[,<notes>])
-✓ brunna v0.3.0 (could not check for newer releases at <TS>: Could not resolve host: example.org; doctor tries again after a day)
+✓ brunna v0.3.0 (could not check for newer releases at <TS>: no answer; doctor tries again after a day)
 ! the checkout moved to v0.3.0 after brunna upgrade last brought this machine in step (at v0.1.0): the Python packages, services, scheduler and hooks may be stale
     → brunna upgrade
 ✓ owner side: assistant (owner_side: assistant)
