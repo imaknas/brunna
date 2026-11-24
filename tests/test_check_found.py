@@ -163,8 +163,8 @@ class Registry(unittest.TestCase):
 
     def test_the_checks_declare_it(self):
         import yaml
-        want = {"modules/claude.yaml": "claude-login", "modules/codex.yaml": "codex-login",
-                "modules/assistant.yaml": "push-reach"}
+        want = {"projects/brunna.yaml": "secrets", "modules/claude.yaml": "claude-login",
+                "modules/codex.yaml": "codex-login", "modules/assistant.yaml": "push-reach"}
         for f, name in want.items():
             jobs = {j["name"]: j for j in yaml.safe_load((ROOT / f).read_text())["jobs"]}
             self.assertIs(jobs[name].get("found_exit"), True, f)

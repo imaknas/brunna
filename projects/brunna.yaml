@@ -199,6 +199,7 @@ jobs:
   cwd: hub
   max_attempts_per_day: 2
   run: bin/py bin/check-secrets.py
+  found_exit: true   # it sends what it finds (alert-routing.md step 3)
 # merged, clean worktrees: idle ≥ 2 days, delete rebuildable dependencies; removed only at ≥ 14 days with nobody using
 # them (branch kept)
 - name: prune-worktrees
