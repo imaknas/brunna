@@ -6,10 +6,12 @@ it) and every kind of failure must fail the run.
 import os
 import pathlib
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 
 RUNNER = pathlib.Path(__file__).resolve().parents[1] / "bin" / "run-tests"
@@ -86,3 +88,84 @@ class RunTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout)
         self.assertIn("(3 modules, 3 items,", r.stdout)
         self.assertIn("test_i18n_golden_x@en", durations.read_text())
+
+
+class Stopped(unittest.TestCase):
+    """A run stopped by a tier's time limit (11-19 and 11-21: thirty minutes, and nothing said what had hung)."""
+
+    def setUp(self):
+        self.tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def start(self, names):
+        """A run over `names`, each of which says it has started, from a copy of bin/ (the nested run's guard keeps its
+        folder in that tree's .state, not this one's, which other tests watch)."""
+        shutil.copytree(RUNNER.parent, self.tmp / "hub" / "bin", ignore=shutil.ignore_patterns("__pycache__"), symlinks=True)
+        run_tmp = self.tmp / "run-tmp"
+        run_tmp.mkdir()
+        env = {**os.environ, "TEST_JOBS": "3", "TMPDIR": str(run_tmp)}
+        env.pop("TEST_DURATIONS", None)   # the tier's own timings: not the nested run's to write
+        tests = self.tmp / "suite"
+        p = subprocess.Popen([sys.executable, str(self.tmp / "hub" / "bin" / "run-tests"), str(tests)], env=env,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, start_new_session=True)
+        self.addCleanup(p.stdout.close)
+        self.addCleanup(p.wait)
+        self.addCleanup(lambda: p.poll() is None and os.killpg(p.pid, signal.SIGKILL))
+        end = time.monotonic() + 60
+        while not all((self.tmp / f"{n}.started").exists() for n in names):
+            self.assertLess(time.monotonic(), end, "the suite never got going")
+            time.sleep(0.05)
+        return p
+
+    def suite(self, **modules):
+        (self.tmp / "suite").mkdir()
+        for name, body in modules.items():
+            (self.tmp / "suite" / f"{name}.py").write_text(
+                "import os, pathlib, subprocess, sys, time, unittest\n"
+                f"HERE = pathlib.Path({str(self.tmp)!r})\n"
+                f"class T(unittest.TestCase):\n    def test_1(self):\n"
+                f"        (HERE / '{name}.started').touch()\n        {body}\n")
+
+    def stopped(self, send, names):
+        p = self.start(names)
+        send(p)
+        out, _err = p.communicate(timeout=60)
+        self.assertNotEqual(p.returncode, 0, out)
+        return out
+
+    HANG = "time.sleep(120)"
+    # three workers: the smallest file waits for one of them, so once test_z has started the failed module's result is in
+    FOUR = {"test_hang": HANG, "test_hang2": HANG, "test_bad": "self.assertEqual(1, 2)", "test_z": HANG}
+
+    def test_the_time_limit_names_what_was_running_and_what_had_failed(self):
+        """TERM to the whole group, as the test runner's stop(): the modules die with it, before the runner can look."""
+        self.suite(**self.FOUR)
+        out = self.stopped(lambda p: os.killpg(p.pid, signal.SIGTERM), self.FOUR)
+        self.assertIn("======== stopped: 1 items had finished, 3 were running", out)
+        for name in ("test_hang", "test_hang2", "test_z"):
+            self.assertRegex(out, rf"(?m)^ +\d+\.\d s  {name}$")
+        self.assertRegex(out, r"(?m)^FAIL: test_1 \(test_bad\.T\.test_1\)$")
+        self.assertNotIn("test_hang (exit", out, "what the stop ended has not failed")
+
+    def test_the_runner_alone_signalled(self):
+        self.suite(**self.FOUR)
+        out = self.stopped(lambda p: p.send_signal(signal.SIGTERM), self.FOUR)
+        self.assertIn("======== stopped: 1 items had finished, 3 were running", out)
+        self.assertRegex(out, r"(?m)^ +\d+\.\d s  test_hang$")
+
+    def test_an_interrupt_from_the_keyboard(self):
+        self.suite(test_hang=self.HANG)
+        out = self.stopped(lambda p: os.killpg(p.pid, signal.SIGINT), ["test_hang"])
+        self.assertRegex(out, r"(?m)^ +\d+\.\d s  test_hang$")
+
+    def test_a_module_whose_child_keeps_its_output_open(self):
+        """A child outside the group outlives the stop and holds the pipe, so the runner never sees the module end."""
+        self.suite(test_hang="p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'], start_new_session=True); "
+                             "(HERE / 'child').write_text(str(p.pid)); (HERE / 'child.started').touch(); p.wait()")
+
+        def kill():
+            if (self.tmp / "child").exists():
+                os.kill(int((self.tmp / "child").read_text()), signal.SIGKILL)
+        self.addCleanup(kill)
+        out = self.stopped(lambda p: os.killpg(p.pid, signal.SIGTERM), ["test_hang", "child"])
+        self.assertRegex(out, r"(?m)^ +\d+\.\d s  test_hang$")

@@ -13,6 +13,8 @@ pool too instead of being one long item.
 
 The run's HOME, secrets and temp folder are its own and removed afterwards (bin/testguard.py), on an interrupt (SIGINT, SIGTERM)
 too; what a test left in them fails the run, a disk image still attached from under them included (it is detached).
+A run stopped that way (a tier's time limit) first prints what was running and for how long, the longest first, and the
+modules that had already failed: a hung test is in that list.
 
 The output ends like unittest's own (people and agents read it): `Ran <n> tests in <s>s`, then `OK` / `OK (skipped=k)` or
 `FAILED (failures=…, errors=…, skipped=…)`; before it, the full output of every module that failed (its `FAIL:` /
@@ -30,6 +32,7 @@ import os
 import pathlib
 import queue
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -94,7 +97,10 @@ def test_ids(item: tuple[str, str | None], tests: pathlib.Path) -> list[str]:
     return ids if all(i.startswith(item[0] + ".") for i in ids) else []
 
 
-RUNNING: set[subprocess.Popen] = set()   # the modules running now: an interrupted run stops them
+RUNNING: dict[subprocess.Popen, tuple[str, float]] = {}   # the modules running now (key, start): an interrupted run stops them
+CUT: list[tuple[str, float]] = []   # (key, seconds) the signal itself ended: a stop goes to the whole group, these die with it
+RESULTS: dict[str, tuple[int, str, float]] = {}   # what has finished: (exit code, output, seconds)
+CUT_CODES = (-signal.SIGTERM, -signal.SIGINT)
 RUNNING_LOCK = threading.Lock()
 STOPPING = threading.Event()
 
@@ -104,14 +110,16 @@ def run_one(item: tuple[str, str | None], tests: pathlib.Path) -> tuple[int, str
     with subprocess.Popen([sys.executable, "-m", "unittest", item[0]], env=env_for(tests, item[1]),
                           stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True) as p:
         with RUNNING_LOCK:
-            RUNNING.add(p)
+            RUNNING[p] = (key(item), t0)
             if STOPPING.is_set():
                 p.terminate()
         try:
             out, _err = p.communicate()
         finally:
             with RUNNING_LOCK:
-                RUNNING.discard(p)
+                RUNNING.pop(p, None)
+                if p.returncode in CUT_CODES:
+                    CUT.append((key(item), time.monotonic() - t0))
     return p.returncode, out, time.monotonic() - t0
 
 
@@ -149,6 +157,28 @@ def counts(out: str) -> dict[str, int]:
     return c
 
 
+def print_failed(k: str, code: int, out: str) -> None:
+    lines = [line for line in out.splitlines() if not RAN.match(line) and not RESULT.match(line)]
+    while lines and (not lines[-1].strip() or set(lines[-1]) == {"-"}):   # its own separator before "Ran"
+        lines.pop()
+    body = "\n".join(lines)
+    print(f"======== {k} (exit {code})\n{body}\n", flush=True)
+
+
+def print_stopped() -> None:
+    """A stopped run says what it was doing, at once: a tier's time limit leaves seconds before the KILL."""
+    with RUNNING_LOCK:
+        now = time.monotonic()
+        was = sorted([(now - t0, k) for k, t0 in RUNNING.values()] + [(secs, k) for k, secs in CUT], reverse=True)
+        cut = {k for _secs, k in was}
+        done = {k: v for k, v in RESULTS.items() if k not in cut}
+    for k in sorted(done):
+        if done[k][0] != 0:
+            print_failed(k, *done[k][:2])
+    print(f"======== stopped: {len(done)} items had finished, {len(was)} were running")
+    print("\n".join(f"{secs:8.1f} s  {k}" for secs, k in was), flush=True)
+
+
 def main(argv: list[str]) -> int:
     if argv and argv[0] in ("-h", "--help"):
         print(__doc__)
@@ -181,8 +211,7 @@ def main(argv: list[str]) -> int:
     todo: queue.Queue = queue.Queue()
     for it in work:
         todo.put(it)
-    results: dict[str, tuple[int, str, float]] = {}
-    lock = threading.Lock()
+    results = RESULTS
 
     def worker():
         while not STOPPING.is_set():
@@ -191,7 +220,7 @@ def main(argv: list[str]) -> int:
             except queue.Empty:
                 return
             res = run_one(it, tests)
-            with lock:
+            with RUNNING_LOCK:   # print_stopped reads them, on an interrupt, while workers still end
                 results[key(it)] = res
 
     t0 = time.monotonic()
@@ -213,11 +242,7 @@ def main(argv: list[str]) -> int:
             failed.append(k)
             if not (c["failures"] or c["errors"]):
                 total["errors"] += 1   # crashed before unittest's own summary (import error, killed…)
-            lines = [line for line in out.splitlines() if not RAN.match(line) and not RESULT.match(line)]
-            while lines and (not lines[-1].strip() or set(lines[-1]) == {"-"}):   # its own separator before "Ran"
-                lines.pop()
-            body = "\n".join(lines)
-            print(f"======== {k} (exit {code})\n{body}\n", flush=True)
+            print_failed(k, code, out)
     if cache:
         secs = {k: v[2] for k, v in results.items()}
         for k, m in parent.items():   # a split module's own total: decides next time whether to split it again
@@ -272,6 +297,7 @@ if __name__ == "__main__":
     try:
         sys.exit(main(sys.argv[1:]))
     except KeyboardInterrupt:
+        print_stopped()
         stop_running()
         print("run-tests: interrupted", file=sys.stderr, flush=True)
         sys.exit(130)
