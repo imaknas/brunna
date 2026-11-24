@@ -25,6 +25,9 @@ error and a count without a new wording counting as a new problem (2026-11-13: t
 character re-sent the same broken login five times in a day). The error is also cleaned (`clean_error`) before it is
 shown.
 
+Exit (found_exit, docs/design/alert-routing.md step 3): 0 nothing found; alert.FOUND (4) the problems are with the
+owner; 1 requests keep failing for another reason than the login, or the problems couldn't be delivered.
+
 Usage: check-claude-login.py
 """
 from __future__ import annotations
@@ -194,10 +197,15 @@ def main() -> int:
         requested.write_text(json.dumps({pid: text for pid, text in zip(ids, hard)
                                          if pid.endswith((":login", ":failing"))}, ensure_ascii=False))
 
-    alert.once("claude-login", hard, _("The claude login check is back to normal"), ids=ids)
+    told = alert.once("claude-login", hard, _("The claude login check is back to normal"), ids=ids)
     for x in hard:
         print(f"⚠️ {x}")
-    return 1 if hard else 0
+    if not hard:
+        return 0
+    # requests failing for another reason than the login (llm.py printed no JSON, claude itself broken): the platform's
+    # agents must hear of it, so a failure, not a finding (docs/design/alert-routing.md step 3)
+    broken = any(pid.endswith(":failing") for pid in ids)
+    return alert.FOUND if told and not broken else 1
 
 
 if __name__ == "__main__":

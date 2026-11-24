@@ -14,6 +14,7 @@ jobs:
   legacy_name: agent-hub/claude-login
   every: 1h
   run: bin/py bin/check-claude-login.py
+  found_exit: true   # it sends what it finds (alert-routing.md step 3)
 secrets:
 - name: claude-headless-token
   path: ~/.claude/headless-oauth-token

@@ -178,6 +178,20 @@ FAILING_FILE = HUB / ".state" / "scheduler-failing.json"
 ALERT_AFTER = datetime.timedelta(minutes=60)
 
 
+FOUND = 4   # alert.FOUND (not imported: a broken alert.py must not stop the scheduling; a test checks they agree)
+
+
+def completed(job: dict, rc: int) -> bool:
+    """Whether a run's exit is a completed run: 0, or FOUND from a job that declares found_exit (a check that ran and
+    delivered what it found itself; docs/design/alert-routing.md step 3). Any other job's 4 is a failure."""
+    return rc == 0 or (rc == FOUND and job.get("found_exit") is True)
+
+
+def finished_line(name: str, rc: int) -> str:
+    """The log line of a completed run (gen-status-page.py's LOG_LINE reads it)."""
+    return f"job '{name}' finished OK" if rc == 0 else f"job '{name}' finished, problems found and sent (exit {rc})"
+
+
 def mark_job(name: str, failed: bool, detail: str = "") -> None:
     """Record which jobs are failing now (last run failed): removed on success. For alert_failing. Failing to write
     doesn't affect scheduling."""
@@ -298,7 +312,7 @@ def reconcile(state: dict, jobs: dict[str, dict], merged: list[pathlib.Path]) ->
             log(f"job '{name}' FAILED (exit -1), background process gone without a result")
             job_failed(name, -1, _("the background run vanished midway (reboot or killed)"), rec.get("project"),
                        rec.get("chain"), rec.get("depth", 1))
-        elif rec["exit"] == 0:
+        elif completed(rec, rec["exit"]):
             state[name] = rec["date"]
             mark_job(name, False)
             if "every_minutes" in jobs.get(name, {}):
@@ -367,9 +381,9 @@ def spawn_background(name: str, command: str, job_log_path: pathlib.Path,
             rc = run_bounded(command, job_log, minutes, env)
         rec.update(exit=rc, finished=datetime.datetime.now().isoformat(timespec="seconds"))
         write_json(run_file, rec)
-        log(f"job '{name}' finished OK" if rc == 0 else
+        log(finished_line(name, rc) if completed(rec, rc) else
             f"job '{name}' FAILED (exit {rc}), will retry next tick")
-        if rc != 0:
+        if not completed(rec, rc):
             job_failed(name, rc, f"log:.logs/{job_log_path.name}", rec.get("project"), rec.get("chain"),
                        rec.get("depth", 1))
     finally:
@@ -647,7 +661,8 @@ def tick() -> None:
         events = batch["events"] if batch else None
         chain, depth = event_jobs.run_chain(name, events or []), event_jobs.run_depth(events or [])
         env = {**JOB_ENV, **event_jobs.run_env(name, chain, depth, events)}
-        extra = {"project": job.get("project"), "chain": chain, "depth": depth}
+        extra = {"project": job.get("project"), "chain": chain, "depth": depth,
+                 **({"found_exit": True} if job.get("found_exit") is True else {})}   # for completed() after the run
         if batch:
             extra.update(events_upto=batch["upto"], events_count=len(events),
                          events_held=[{"id": h["id"]} for h in batch["held"]])
@@ -661,7 +676,7 @@ def tick() -> None:
         try:
             with open(job_log_path, "a") as job_log:
                 rc = run_bounded(job["command"], job_log, timeout_of(job), env)
-            if rc:
+            if not completed(job, rc):
                 raise subprocess.CalledProcessError(rc, job["command"])
             state[name] = today
             if "every_minutes" in job:
@@ -671,7 +686,7 @@ def tick() -> None:
                 held_back(state, name, batch["held"], today)
             save_state(state)
             mark_job(name, False)
-            log(f"job '{name}' finished OK")
+            log(finished_line(name, rc))
         except subprocess.CalledProcessError as e:
             log(f"job '{name}' FAILED (exit {e.returncode}), will retry next tick")
             job_failed(name, e.returncode, f"log:.logs/{job_log_path.name}", job.get("project"), chain, depth)
@@ -689,8 +704,10 @@ def tick() -> None:
 def record_run(name: str, code: int) -> None:
     """A manual run's result (`schedulectl run`, which starts the job outside a tick): it clears or sets the job's
     failing mark as a scheduled run's would, so a job fixed and run by hand doesn't stay "failing" until its next
-    scheduled day (a monthly job: weeks of daily alerts). Only the mark; the day's run mark is schedulectl's."""
-    mark_job(name, code != 0, f"exit {code} (run by hand)")
+    scheduled day (a monthly job: weeks of daily alerts). Only the mark; the day's run mark is schedulectl's. A job
+    that declares found_exit is looked up, so its FOUND counts as completed here too."""
+    job = next((j for j in all_jobs()[0] if j.get("name") == name), {}) if code == FOUND else {}
+    mark_job(name, not completed(job, code), f"exit {code} (run by hand)")
 
 
 if __name__ == "__main__":

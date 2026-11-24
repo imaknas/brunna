@@ -96,7 +96,11 @@ schema v1 (contracts/project.v1.md has the full description):
   gate: strict                    the merge gate enforced: main in the main checkout can't be committed to directly
                                   (only via merge-branch); by default it only detects
   jobs:      [{name, at | every | trigger, run | (kind: agent + prompt), cwd?, days?, days_of_month?, months?,
-               until?, between?, background?, after?, max_attempts_per_day?, timeout?, legacy_name?, catch_up?}]
+               until?, between?, background?, after?, max_attempts_per_day?, timeout?, legacy_name?, catch_up?,
+               found_exit?}]
+    found_exit: true (a scheduled command job of the platform or a module only): the job is a check that sends what
+      it finds itself (alert.once); its exit alert.FOUND (4) means it ran and what it found was delivered, a completed
+      run for the scheduler, not a failure (docs/design/alert-routing.md step 3). Any other job's 4 is a failure
     catch_up: period (a job with at and day filters): when the machine was asleep or off on the scheduled day, the
       job runs at the first tick after it wakes instead of skipping to the next scheduled day (newcomer-path.md B7)
     timeout: 45m / 2h: the run is stopped (its whole process group) past this; without it the scheduler's default
@@ -220,7 +224,7 @@ HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
 RESERVED_LOCAL_PORTS = (47615,)   # credentials.CALLBACK_PORT: no service may listen there (tests check they agree)
 JOB = {"name", "at", "every", "trigger", "run", "kind", "prompt", "cwd", "days", "days_of_month", "months", "until",
        "between", "background", "after", "before", "max_attempts_per_day", "timeout", "legacy_name", "allow",
-       "connectors", "catch_up", "mail", "tier", "credentials"}
+       "connectors", "catch_up", "mail", "tier", "credentials", "found_exit"}
 TRIGGER = {"events", "projects", "sources", "where", "debounce"}
 # the mailbox's own work and bookkeeping (inbox records, delivery and closing written by dispatch, which relays others'
 # letters without a chain): no event job reacts to them (event-jobs.md 3.5)
@@ -1019,6 +1023,11 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
             errs.append(_("job {name}: connectors: true needs an allow: list (its run denies every MCP server the list "
                           "doesn't name, so without one it could use no connector)", name=n))
         errs += [_("job {name}: {error}", name=n, error=e) for e in validate_job_credentials(job, doc)]
+        if "found_exit" in job and (job["found_exit"] is not True or not platform_doc(doc, stem)
+                                    or job.get("kind", "command") != "command" or "trigger" in job):
+            errs.append(_("job {name}: found_exit: true is only for a scheduled command job of the platform or a module "
+                          "(a check that sends what it finds itself; on a project's job it would hide its failures)",
+                          name=n))
         if any(str(x).startswith("mcp__claude_ai_") for x in job.get("allow") or []) and not job.get("connectors"):
             errs.append(_("job {name}: allow has claude.ai connector tools; add connectors: true (the default headless token "
                            "loads no connectors)", name=n))
@@ -1453,7 +1462,8 @@ def scheduler_jobs(index: dict, legacy_names: set[str]) -> tuple[list[dict], lis
                 j["every_minutes"] = every_minutes(str(job["every"]))
             for src, dst in (("days", "days_of_week"), ("days_of_month", "days_of_month"), ("months", "months"),
                              ("until", "end_date"), ("between", "between"), ("background", "background"),
-                             ("max_attempts_per_day", "max_attempts_per_day"), ("catch_up", "catch_up")):
+                             ("max_attempts_per_day", "max_attempts_per_day"), ("catch_up", "catch_up"),
+                             ("found_exit", "found_exit")):
                 if src in job:
                     j[dst] = job[src]
             if "trigger" in job:

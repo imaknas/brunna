@@ -48,10 +48,11 @@ class Check(unittest.TestCase):
         (self.tmp / "token").write_text("secret-token\n")
         self.alerts = []
         self.requests = []
+        self.delivered = True   # what alert.once answers: whether the problems reached the owner
         conf = {"assistant.api": "https://a.example:8444/anything"}
         for p in (mock.patch.object(self.m, "STREAK", self.tmp / "streak.json"),
                   mock.patch.object(self.m.alert, "_assistant_on", lambda: True),
-                  mock.patch.object(self.m.alert, "once", lambda key, problems, ok: self.alerts.append((key, problems, ok))),
+                  mock.patch.object(self.m.alert, "once", lambda key, problems, ok: self.alerts.append((key, problems, ok)) or self.delivered),
                   mock.patch.object(self.m.hubconf, "get", lambda k, d=None: conf.get(k, d)),
                   mock.patch.object(self.m.hubconf, "p", lambda k, d=None: self.tmp / "token"),
                   mock.patch("builtins.print")):
@@ -77,13 +78,13 @@ class Check(unittest.TestCase):
         self.assertEqual(self.requests[0].get_header("Authorization"), "Bearer secret-token")
 
     def test_not_reaching_is_a_problem_at_once_and_names_since_when(self):
-        self.assertEqual(self.run_with({**DOWN, "unshown_since": "2026-11-07T10:00:00+08:00"}), 1)
+        self.assertEqual(self.run_with({**DOWN, "unshown_since": "2026-11-07T10:00:00+08:00"}), self.m.alert.FOUND)
         self.assertEqual(len(self.alerts[-1][1]), 1)
         self.assertIn("2026-11-07T10:00:00+08:00", self.alerts[-1][1][0])
 
     def test_no_subscription_is_a_problem_though_reaching_is_true(self):
         """nothing is being sent, so reaching stays true, and nothing can arrive"""
-        self.assertEqual(self.run_with({**OK, "subscriptions": 0}), 1)
+        self.assertEqual(self.run_with({**OK, "subscriptions": 0}), self.m.alert.FOUND)
         self.assertEqual(len(self.alerts[-1][1]), 1)
 
     def test_not_reaching_and_no_subscription_are_two_problems(self):
@@ -108,7 +109,7 @@ class Check(unittest.TestCase):
         for code in (0, 0):
             self.assertEqual(self.run_with(TimeoutError()), code)
             self.assertEqual(self.alerts[-1][1], [])
-        self.assertEqual(self.run_with(TimeoutError()), 1)
+        self.assertEqual(self.run_with(TimeoutError()), self.m.alert.FOUND)
         self.assertEqual(len(self.alerts[-1][1]), 1)
 
     def test_a_server_error_is_no_answer(self):
@@ -128,6 +129,11 @@ class Check(unittest.TestCase):
             self.alerts.clear()
             self.assertEqual(self.run_with(answer), 1, answer)
             self.assertEqual(len(self.alerts[-1][1]), 1, answer)
+
+    def test_a_finding_that_cant_be_delivered_is_a_failure(self):
+        """nobody heard of it: exit 1, so the scheduler tries again at the next tick and the job shows red"""
+        self.delivered = False
+        self.assertEqual(self.run_with(DOWN), 1)
 
     def test_a_missing_token_is_a_problem_and_no_request_goes_out(self):
         (self.tmp / "token").unlink()

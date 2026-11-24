@@ -158,8 +158,21 @@ class Check(unittest.TestCase):
         for err in (SHIFTED_A, SHIFTED_B, SHIFTED_B, SHIFTED_A, SHIFTED_B):
             self.answers[None] = err
             code, _ = self.run_check()
-            self.assertEqual(code, 1)
+            self.assertEqual(code, self.m.alert.FOUND, "found and with the owner: a completed run, not a failure")
         self.assertEqual(len(self.sent), 1, self.sent)
+
+    def test_a_login_problem_that_cant_be_delivered_is_a_failure(self):
+        self.answers[None] = "Login expired · Please run /login"
+        with mock.patch.object(self.m.alert, "send", lambda *a, **k: False):
+            code, _ = self.run_check()
+        self.assertEqual(code, 1, "nobody heard of it: the scheduler retries and the job shows red")
+
+    def test_requests_failing_for_another_reason_are_a_failure(self):
+        """claude itself broken (llm.py printed no JSON, a timeout three times): the platform's agents must hear of it,
+        so the run fails even though the owner was told (alert-routing.md step 3)."""
+        self.answers["token"] = "timeout talking to api"
+        codes = [self.run_check()[0] for _ in range(3)]
+        self.assertEqual(codes, [0, 0, 1])
 
     def test_a_rising_failure_count_alerts_once(self):
         self.answers["token"] = "timeout talking to api"
@@ -179,10 +192,11 @@ class Check(unittest.TestCase):
         store_fixture.empty(self)
         self.asked.clear()
         code, out = self.run_check()
-        self.assertEqual((code, self.asked, len(self.sent)), (1, [], 1), "nothing asked, the open alert left as it is")
+        found = self.m.alert.FOUND
+        self.assertEqual((code, self.asked, len(self.sent)), (found, [], 1), "nothing asked, the open alert left as it is")
         (self.home / ".claude" / "headless-oauth-token").unlink()
         code, _out = self.run_check()
-        self.assertEqual((code, len(self.sent)), (1, 2), "a missing token is a new problem")
+        self.assertEqual((code, len(self.sent)), (found, 2), "a missing token is a new problem")
         self.assertIn("Login expired", self.sent[-1], "the open login problem is still in it")
 
     def test_with_no_checked_copy_the_streak_is_kept(self):

@@ -25,6 +25,7 @@ jobs:
 - name: push-reach
   every: 1h
   run: bin/py bin/check-push-reach.py
+  found_exit: true   # it sends what it finds (alert-routing.md step 3)
 services:
 # channel leases (bin/lease-runner.py): 127.0.0.1:18797, Bearer token in .secrets/runner-token
 - name: lease-runner

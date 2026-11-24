@@ -281,8 +281,13 @@ def run_here(name, job, env) -> int:
             sys.stdout.write(line)
             f.write(line)
         code = p.wait()
-    scheduler_module().record_run(name, code)   # clears or sets its failing mark, as a scheduled run's would
-    print(_("{name} finished (exit {code}); today's schedule won't run it again", name=name, code=code))
+    sched = scheduler_module()
+    sched.record_run(name, code)   # clears or sets its failing mark, as a scheduled run's would
+    if code and sched.completed(job, code):   # a check's FOUND: it ran, and what it found was sent
+        print(_("{name} finished: problems found and sent (exit {code}); today's schedule won't run it again",
+                name=name, code=code))
+    else:
+        print(_("{name} finished (exit {code}); today's schedule won't run it again", name=name, code=code))
     return code
 
 

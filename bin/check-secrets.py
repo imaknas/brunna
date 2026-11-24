@@ -22,8 +22,10 @@ The registry holds only names, locations and expiry, **never values**; this scri
   - platform credentials (an entry with kind; docs/design/platform-credentials.md C8): from their status files only
     (bin/credentials.py rows): one a job lists that isn't granted, or that needs the owner again, is a problem, with
     the command that grants it; its file's mode is checked, never its content
-On problems: the alert channels (once per set, once more on recovery), exit 1 (the scheduler records a failure, the
-status page turns red). No alert channel at all is printed as a reminder, not a problem.
+On problems: the alert channels (once per set, once more on recovery) and exit alert.FOUND (4: found_exit, the
+scheduler counts the run as completed, the status page shows "problems found"; docs/design/alert-routing.md step 3).
+Exit 1 when they couldn't be delivered, or when projects are named (no alert is sent then). No alert channel at all is
+printed as a reminder, not a problem.
 
 Usage: check-secrets.py [project...]
 """
@@ -252,12 +254,14 @@ def main(argv: list[str]) -> int:
                                                     "platform alert can be sent"))
             problems.append(_("The Discord alert channel does not work (bot token invalid or unreachable) — the status page "
                               "shows it in red too"))
-        alert.once("secrets", problems, _("The credentials declared in the registry are all fine again"))
+    told = not argv and alert.once("secrets", problems, _("The credentials declared in the registry are all fine again"))
     for p in problems:
         print(f"⚠️ {p}")
     print(_("Checked {count} {count:credential|credentials}, {problems} {problems:problem|problems}", count=count,
             problems=len(problems)))
-    return 1 if problems else 0
+    if not problems:
+        return 0
+    return alert.FOUND if told else 1
 
 
 if __name__ == "__main__":

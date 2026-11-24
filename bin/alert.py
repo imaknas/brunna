@@ -50,7 +50,10 @@ _ = i18n.domain(__file__)
 SENT = hubconf.STATE / "alerts-sent.json"      # key -> {"problems": [...], "ids": [...] when given, "at": when last sent}
 FAILED = hubconf.STATE / "alerts-failed.json"  # key -> {"at": …, "text": first line of the one not sent}
 LOG = hubconf.STATE / "alerts-log.jsonl"       # one line per notice tried: {"at", "key", "state", "sent"}; never rewritten
-REMIND = datetime.timedelta(hours=24)
+REMIND = datetime.timedelta(hours=23)   # "every 24 hours": a daily check that starts a little earlier still reminds
+# a check job's exit when it ran and everything it found is with whoever must hear it (alert-routing.md step 3): the
+# scheduler takes it as a completed run, for a job that declares found_exit: true
+FOUND = 4
 API = "https://discord.com/api/v10"
 _LIVE = (SENT, FAILED)
 _LIVE_LOG = LOG
@@ -374,11 +377,14 @@ def open_keys(prefix: str) -> list[str]:
     return sorted(k for k, v in _load(SENT).items() if k.startswith(prefix) and isinstance(v, dict) and v.get("problems"))
 
 
-def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = None) -> None:
+def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = None) -> bool:
+    """Send what changed about one alert. Returns whether these problems are with whoever must hear them: sent now, or
+    told before (open and unchanged, a reminder included, or a letter that stands). False when they couldn't be
+    delivered (no channel, a failed send, a test's held state): a check then exits as broken, not with FOUND."""
     if ids is not None and len(ids) != len(problems):
         raise ValueError(f"alert.once({key!r}): {len(ids)} ids for {len(problems)} problems")
     if _held():
-        return
+        return False
     now = datetime.datetime.now()
     sent = _load(SENT)
     last = sent.get(key)
@@ -395,17 +401,17 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
                                                              and "to" not in (last or {}))
     if to != "owner" and not escalated:
         if _agent(key, to, problems, ids, ident, last_ident, last, sent, now):
-            return
+            return True
         # the owner is told: the letter couldn't go, or a day passed unsettled. From now on it is the owner's alert
         escalated = True
         last_ident = []   # what follows sends it as new
     if ident == last_ident:
         if not problems:
             clear_failure(key)  # the earlier one was not sent and the problem has fixed itself: nothing to resend
-            return
+            return True
         at = (last or {}).get("at")
         if at and now - datetime.datetime.fromisoformat(at) < REMIND:
-            return
+            return True
         text = _("⏰ Still not resolved (last reminder: {at}):", at=at[:16] if at else _("earlier")) + "\n" \
             + "\n".join(problems)
     elif problems:
@@ -440,3 +446,4 @@ def once(key: str, problems: list[str], ok_text: str, ids: list[str] | None = No
         clear_failure(key)
     else:
         record_failure(key, text, {"problems": wanted, **({"ids": ident} if ids is not None else {}), "at": notice_at})
+    return ok or ident == last_ident   # a reminder that didn't go: they were told before (the failure shows red)

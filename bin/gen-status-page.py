@@ -37,7 +37,9 @@ SCHED_LOG = HUB / ".logs" / "scheduler.log"
 AGENT_JOBS = HUB / ".state" / "agent-jobs"
 OUT = HUB / ".state" / "status" / "index.html"
 WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
-LOG_LINE = re.compile(r"^\[(\S+ \S+)\] (?:running job '([^']+)'|job '([^']+)' (finished OK|FAILED \(exit (-?\d+)\)))")
+# scheduler.finished_line and the FAILED line; "problems found and sent" is a check's FOUND (alert-routing.md step 3)
+LOG_LINE = re.compile(r"^\[(\S+ \S+)\] (?:running job '([^']+)'|job '([^']+)' "
+                      r"(finished OK|(?:finished, problems found and sent|FAILED) \(exit (-?\d+)\)))")
 
 
 def prune_line() -> str:
@@ -219,7 +221,8 @@ def scheduler_runs() -> tuple[dict, datetime.datetime | None]:
             runs[started] = {"started": ts, "result": "running"}
         else:
             r = runs.setdefault(ended, {"started": ts})
-            r["result"] = "ok" if result == "finished OK" else f"failed (exit {code})"
+            r["result"] = "ok" if result == "finished OK" else "found" if result.startswith("finished") \
+                else f"failed (exit {code})"
             r["code"] = code
             r["ended"] = ts
     return runs, last_tick
@@ -600,8 +603,9 @@ def main() -> None:
                                     code=run.get("code", "?"), log=name.replace('/', '__'))))
         if "trigger" in job:
             detail = "; ".join(x for x in [detail, *event_detail(job, state, now, alerts)] if x)
-        cls = {"ok": "ok", "running": "run"}.get(result, "bad" if result.startswith("failed") else "")
-        label = {"ok": _("succeeded"), "running": _("running"), "failed": _("failed")}.get(result.split(" ")[0], result or "—")
+        cls = {"ok": "ok", "running": "run", "found": "warn"}.get(result, "bad" if result.startswith("failed") else "")
+        label = {"ok": _("succeeded"), "running": _("running"), "failed": _("failed"),
+                 "found": _("problems found")}.get(result.split(" ")[0], result or "—")
         dot = f"<i class='dot c{hue(name.split('/')[0])}'></i>" if "/" in name else "<i class='dot none'></i>"
         rows.append(
             f"<tr class='job{' off' if not job.get('enabled', True) else ''}'>"
@@ -883,7 +887,7 @@ th{font-size:12px;color:var(--dim);font-weight:500;background:var(--raised)}
 td .proj .dot,td.name .dot{margin-right:2px}
 td.name b{font-weight:600;color:var(--fg)} td.last,td.next{white-space:nowrap} td.name .dot{margin-right:8px;position:relative;top:-1px} td.when{color:var(--mut)}
 tr.off{opacity:.45}
-.st{font-weight:500} .st.ok{color:var(--ok)} .st.bad{color:var(--bad);font-weight:600} .st.run{color:var(--acc)}
+.st{font-weight:500} .st.ok{color:var(--ok)} .st.bad{color:var(--bad);font-weight:600} .st.run{color:var(--acc)} .st.warn{color:var(--warn)}
 .tag{font-size:11px;border:1px solid var(--line);border-radius:5px;padding:0 5px;margin-left:6px;color:var(--mut);
 background:var(--raised)}
 .gap{margin-top:8px}

@@ -87,3 +87,52 @@ ASCII only (hubbus's id pattern). Left as is: a letter sent from a process insid
 it would name one tool's variable in the core.
 
 Separate: the login check's two sources sending the same problem twice (`check-claude-login` ids).
+
+## Step 3: a check that found something hasn't failed (11-24)
+
+On 11-24 `assistant/push-reach` found that the assistant's pushes hadn't reached the phone since 01:16. It alerted the
+owner under its own key (`push-reach`, the owner's), as it should. It also exited 1, so the scheduler counted it as a
+failed job too:
+- a second alert, `scheduler-job:assistant/push-reach`, went as a letter to brunna, whose agents can't fix a phone.
+  After a day it would have reached the owner as a duplicate. That breaks step 2: what only the owner can do goes
+  straight to the owner;
+- it was retried every tick (15 minutes) instead of every hour, each run asking the assistant again;
+- `job.failed` went on the bus, and the status page showed red, as if the check were broken.
+
+`check-secrets`, `check-claude-login` and `check-runtime-login` do the same. A run of one of these four now ends in one
+of three ways:
+
+- **0**: nothing found.
+- **`alert.FOUND` (4)**: the check ran, and every problem it found has reached whoever the routing table names (the
+  owner, for these four). `alert.once` returns whether that is so: the problem was sent now, or it is open and was
+  told already. The scheduler treats this as a completed run:
+  - it is not retried before its next turn, and `last_ok` and the day's mark are set;
+  - it does not count as failing: no `scheduler-job:` alert and no `job.failed`. A `scheduler-job:` alert open from
+    before recovers, and its letter is taken back;
+  - the log line reads `job '<name>' finished, problems found and sent (exit 4)`;
+  - the status page shows it amber, as "problems found".
+- **anything else** (a crash, a timeout, exit 1): the check is broken. It is a failed job as before, and its alert goes
+  to whoever fixes the job. Two kinds of finding also exit 1, so they are retried at the next tick and shown red as
+  before:
+  - a problem that says the check itself broke: the push health answer breaks the contract, the ingest token can't be
+    read, the login check raised, or llm.py printed no JSON;
+  - a finding `alert.once` couldn't deliver, because no channel is set up or a send failed.
+
+  Only the code path that called `alert.once` may answer FOUND; `check-secrets <project>` doesn't.
+
+**Who may answer FOUND**: a job that declares `found_exit: true` in its registry entry; these four do. The registry
+accepts the field only in the platform's own entry and in modules, so a project's job can't hide its failures behind
+it. It is also refused on an event job, where FOUND would have to say what happens to the batch. The scheduler carries
+the flag into a background run's file, and `--record-run` and `schedulectl run` look the job up. For any other job a 4
+is an ordinary failure, so a tool that happens to exit 4 is never read as "sent".
+
+**Reminders for a daily check**: a reminder is due once 23 hours have passed, not 24. A daily check sends once a day,
+and a run that starts a few minutes earlier than yesterday's would otherwise push the reminder to the next day. Until
+now, the exit-1 retry hid that.
+
+Left as is:
+- `render-services`: some of its problems are its own apply failures. Its key goes to the owner, while a service that
+  isn't running is its project's to fix. The `scheduler-job:` letter to brunna is the only way agents hear of them.
+- `credentials.py keepalive`: its exit 1 is for errors it sends nowhere.
+- `update-runtimes`: its keys and its job's letter both go to brunna, so the duplicate reaches the same reader.
+- `glance` reads only failing jobs, so a FOUND run isn't there; the finding itself is the owner's alert.

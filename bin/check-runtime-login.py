@@ -8,7 +8,8 @@ call; this script only decides whether to ask and alerts.
 A runtime the platform runs no work on (runtime_ports.platform_work: not the default, no point pinned to it, no provider
 on it) isn't checked: nothing is said and nothing alerts, so a runtime only installed for sessions costs nothing here
 (docs/design/runtime-codex.md, Step 1 r2, D11). One alert per runtime, each problem by the adapter's stable id. Exit 0
-when the login works or isn't checked, 1 when it doesn't, 2 on a usage error.
+when the login works or isn't checked; alert.FOUND (4, found_exit, docs/design/alert-routing.md step 3) when it doesn't
+and the owner has been told; 1 when the check broke or the problems couldn't be delivered; 2 on a usage error.
 """
 from __future__ import annotations
 
@@ -52,13 +53,14 @@ def main(argv: list[str]) -> int:
         problems = [(str(i), str(p)) for i, p in check()]
     except Exception as e:   # a check that breaks is said by its kind, never a traceback
         problems = [("broke", _("the login check broke: {error}", error=type(e).__name__))]
-    alert.once(f"runtime-login-{name}", [p for _i, p in problems], _("{runtime}: its login works again", runtime=name),
-               ids=[i for i, _p in problems])
+    told = alert.once(f"runtime-login-{name}", [p for _i, p in problems],
+                      _("{runtime}: its login works again", runtime=name), ids=[i for i, _p in problems])
     for _i, p in problems:
         print(_("{runtime}: {problem}", runtime=name, problem=p))
     if not problems:
         print(_("{runtime}: its login works", runtime=name))
-    return 1 if problems else 0
+        return 0
+    return alert.FOUND if told and not any(i == "broke" for i, _p in problems) else 1
 
 
 if __name__ == "__main__":

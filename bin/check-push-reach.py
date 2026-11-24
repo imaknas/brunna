@@ -17,6 +17,10 @@ The problem's text holds nothing that changes from hour to hour, because a chang
 Off when the assistant channel is off (`alerts.assistant`, `assistant.api`): nothing is checked, and an open alert stays
 as it is, since nothing recovered either.
 
+Exit (found_exit, docs/design/alert-routing.md step 3): 0 nothing found; alert.FOUND (4) what it found is with the
+owner; 1 the check is broken (an answer that breaks the contract, the token unreadable) or what it found couldn't be
+delivered: the scheduler's job alert then goes to the platform's agents and the next tick tries again.
+
 Usage: check-push-reach.py
 """
 from __future__ import annotations
@@ -90,6 +94,7 @@ def main() -> int:
         print(_("not checked: the assistant channel is off"))
         return 0
     problems: list[str] = []
+    broken = False   # the check itself can't work: a failure, not a finding
     try:
         health = ask()
     except NoAnswer as e:
@@ -100,6 +105,7 @@ def main() -> int:
                               "unknown", limit=SOFT_LIMIT))
     except BadAnswer as e:
         streak(False)
+        broken = True
         problems.append(_("Whether the assistant's pushes reach the phone can't be checked: {err}", err=e))
     else:
         streak(False)
@@ -110,10 +116,12 @@ def main() -> int:
                               since=health.get("unshown_since") or "?"))
         if health["subscriptions"] == 0:
             problems.append(_("No phone is subscribed to the assistant's pushes: open its app and turn on notifications"))
-    alert.once("push-reach", problems, _("The assistant's pushes reach the phone again"))
+    told = alert.once("push-reach", problems, _("The assistant's pushes reach the phone again"))
     for x in problems:
         print(f"⚠️ {x}")
-    return 1 if problems else 0
+    if not problems:
+        return 0
+    return alert.FOUND if told and not broken else 1
 
 
 if __name__ == "__main__":

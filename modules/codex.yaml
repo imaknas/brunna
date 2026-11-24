@@ -43,3 +43,4 @@ jobs:
 - name: codex-login
   every: 1h
   run: bin/py bin/check-runtime-login.py --runtime codex
+  found_exit: true   # it sends what it finds (alert-routing.md step 3)
