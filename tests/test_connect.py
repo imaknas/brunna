@@ -154,7 +154,20 @@ class Connect(unittest.TestCase):
         with mock.patch.object(connect.hubconf, "get", lambda k, d=None: d):
             rc, out, _err = self.run_connect(str(app), "--yes", "--remote", "--dry-run")
         self.assertEqual(rc, 0)
-        self.assertIn("No GitHub repo", out)
+        self.assertIn("no GitHub repo is created", out)
+        subprocess.run(["git", "-C", str(app), "remote", "add", "origin", "https://example.invalid/x/app.git"], check=True)
+        with mock.patch.object(connect.hubconf, "get", lambda k, d=None: d):
+            rc, out, _err = self.run_connect(str(app), "--yes", "--remote", "--dry-run")
+        self.assertNotIn("GitHub repo", out, "it has a remote of its own: nothing stays on this machine")
+
+    def test_a_repo_added_beside_connected_ones_can_belong_with_them(self):
+        group = self.code / "group"
+        a, _b = repo(group / "a"), repo(group / "b")
+        self.projects = {"a": {"paths": {"workspace": str(a)}}}
+        with mock.patch.object(connect, "ask", lambda q, yes, default: True):
+            rc, out, _err = self.run_connect(str(group), "--dry-run")
+        self.assertEqual(rc, 0, out)
+        self.assertIn('layout_intent={"span": ["a", "b"]}', out)
 
     def test_folders_left_out_are_named(self):
         group = self.code / "group"

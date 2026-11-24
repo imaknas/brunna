@@ -247,8 +247,12 @@ def cmd_run(name):
     job = next((j for j in all_jobs() if j["name"] == name), None)
     if job is None:
         sys.exit(_("Neither schedule.yaml nor the project registry has '{name}'", name=name))
-    import llm_ready
-    if (off := llm_ready.job(name)):   # it would do nothing: said now, in the terminal, and the day's run is not used up
+    try:
+        import llm_ready
+        off = llm_ready.job(name)
+    except Exception:   # settings that can't be told from here: the job itself says what is wrong with them
+        off = None
+    if off:   # it would do nothing: said now, in the terminal, and the day's run is not used up
         print(_("{name} is off here, so nothing was started: {reason}. Its scheduled run stays", name=name, reason=off))
         return 1
     env = run_env(job)

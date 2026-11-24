@@ -2188,7 +2188,8 @@ def doctor_runtimes(add, default: str, installed: list[str]) -> None:
                       others=runtime_ports.or_list(list(dict.fromkeys(n for _feat, have in elsewhere for n in have)))),
             _("point {settings} runtime.default at one that has them"))
     for n in names:
-        gaps = [(feat, miss) for feat, miss in runtime_ports.feature_gaps(n) if miss]
+        gaps = [(feat, miss) for feat, miss in runtime_ports.feature_gaps(n) if miss
+                and not (n == default and feat in dict(elsewhere))]   # said in the row above
         if not gaps:
             continue
         feats = _("; ").join(feat for feat, _miss in gaps)

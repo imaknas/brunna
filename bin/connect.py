@@ -320,28 +320,25 @@ def main(argv: list[str]) -> int:
     kind, candidates = layout(folder)
     known = [(c, name) for c in candidates if (name := connected_as(c))]
     others = left_out(folder, candidates) if kind == "repos" else []
+    names = [c.name for c in candidates]
     candidates = [c for c in candidates if c not in dict(known)]
     asks = not yes and not dry and sys.stdin.isatty()
-    for c, name in known:
-        print(_("{path} is already connected, as the project {name}; nothing to do", path=c, name=name))
-    names = [c.name for c in candidates]
     if kind == "repos" and candidates:
         print(_("{path} holds {n} {n:repo|repos}: {names}. Each becomes a project of its own.", path=folder,
                 n=len(names), names=", ".join(names)))
+    for c, name in known:
+        print(_("{path} is already connected, as the project {name}; nothing to do", path=c, name=name))
     if others:
         print(_("Left out, with no version history (git) to tell them as projects: {names}. To connect one: brunna "
                 "connect {path}", names=", ".join(others), path=folder / others[0]))
     if not candidates:
         return 0
-    if remote and not hubconf.get("github.owner"):
-        print(_("No GitHub repo: {settings} has no github.owner, so what is connected stays on this machine only. To "
-                "create repos for later projects: gh auth login, then set github.owner"))
     if not (yes or dry or asks):   # nobody to ask, and no --yes: never a silent yes
         print(_("brunna connect: no terminal here to ask in, so nothing was connected ({folders}). With --yes it connects "
                 "with the defaults", folders=", ".join(map(str, candidates))),
               file=sys.stderr)
         return 2
-    if kind == "repos" and len(candidates) > 1:
+    if kind == "repos" and len(names) > 1:
         together = ask(_("Do they belong together as one project? (Recorded now, carried out once brunna supports "
                          "a project spanning several repos.)"), yes, False)
         intent = {"span": names} if together else None
@@ -365,6 +362,9 @@ def main(argv: list[str]) -> int:
             rc = 1
             continue
         explain(c)
+        if remote and not hubconf.get("github.owner") and not has_remote(c, False):   # asked for, and can't be
+            print("  " + _("no GitHub repo is created for it: {settings} has no github.owner (gh auth login, then set "
+                           "it), so it stays on this machine"))
         if not ask(_("Connect it?"), yes, True):
             continue
         one = connect_one(c, remote, intent, dry, decide(c, remote, opts, yes), verbose)
