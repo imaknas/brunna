@@ -1,0 +1,7 @@
+{
+ "{path} already holds other things; name a new or an empty folder": "{path} 裡面已經有別的東西;請指定一個新的或空的資料夾",
+ "{path} holds an earlier install's settings, but {file} can't be read ({why}). Put it right (git -C {config} log shows its history), then run init again": "{path} 有先前安裝的設定,但 {file} 讀不出來({why})。先把它修好(git -C {config} log 看得到它的歷史),再跑一次 init",
+ "{path} is not a folder": "{path} 不是資料夾",
+ "{path} is your home folder or contains it; name a folder of its own, such as {example}": "{path} 是你的家目錄或包含它;請指定一個專用的資料夾,例如 {example}",
+ "{path} is inside the hub's folder ({hub}): removing the hub would take it along; name a folder of its own, such as {example}": "{path} 在 hub 資料夾({hub})裡面:刪 hub 時會一起被刪掉;請指定一個專用的資料夾,例如 {example}"
+}

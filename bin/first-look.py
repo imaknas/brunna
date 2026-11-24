@@ -88,6 +88,10 @@ def main(argv: list[str]) -> int:
         return 1
     if not isinstance(facts, dict):
         return 1
+    if not facts.get("tree"):
+        print(_("{project}: no first summary yet: nothing in it is committed. Once something is: brunna first-look {project}",
+                project=name))
+        return 0
     print(_("{project}: writing a first summary from its README and history…", project=name), flush=True)
     r = subprocess.run([*hubconf.launch(BIN / "llm.py"), "run", POINT], input=prompt(name, facts),
                        capture_output=True, text=True, timeout=700)

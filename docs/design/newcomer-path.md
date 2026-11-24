@@ -376,7 +376,8 @@ One flow, reached through `agenthub connect` (the new user-facing name for onboa
    - a folder holding several repos (several `.git` one level down).
 3. **What connecting does, said before it happens, in plain words:**
    - "agent-hub keeps this project's notes in a separate place, so your files don't change";
-   - "a folder without version history gets it, with one first save of what is there now";
+   - "a folder without version history gets one that starts empty (11-25); your files stay as they are, for you or an agent
+     to commit";
    - "a folder with unsaved changes is skipped until you save them".
 
    No GitHub repo is created unless `github.owner` is set and the user says yes.
@@ -608,4 +609,4 @@ Once picked, the text goes in the README's first lines, the GitHub description, 
 - **`agenthub uninstall`.** Lists first; `--apply` stops this hub's scheduler, watchdog and generated services and
   takes the platform's parts out of each project (rules-file block, hooks, sandbox rules, git hooks), each through
   the code that installed it; MCP registrations and user-level hooks only on a terminal yes; notes stay unless
-  `--purge`.
+  `--purge`, which is asked on its own (no unless yes is typed) and takes only from folders made for it (`bin/instance_dir.py`).

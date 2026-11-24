@@ -150,6 +150,8 @@ import hubconf  # noqa: E402
 import names  # noqa: E402
 import i18n  # noqa: E402
 import init_dialogue  # noqa: E402
+import instance_dir  # noqa: E402
+import user_file  # noqa: E402
 
 _ = i18n.domain(__file__)
 
@@ -353,10 +355,9 @@ def record(done: dict, ok: bool) -> None:
     commit = appliers.config_commit()
     applied = appliers.applied_path()
     changes = [{"op": c.op, "target": c.target, "detail": c.detail} for cs in done.values() for c in cs]
-    applied.parent.mkdir(parents=True, exist_ok=True)
-    applied.write_text(json.dumps({"commit": commit, "ok": ok, "changes": len(changes),
-                                   "at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")},
-                                  ensure_ascii=False, indent=1) + "\n")
+    hubconf.write_atomic(applied, json.dumps({"commit": commit, "ok": ok, "changes": len(changes),
+                                              "at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")},
+                                             ensure_ascii=False, indent=1) + "\n")
     if not changes:
         return
     payload = {"commit": commit, "changes": changes, "source": "hub config apply"}
@@ -376,7 +377,7 @@ def read_hub_json() -> dict:
 
 
 def write_hub_json(d: dict) -> None:
-    hubconf.config_path().write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+    user_file.replace(hubconf.config_path(), json.dumps(d, ensure_ascii=False, indent=2) + "\n")
 
 
 def llm_modules() -> list[str]:
@@ -945,7 +946,9 @@ def config_repo_first_commit(cfgdir: pathlib.Path, owner: str) -> tuple[bool, li
     if subprocess.run(["git", "-C", str(cfgdir), "rev-parse", "-q", "--verify", "HEAD"], capture_output=True).returncode == 0:
         return True, []
     lines = [note] if (note := config_repo_identity(cfgdir, owner)) else []
-    subprocess.run(["git", "-C", str(cfgdir), "add", "-A"], capture_output=True)
+    # the platform's own files, whatever else is in the folder
+    mine = [f for f in [*instance_dir.CONFIG_FILES, "projects"] if (cfgdir / f).exists()]
+    subprocess.run(["git", "-C", str(cfgdir), "add", "--", *mine], capture_output=True)
     r = subprocess.run(["git", "-C", str(cfgdir), "commit", "-q", "-m", f"config: first commit ({names.current('cli')} init)"],
                        capture_output=True, text=True)
     if r.returncode != 0:
@@ -1038,8 +1041,67 @@ def init_argv_problem(argv: list[str]) -> str | None:
 
 
 def instance_home_answer(args: dict) -> pathlib.Path:
-    return pathlib.Path(os.path.expanduser(args.get("home") or names.env("HOME") or UI().ask(
-        "home", _("where brunna keeps your settings, data and keys"), default_home())))
+    """Where this install keeps its own: a folder init may make one in (instance_dir.problem), asked again at a terminal."""
+    while True:
+        home = _home_answer(args)
+        if not (why := instance_dir.problem(home)):
+            return home
+        if args.get("home") or names.env("HOME") or not (UI().can_ask and UI().acts):
+            raise NoHome(why)
+        print(why)
+
+
+def missing_home(args: dict) -> str | None:
+    """Why init stops when the pointer names an instance that isn't there: one made elsewhere would leave it behind. Another
+    folder is named on purpose, with --home."""
+    if names.env("HOME") or args.get("home") or not (home := hubconf.instance_home()) or instance_dir.settings(home):
+        return None
+    return _("{pointer} names {home}, and brunna's settings aren't there (a disk that isn't plugged in?). Bring it back, or, to "
+             "use another folder, name it: brunna init --home <folder>", pointer=hubconf.POINTER, home=home)
+
+
+class NoHome(Exception):
+    """The folder named for the instance can't be one; nothing was written."""
+
+
+def _home_answer(args: dict) -> pathlib.Path:
+    return pathlib.Path(os.path.abspath(os.path.expanduser(args.get("home") or names.env("HOME") or UI().ask(
+        "home", _("where brunna keeps your settings, data and keys"), default_home()))))
+
+
+def earlier_home(args: dict) -> pathlib.Path | None:
+    """The instance an earlier install left where this one would keep its own (--home, the environment, or the default): init
+    takes it as it is. At a terminal the default is asked for first."""
+    named = args.get("home") or names.env("HOME")
+    home = os.path.abspath(os.path.expanduser(named or default_home()))
+    if not instance_dir.settings(home):
+        return None
+    if not named:
+        home = os.path.abspath(os.path.expanduser(UI().ask(
+            "home", _("where brunna keeps your settings, data and keys (an earlier install's are there: they are used as they "
+                      "are)"), default_home())))
+        args["home"] = home   # answered: not asked again
+    return pathlib.Path(home) if instance_dir.settings(home) else None
+
+
+def adopt(home: pathlib.Path, args: dict, dry: bool) -> None:
+    """An earlier install's instance becomes this hub's: the pointer is written, and no setting changes."""
+    if dry:
+        print(_("(dry-run) would use {home}, an earlier install's settings, notes and keys, as they are (write {pointer})",
+                home=home, pointer=hubconf.POINTER))
+        return
+    hubconf.write_atomic(hubconf.POINTER, str(home) + "\n")
+    hubconf._cfg = None
+    cfg = home / "config"
+    hooks = git_out(cfg, "config", "--local", "core.hooksPath") if (cfg / ".git").exists() else ""
+    want = str(ROOT / "githooks" / "config")
+    if hooks.endswith("/githooks/config") and hooks != want:   # its commits go through this hub's config gate now
+        subprocess.run(["git", "-C", str(cfg), "config", "core.hooksPath", want])
+    print(_("✓ {home} holds an earlier install's settings, notes and keys: they are used as they are", home=home))
+    ignored = [o for o in INIT_OPTIONS if o != "--home" and args.get(o.removeprefix("--"))]
+    if ignored:
+        print(_("  not applied, since its settings stay: {options} (change one later: brunna init --agent, --lang; or edit "
+                "{file} and run brunna config apply)", options=", ".join(ignored), file=hubconf.config_path()))
 
 
 def default_home() -> str:
@@ -1139,18 +1201,21 @@ def init_questions(args: dict) -> list[dict]:
         with contextlib.redirect_stdout(io.StringIO()):
             if hubconf.config_path().exists():
                 choice = current_agent(read_hub_json(), presets)
+            elif earlier_home(args):
+                choice = None   # its settings stay: nothing of a fresh init is asked
             else:
                 ui, content = choose_language(args)
                 names.env_set(os.environ, "LANG_UI", ui)
                 names.env_set(os.environ, "LANG_CONTENT", content)
-                instance_home_answer(args)
+                _home_answer(args)
                 d = new_hub_json(args)
                 choice = args["_agent"]
                 args["_runtime"] = (d.get("runtime") or {}).get("default")   # hub.json isn't written: llm_setup asks
-            agent_credential(choice, presets)
-            offer_mcp_registration(presets)
-            llm_setup(args)
-            connect_existing(args, False)
+            if choice is not None:
+                agent_credential(choice, presets)
+                offer_mcp_registration(presets)
+                llm_setup(args)
+                connect_existing(args, False)
     finally:
         for k, v in saved.items():
             if v is None:
@@ -1181,6 +1246,9 @@ def init_for_agent(flags: set, args: dict, argv: list[str]) -> int:
         return 2
     opts = answers_args(answers)
     exists = hubconf.config_path().exists()
+    if why := missing_home(opts):
+        emit({"error": why})
+        return 1
     if exists and not INIT_UNFINISHED.exists():
         emit({"error": _("brunna is already set up here"), "next": f"{names.current('cli')} doctor"})
         return 1
@@ -1239,9 +1307,23 @@ def cmd_init(argv: list[str], transport=None) -> int:
     if "--register-mcp" in flags and hubconf.config_path().exists():
         offer_mcp_registration(agent_presets())   # an existing instance: only this step
         return 0
+    if why := missing_home(args):
+        print(_("brunna init: {problem} (nothing was done)", problem=why), file=sys.stderr)
+        return 2
     created = False
-    legacy = hubconf.instance_home() is None and hubconf.config_path().exists()
-    if legacy:
+    # a pointer left empty names no instance: an earlier one is looked for, before the old layout's copies in the hub
+    blank = hubconf.instance_home() is None and hubconf.POINTER.is_file()
+    home = earlier_home(args) if blank or not hubconf.config_path().exists() else None
+    legacy = home is None and hubconf.instance_home() is None and hubconf.config_path().exists()
+    if home:
+        if why := instance_dir.problem(home):
+            print(_("brunna init: {problem} (nothing was done)", problem=why), file=sys.stderr)
+            return 2
+        adopt(home, args, dry)
+        if dry:
+            return 0
+        created = INIT_UNFINISHED.exists()   # an init that stopped right after its settings: carried on
+    elif legacy:
         # the old layout (hub.json in the hub root, as before the move): left alone; the move is a separate step
         # (docs/design/new-user.md step 6)
         print(_("✓ {path} already exists (the old layout); leaving it alone", path=hubconf.config_path()))
@@ -1252,10 +1334,19 @@ def cmd_init(argv: list[str], transport=None) -> int:
             print(_("an earlier brunna init stopped before it finished; carrying on with what it didn't do"))
             created = True
     else:
-        ui, content = choose_language(args)
-        names.env_set(os.environ, "LANG_UI", ui)   # every later question
-        names.env_set(os.environ, "LANG_CONTENT", content)
-        home = instance_home_answer(args)
+        lang = {k: os.environ.get(k) for x in ("LANG_UI", "LANG_CONTENT") for k in names.env_names(x)}
+        try:
+            ui, content = choose_language(args)
+            names.env_set(os.environ, "LANG_UI", ui)   # every later question
+            names.env_set(os.environ, "LANG_CONTENT", content)
+            home = instance_home_answer(args)
+        except NoHome as e:
+            print(_("brunna init: {problem} (nothing was done)", problem=e), file=sys.stderr)
+            return 2
+        if instance_dir.settings(home):   # typed at the question: an instance, so it is taken as it is
+            for k, v in lang.items():   # in its own language
+                os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
+            return cmd_init([*argv, "--home", str(home)], transport)
         d = new_hub_json(args)
         d["registry_dir"] = "projects"   # relative to config/
         d["language"] = {**(d.get("language") or {}), "ui": ui, "content": content}
@@ -1263,15 +1354,16 @@ def cmd_init(argv: list[str], transport=None) -> int:
             print(_("(dry-run) would create the instance directory {home}/{{config,data,secrets}}, write config/{settings}, "
                     "write {pointer}:\n", home=home, pointer=hubconf.POINTER) + json.dumps(d, ensure_ascii=False, indent=2))
             return 0
-        for sub in ("config/projects", "data", "secrets"):
-            (home / sub).mkdir(parents=True, exist_ok=True)
-        (home / "secrets").chmod(0o700)
-        (home / "config" / names.current("config_file")).write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
-        hubconf.POINTER.write_text(str(home) + "\n")   # written last: once it exists, the platform uses this instance
-        hubconf._cfg = None
         # until the steps after hub.json are done (llm setup), a re-run of init carries on instead of skipping them
         INIT_UNFINISHED.parent.mkdir(parents=True, exist_ok=True)
         INIT_UNFINISHED.write_text("llm-setup\n")
+        for sub in ("config/projects", "data", "secrets"):
+            (home / sub).mkdir(parents=True, exist_ok=True)
+        (home / "secrets").chmod(0o700)
+        instance_dir.mark(home)
+        hubconf.write_atomic(home / "config" / names.current("config_file"), json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+        hubconf.write_atomic(hubconf.POINTER, str(home) + "\n")   # written last: once it exists, the platform uses this instance
+        hubconf._cfg = None
         created = True
         print(_("✓ brunna's folder: {home} (you: {owner}; on: {modules})", home=home,
                 owner=d['owner']['tag'], modules=', '.join(k for k, v in d['modules'].items() if v is True)))
@@ -1336,8 +1428,7 @@ def cmd_init(argv: list[str], transport=None) -> int:
 
 # ---------- move-instance (the old layout → an instance directory, docs/design/new-user.md step 6) ----------
 
-CONFIG_FILES = [*names.all("config_file"), "models.env", "mirror-list.txt", "services.tsv", "schedule.yaml"]
-DATA_FILES = ["digest", "reflect", "todo.md", "index.md", "review-log.md", "openclaw-migration-status.md", "legacy-paths.tsv"]
+CONFIG_FILES, DATA_FILES = instance_dir.CONFIG_FILES, instance_dir.DATA_FILES
 
 
 def move_plan(home: pathlib.Path) -> list[tuple[pathlib.Path, pathlib.Path]]:
@@ -1373,6 +1464,9 @@ def cmd_move_instance(argv: list[str]) -> int:
     if home.exists() and any(home.iterdir()):
         print(_("{path} is not empty; not overwriting", path=home), file=sys.stderr)
         return 1
+    if why := instance_dir.problem(home):
+        print(why, file=sys.stderr)
+        return 1
     plan = move_plan(home)
     for src, dst in plan:
         print(_("copy {src} → {dst}", src=src, dst=dst) if apply else _("(would copy) {src} → {dst}", src=src, dst=dst))
@@ -1387,6 +1481,7 @@ def cmd_move_instance(argv: list[str]) -> int:
     for sub in ("config/projects", "data", "secrets"):
         (home / sub).mkdir(parents=True, exist_ok=True)
     (home / "secrets").chmod(0o700)
+    instance_dir.mark(home)
     # backup scope: the old .secrets becomes the new secrets; config/ and data/ are added (once out of git, the backup
     # is their only copy)
     cfg_path = names.resolve(home / "config", "config_file")
@@ -1395,7 +1490,7 @@ def cmd_move_instance(argv: list[str]) -> int:
     if isinstance(b, dict):
         inc = [x for x in b.get("include", []) if hubconf.path(x) != hubconf.secrets_dir()]
         b["include"] = inc + [str(home / "config"), str(home / "data"), str(home / "secrets")]
-    cfg_path.write_text(json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
+    user_file.replace(cfg_path, json.dumps(cfg, ensure_ascii=False, indent=2) + "\n")
     env = dict(os.environ)
     names.env_set(env, "HOME", str(home))
     # verify the new layout (the pointer file isn't written yet: point there with AGENT_HUB_HOME)
@@ -1427,7 +1522,7 @@ def cmd_move_instance(argv: list[str]) -> int:
         print(_("the config repo's first commit failed: {error}", error=(r.stdout + r.stderr).strip()[:400]), file=sys.stderr)
         return 1
     # written last: from this moment the platform uses the new layout; deleting it goes back
-    hubconf.POINTER.write_text(str(home) + "\n")
+    hubconf.write_atomic(hubconf.POINTER, str(home) + "\n")
     # the registry dir moved with the config: rebuild the index from it on purpose (refresh() refuses another dir)
     subprocess.run([*hubconf.launch(BIN / "registry.py"), "check", "--rebuild"], capture_output=True, text=True)
     print(_("\n✓ wrote {pointer}. The old files in the hub are still there (not deleted). Next steps (by hand):",
@@ -2451,7 +2546,7 @@ def cmd_land(argv: list[str]) -> int:
                 path=p, shared=hubconf.shared()), file=sys.stderr)
     steps = [[*hubconf.launch(BIN / "registry.py"), "check", *argv],
              [*hubconf.launch(BIN / "render-project-settings.py"), "--only", hubconf.hub_project()]]
-    if (w := upgrade.cli_wrapper()):
+    if (w := upgrade.cli_wrapper()) and upgrade.own_wrapper(w) is not None:
         steps.append([*hubconf.launch(BIN / "agenthub"), "install-cli", "--dir", str(w.parent)])
     steps += [[*hubconf.launch(BIN / "agenthub"), "init", "--scheduler-only"],
               [*hubconf.launch(BIN / "agenthub"), "config", "apply"]]
@@ -2559,20 +2654,33 @@ def cmd_install_cli(argv: list[str]) -> int:
     """~/.local/bin/brunna: a two-line wrapper script (not a symlink: the CLI finds the platform's Python from the folder
     it is in) running this hub's CLI. A wrapper under the other name (agenthub, from before the rename,
     docs/design/rename-brunna.md) is kept and rewritten the same way, so what a project's rules or an older setup call
-    keeps working; a new install gets only the new name."""
+    keeps working; a new install gets only the new name. A file there that isn't one of these wrappers, and a link, are
+    left as they are, and said."""
+    import upgrade
     d = pathlib.Path(os.path.expanduser(argv[argv.index("--dir") + 1] if "--dir" in argv else "~/.local/bin"))
     d.mkdir(parents=True, exist_ok=True)
     # bin/brunna: the shell forwarder to the implementation (bin/agenthub), run directly; bin/py could not run it
     body = (f'#!/bin/sh\n# the {names.current("product")} CLI (written by {names.current("cli")} install-cli; run it again '
             f'after moving the hub)\nexec "{BIN / names.current("cli")}" "$@"\n')
+    theirs = False
     for name in names.all("cli"):
         f = d / name
-        if name != names.current("cli") and not f.exists():
+        there = os.path.lexists(f)
+        if there and upgrade.own_wrapper(f) is None:
+            if f.is_symlink() and upgrade.own_wrapper(os.path.realpath(f)) == str(ROOT):
+                print(_("✓ {path} is up to date", path=f))   # a link of the user's to this hub's wrapper
+            elif name == names.current("cli"):
+                print(_("✗ {path} is not brunna's (another program, or a link): left as it is. Move it away and run brunna "
+                        "install-cli again, or put the command in another folder: brunna install-cli --dir <folder>", path=f),
+                      file=sys.stderr)
+                theirs = True
             continue
-        if f.exists() and f.read_text() == body:
+        if name != names.current("cli") and not there:
+            continue
+        if there and f.read_text() == body:
             print(_("✓ {path} is up to date", path=f))
         else:
-            f.write_text(body)
+            user_file.replace(f, body, mode=0o755)
             f.chmod(0o755)
             print(_("wrote {path}", path=f))
     # and the one services and scheduled commands find by name (hubconf.cli_folder; render-services writes it too)
@@ -2586,7 +2694,7 @@ def cmd_install_cli(argv: list[str]) -> int:
     if not on_path:
         print(_('⚠️ {dir} is not on PATH: add it to your shell setup (e.g. export PATH="{dir}:$PATH") so sessions can '
                 'reach brunna', dir=d))
-    return 0 if on_path else 1
+    return 0 if on_path and not theirs else 1
 
 
 COMMANDS = {

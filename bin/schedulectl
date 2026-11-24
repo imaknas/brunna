@@ -46,6 +46,7 @@ import event_jobs  # noqa: E402
 import hubconf  # noqa: E402
 import names  # noqa: E402
 import i18n  # noqa: E402
+import user_file  # noqa: E402
 
 _ = i18n.domain(__file__)
 
@@ -82,7 +83,7 @@ def commit_hub_file(path, msg):
 
 
 def save_jobs(jobs, msg):
-    SCHEDULE.write_text(yaml.dump({"jobs": jobs}, allow_unicode=True, sort_keys=False))
+    user_file.replace(SCHEDULE, yaml.dump({"jobs": jobs}, allow_unicode=True, sort_keys=False))
     commit_hub_file(SCHEDULE, msg)
 
 
@@ -492,7 +493,7 @@ def cmd_set_model(which, model):
         d["llm"].pop("points")
     if not d["llm"]:
         d.pop("llm")
-    f.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+    user_file.replace(f, json.dumps(d, ensure_ascii=False, indent=2) + "\n")
     commit_hub_file(f, f"schedulectl: {which} → {model}")
     print(_("{settings} llm.points: {points} → {model}", points=_(", ").join(targets), model=model))
 

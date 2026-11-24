@@ -115,6 +115,12 @@ def create(name: str, purpose: str) -> int:
         "# {name}\n\nA project for exploring an idea (an idea sandbox), opened by the assistant for this idea:\n\n"
         "> {purpose}\n\nConclusions, decisions and to-dos from discuss leases go in memory (`.agent-memory/`); "
         "to turn it into a real project, use brunna's `bin/upgrade-idea.py`.\n", name=name, purpose=purpose))
+    # its own first commit, the README just written (connecting commits nothing that is in a folder)
+    for args in (["init", "-q"], ["add", "--", "README.md"], ["commit", "-q", "-m", "chore: initial commit"]):
+        r = subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-C", str(ws), *args], capture_output=True, text=True)
+        if r.returncode != 0:
+            shutil.rmtree(ws, ignore_errors=True)
+            return out("create_failed", 1, detail=_("onboard failed: {tail}{note}", tail=r.stderr.strip()[-300:], note=""))
     extra = {"type": "idea", "purpose": purpose, "enforce": {"sandbox": True, "capabilities": default_capabilities(), "work": True},
              "privacy": {"reflection": "stats_only"}}
     env = {**os.environ, "ONBOARD_REGISTRY_EXTRA": json.dumps(extra, ensure_ascii=False)}

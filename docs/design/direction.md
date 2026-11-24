@@ -332,6 +332,11 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   nightly tidy-up with nothing to run on is "off" everywhere (`bin/job_off.py`), onboarding without `github.owner` stays
   local, connecting again is a no-op and needs a terminal or `--yes`, a wrong answer is asked again, doctor's `!` asks
   for something (a runtime's gaps and the checkout race are `·`, once). `brunna --help` gained `llm setup` and `connect`.
+- **Installing and removing lose nothing of the user's** (11-25, an audit's findings): built: init takes only a folder of
+  its own and uses an earlier install's instance as it is (`bin/instance_dir.py`); uninstall takes only what brunna made,
+  asks the purge on its own and says what it couldn't remove; onboarding's own first commit is empty, so nothing of the user's is
+  committed or published by it (`bin/repo_guard.py` says which folders it doesn't take); a stopped connect goes on, a copied project keeps off the original's notes;
+  a rename keeps every worktree. Left: the session-start writer of the rules file (`names.put_block`).
 
 - **Alerts** (`alert-routing.md`, 11-18): both steps built: one alert per failing job, recoveries not pushed, a log of
   notices; and each alert routed to whoever can fix it (a project's job → the project, the platform's → brunna, a day

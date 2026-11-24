@@ -78,18 +78,67 @@ exit 1
 --- stderr
 onboard-project: the agent-memory branch exists but the .agent-memory worktree does not: probably a run that failed halfway; clean up by hand first (git branch -D agent-memory), then run again
 
-=== .agent-memory and the bare repo both exist
+=== .agent-memory isn't a notes folder
+exit 1
+--- stdout
+--- stderr
+onboard-project: <TMP>/home/workspace/nu/.agent-memory isn't a notes folder of this repo's: move it away, then run this again
+
+=== .agent-memory and another bare repo of its name
 exit 1
 --- stdout
 --- stderr
 onboard-project: .agent-memory already exists and the hub machine already has its bare repo (agent-memory branch pushed): this project should already be onboarded
 
+=== a copy of a connected project
+exit 1
+--- stdout
+--- stderr
+onboard-project: the notes in <TMP>/home/workspace/alpha-copy/.agent-memory aren't this folder's (<TMP>/home/workspace/alpha/.git): it looks like a copy of another project, and connecting it would take over that project's notes. To connect it as a project of its own, remove the copied notes (the other project keeps its own), then run this again:
+  rm -rf <TMP>/home/workspace/alpha-copy/.agent-memory <TMP>/home/workspace/alpha-copy/.git/worktrees/-agent-memory; git -C <TMP>/home/workspace/alpha-copy branch -D agent-memory
+
+=== a moved project
+exit 1
+--- stdout
+--- stderr
+onboard-project: <TMP>/home/workspace/alpha-copy/.agent-memory names a repo that isn't there (/gone/.git/worktrees/.agent-memory). If this folder was moved, run git -C <TMP>/home/workspace/alpha-copy worktree repair .agent-memory, then run this again
+
+=== inside another repo
+exit 1
+--- stdout
+--- stderr
+onboard-project: <TMP>/home/workspace/sub/part is inside the repo <TMP>/home/workspace/sub, and a repo made in it would be apart from that one. Connect <TMP>/home/workspace/sub, or, if it is a project of its own: git init <TMP>/home/workspace/sub/part, then run this again (nothing was done)
+
+=== files in a folder with no history
+exit 0
+--- stdout
+The files in the folder stay as they are, not committed: they are yours, or an agent's session's, to commit
+[1/11] Preconditions OK: pi (no remote, stays local only)
+[2/11] Created the .agent-memory worktree (agent-memory branch, fully separate from the main branch)
+[3/11] Skeleton files in place and committed on the agent-memory branch
+[4/11] .agent-memory/ is excluded in .git/info/exclude (.gitignore untouched)
+sync-local-setup (stand-in): pi
+[5-6/11] Hooks and the rules-file block are in place (not version-controlled)
+[7/11] No changes to the outer repo, nothing committed
+[8/11] Memory bare repo created (~/git-origin/pi-memory.git), agent-memory branch pushed
+[9/11] Cloned the librarian's memory copy to ~/.memory-copies/pi
+[10/11] No external remote, not added to the mirror-backup list
+registry: <TMP>/hub/projects/pi.yaml
+commit-hub-files (stand-in): register pi (onboard-project.sh)
+[11/11] Registered in brunna's project registry (projects/pi.yaml), and committed
+
+Done: pi is connected to brunna.
+--- stderr
+
 === resume after an interrupted run
 exit 0
 --- stdout
-(The local steps are done, but the hub machine has no bare repo with content for this project: it looks like the last run was interrupted; continuing with the hub machine's steps, without redoing what is done)
+(Notes from a run that stopped are here; continuing, without redoing what is done)
 [1/11] Preconditions OK: alpha (no remote, stays local only)
-[2-7/11] Resume mode: done by the previous run, skipped
+[4/11] .agent-memory/ is excluded in .git/info/exclude (.gitignore untouched)
+sync-local-setup (stand-in): alpha
+[5-6/11] Hooks and the rules-file block are in place (not version-controlled)
+[7/11] No changes to the outer repo, nothing committed
 [8/11] Memory bare repo created (~/git-origin/alpha-memory.git), agent-memory branch pushed
 [9/11] Cloned the librarian's memory copy to ~/.memory-copies/alpha
 [10/11] No external remote, not added to the mirror-backup list

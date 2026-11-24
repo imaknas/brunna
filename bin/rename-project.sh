@@ -160,9 +160,39 @@ hub_say "[hub machine] bare repo / ~/.memory-copies / checkpoint / mirror rename
 # --- local ---
 git -C "$OLD_PATH" remote set-url "$MEMORY_REMOTE" "$(mini_memory_url "$NEW")"
 if [ "$NEW_PATH" != "$OLD_PATH" ]; then
+  # every worktree of the repo, not only the notes': the ones inside the folder move with it, the others stay where they
+  # are, and either way both sides name the other by its path
+  OLD_REAL="$(cd "$OLD_PATH" && pwd -P)"
+  worktrees=()
+  while IFS= read -r line; do
+    case "$line" in "worktree "*) worktrees+=("${line#worktree }") ;; esac
+  done < <(git -C "$OLD_PATH" worktree list --porcelain)
   mkdir -p "$(dirname "$NEW_PATH")"
   mv "$OLD_PATH" "$NEW_PATH"
-  git -C "$NEW_PATH" worktree repair "$NEW_PATH/.agent-memory"
+  NEW_REAL="$(cd "$NEW_PATH" && pwd -P)"
+  lost=()
+  for wt in "${worktrees[@]}"; do
+    case "$wt" in
+      "$OLD_REAL") continue ;;
+      "$OLD_REAL"/*) wt="$NEW_REAL${wt#"$OLD_REAL"}" ;;
+      "$OLD_PATH"/*) wt="$NEW_REAL${wt#"$OLD_PATH"}" ;;
+    esac
+    if [ ! -d "$wt" ] || ! git -C "$NEW_PATH" worktree repair "$wt" >/dev/null 2>&1; then
+      lost+=("$wt")   # on a disk that isn't here now, or removed by hand
+      continue
+    fi
+    # a session's links into the project's folder (worktree-memory.sh made them: the notes, the local-only files)
+    while IFS= read -r -d '' link; do
+      to="$(readlink "$link")"
+      case "$to" in
+        "$OLD_PATH"/*) ln -sfn "$NEW_PATH${to#"$OLD_PATH"}" "$link" ;;
+        "$OLD_REAL"/*) ln -sfn "$NEW_REAL${to#"$OLD_REAL"}" "$link" ;;
+      esac
+    done < <(find "$wt" -maxdepth 2 -type l -print0 2>/dev/null)
+  done
+  for wt in ${lost[@]+"${lost[@]}"}; do
+    hub_say "Note: the worktree {path} can't be reached now, so it still names the old folder. Once it can: {command}" path="$wt" command="git -C $(printf %q "$NEW_PATH") worktree repair $(printf %q "$wt")"
+  done
 fi
 git -C "$NEW_PATH/.agent-memory" fetch -q "$MEMORY_REMOTE"
 [ "$(git -C "$NEW_PATH/.agent-memory" rev-parse HEAD)" = "$(git -C "$NEW_PATH/.agent-memory" rev-parse @{u})" ] \

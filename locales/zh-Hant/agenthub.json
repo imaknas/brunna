@@ -339,5 +339,12 @@
  "which optional features to turn on (available: {modules}; none for none of them)": "要打開哪些選用功能(可選:{modules};都不要就打 none)",
  "off, because the platform starts {default}: {features} ({others} has them)": "因為平台啟動的是 {default},這些功能關著:{features}({others} 有)",
  "point {settings} runtime.default at one that has them": "把 {settings} 的 runtime.default 改成有的那個",
- "the scheduler starts, but its ticks don't complete: {n} in a row ({error})": "排程器有啟動,但 tick 都沒跑完:連續 {n} 次({error})"
+ "the scheduler starts, but its ticks don't complete: {n} in a row ({error})": "排程器有啟動,但 tick 都沒跑完:連續 {n} 次({error})",
+ "  not applied, since its settings stay: {options} (change one later: brunna init --agent, --lang; or edit {file} and run brunna config apply)": "  設定照舊,所以沒有套用:{options}(之後要改:brunna init --agent、--lang;或編輯 {file} 再跑 brunna config apply)",
+ "(dry-run) would use {home}, an earlier install's settings, notes and keys, as they are (write {pointer})": "(dry-run) 會直接使用 {home},先前安裝留下的設定、筆記和金鑰,不改內容(寫 {pointer})",
+ "brunna init: {problem} (nothing was done)": "brunna init:{problem}(什麼都沒做)",
+ "where brunna keeps your settings, data and keys (an earlier install's are there: they are used as they are)": "brunna 放你的設定、資料和金鑰的地方(先前安裝的還在那裡:會直接使用,不改內容)",
+ "✓ {home} holds an earlier install's settings, notes and keys: they are used as they are": "✓ {home} 有先前安裝的設定、筆記和金鑰:直接使用,不改內容",
+ "✗ {path} is not brunna's (another program, or a link): left as it is. Move it away and run brunna install-cli again, or put the command in another folder: brunna install-cli --dir <folder>": "✗ {path} 不是 brunna 的(別的程式,或是連結):原樣留著。把它移開再跑一次 brunna install-cli,或把指令放到別的資料夾:brunna install-cli --dir <資料夾>",
+ "{pointer} names {home}, and brunna's settings aren't there (a disk that isn't plugged in?). Bring it back, or, to use another folder, name it: brunna init --home <folder>": "{pointer} 指的是 {home},但那裡沒有 brunna 的設定(磁碟沒接上?)。把它接回來;要改用別的資料夾,就指定它:brunna init --home <資料夾>"
 }

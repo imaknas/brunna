@@ -2,18 +2,20 @@
 """Connect existing folders as projects (docs/design/newcomer-path.md B6): `brunna connect [<folder>] [--yes]
 [--remote] [--dry-run] [--verbose] [--sandbox|--no-sandbox] [--push none|others|all] [--push-email <address>]…`.
 
-The user names a folder. What it holds is found by reading files, and the only git call made in it (the
-unsaved-changes check) runs with its hooks and fsmonitor off, because the folder isn't trusted yet. Then:
+The user names a folder. What it holds is found by reading files, and the git calls made in it (its unsaved changes, what
+bin/repo_guard.py refuses) run with its hooks and fsmonitor off, because the folder isn't trusted yet. Then:
   a plain folder, or one repo       one project
   a monorepo                        one project for the whole repo; whether to split it into its parts later is
                                     asked and recorded (layout_intent: {split: true}) for when projects-and-repos lands
   a folder holding several repos    one project per repo; whether they belong together is asked and recorded
                                     (layout_intent: {span: [...]}) for the same
-It never connects a part of a monorepo as a repo of its own. Before each one it says, in plain words, what connecting
-does; a repo with unsaved changes is skipped until they're saved, a folder that is connected already is left as it is
-(so running it again is safe), and every folder left out is named with why. Without a terminal to ask in it connects
-nothing unless --yes says so. The connecting's own steps go to a log, named at the end (--verbose prints them). No
-GitHub repo is created unless --remote is given and {settings} has github.owner. The connecting itself is
+It never connects a part of a monorepo as a repo of its own, and a folder inside another repo is refused. Before each one
+it says, in plain words, what connecting does. A folder with no version history gets one that starts empty: its files stay
+as they are, for the user or an agent to commit, and nothing of them is published. A repo with unsaved changes is skipped
+until they're saved, a folder that is connected already is left as it is (so running it again is safe, and one whose
+connecting stopped goes on from there), and every folder left out is named with why. Without a terminal to ask in it
+connects nothing unless --yes says so. The connecting's own steps go to a log, named at the end (--verbose prints them).
+No GitHub repo is created unless --remote is given and {settings} has github.owner. The connecting itself is
 bin/onboard-project.sh.
 
 Two questions per project (docs/design/platform-push.md section 2), or their flags for a run without a person:
@@ -26,7 +28,7 @@ Two questions per project (docs/design/platform-push.md section 2), or their fla
                 brunna push setup
 
 Refused: the home folder and its parents, hidden folders, the hub, the instance directory, anything inside a project
-that is already connected. The folder is resolved to its real path first.
+that is already connected, a folder inside a repo that is none itself. The folder is resolved to its real path first.
 
   brunna connect --add-root <folder>   add a folder to {settings} connect.roots: the places from which an agent session
                                          may connect a folder (the MCP server's connect_project, B5). Only the owner
@@ -44,6 +46,8 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
+import repo_guard  # noqa: E402
+import user_file  # noqa: E402
 
 _ = i18n.domain(__file__)
 BIN = pathlib.Path(__file__).resolve().parent
@@ -52,14 +56,7 @@ MONOREPO_FILES = ("pnpm-workspace.yaml", "lerna.json", "go.work", "nx.json", "tu
 MANIFESTS = ("package.json", "pyproject.toml", "Cargo.toml", "go.mod", "pom.xml", "build.gradle", "Gemfile")
 
 
-def sgit(path: pathlib.Path, *args: str) -> subprocess.CompletedProcess:
-    """git in a folder that isn't trusted yet: its hooks and fsmonitor off."""
-    return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=", "-C", str(path), *args],
-                          capture_output=True, text=True)
-
-
-def is_repo(p: pathlib.Path) -> bool:
-    return (p / ".git").exists()
+sgit, is_repo = repo_guard.sgit, repo_guard.is_repo
 
 
 def is_monorepo(p: pathlib.Path) -> bool:
@@ -148,7 +145,7 @@ def add_root(folder: str) -> int:
     roots = (d.setdefault("connect", {})).setdefault("roots", [])
     if str(p) not in roots:
         roots.append(str(p))
-        f.write_text(json.dumps(d, ensure_ascii=False, indent=2) + "\n")
+        user_file.replace(f, json.dumps(d, ensure_ascii=False, indent=2) + "\n")
         subprocess.run([str(BIN / "commit-hub-files.sh"), "chore(config): a folder for projects", f.name])
     print(_("✓ projects may be connected from inside {path}", path=p))
     return 0
@@ -192,8 +189,9 @@ def ask(question: str, yes: bool, default: bool) -> bool:
 def explain(p: pathlib.Path) -> None:
     print(_("Connecting {path}:", path=p))
     print("  " + _("brunna keeps this project's notes in a separate place, so your files don't change"))
-    if not is_repo(p):
-        print("  " + _("this folder has no version history yet: it gets one, with a first save of what is in it now"))
+    if not repo_guard.has_commits(p):
+        print("  " + _("this folder has no version history yet: it gets one that starts empty; your files stay as they are, for "
+                       "you or an agent to commit"))
 
 
 SANDBOX_Q = ("Sandbox it? Yes when its agent will touch other people's data, or run or read untrusted code or content "
@@ -223,6 +221,24 @@ def has_remote(p: pathlib.Path, remote: bool) -> bool:
     return bool(remote and hubconf.get("github.owner"))
 
 
+def unfinished(name: str) -> bool:
+    """Whether connecting it stopped after its registry entry was written and before that was committed: onboarding run
+    again does the rest."""
+    f = hubconf.registry_dir() / f"{name}.yaml"
+    if not f.is_file():
+        return False
+    r = subprocess.run(["git", "-C", str(f.parent), "status", "--porcelain", "--", f.name], capture_output=True, text=True)
+    return r.returncode == 0 and r.stdout.startswith(("??", "A "))
+
+
+def unsaved(p: pathlib.Path) -> bool:
+    """Changes of the user's in a repo with history; what an earlier run that stopped left (the notes, the agents' local
+    files) is the platform's."""
+    return not repo_guard.holds_nothing(p) and bool(
+        sgit(p, "status", "--porcelain", "--", ".", ":(exclude).agent-memory",
+             *(f":(exclude,glob)**/{f}" for f in repo_guard.local_files())).stdout.strip())
+
+
 def decide(p: pathlib.Path, remote: bool, opts: dict, yes: bool) -> list[str]:
     """onboard-project.sh's --sandbox / --push flags for this folder: the flags given, else the person's answers."""
     sandbox = opts.get("sandbox")
@@ -250,7 +266,7 @@ def connect_log() -> pathlib.Path:
 
 def connect_one(p: pathlib.Path, remote: bool, intent: dict | None, dry: bool, flags: list[str] | None = None,
                 verbose: bool = False) -> int:
-    if is_repo(p) and sgit(p, "status", "--porcelain").stdout.strip():
+    if unsaved(p):
         print(_("Skipped {path}: it has unsaved changes. Save (commit) them, then run brunna connect again.", path=p))
         return 1
     argv = [str(BIN / "onboard-project.sh")]
@@ -311,18 +327,24 @@ def main(argv: list[str]) -> int:
         return 2
     yes, remote, dry, verbose = (f in flags for f in ("--yes", "--remote", "--dry-run", "--verbose"))
     folder = pathlib.Path(os.path.expanduser(args[0] if args else ".")).resolve()
-    if (name := connected_as(folder)):
+    if (name := connected_as(folder)) and unfinished(name):
+        return connect_one(folder, False, None, dry, [], verbose)
+    if name:
         print(_("{path} is already connected, as the project {name}; nothing to do", path=folder, name=name))
         return 0
     if (why := refusal(folder)):
         print(_("brunna connect: {reason}; nothing was done", reason=why), file=sys.stderr)
         return 2
     kind, candidates = layout(folder)
-    known = [(c, name) for c in candidates if (name := connected_as(c))]
+    known = [(c, name) for c in candidates if (name := connected_as(c)) and not unfinished(name)]
     others = left_out(folder, candidates) if kind == "repos" else []
     names = [c.name for c in candidates]
     candidates = [c for c in candidates if c not in dict(known)]
     asks = not yes and not dry and sys.stdin.isatty()
+    cant = [why for c in candidates if not connected_as(c) and (why := repo_guard.refusal(c))]
+    for why in cant:
+        print("brunna connect: " + why, file=sys.stderr)
+    candidates = [c for c in candidates if connected_as(c) or not repo_guard.refusal(c)]
     if kind == "repos" and candidates:
         print(_("{path} holds {n} {n:repo|repos}: {names}. Each becomes a project of its own.", path=folder,
                 n=len(names), names=", ".join(names)))
@@ -332,7 +354,7 @@ def main(argv: list[str]) -> int:
         print(_("Left out, with no version history (git) to tell them as projects: {names}. To connect one: brunna "
                 "connect {path}", names=", ".join(others), path=folder / others[0]))
     if not candidates:
-        return 0
+        return 2 if cant else 0
     if not (yes or dry or asks):   # nobody to ask, and no --yes: never a silent yes
         print(_("brunna connect: no terminal here to ask in, so nothing was connected ({folders}). With --yes it connects "
                 "with the defaults", folders=", ".join(map(str, candidates))),
@@ -355,9 +377,10 @@ def main(argv: list[str]) -> int:
     ready = not dry and llm_ready.unsupported("first-look") is None   # without a model, first-look only says so
     look = not dry and (not ready or ask(_("Write a first summary of each project now? It sends its README and recent "
                                            "commit titles to the AI model that makes brunna's decisions."), yes, True))
-    rc = done = 0
+    local = {f.split("/")[0] for f in repo_guard.local_files()}
+    rc, done, drafts = 1 if cant else 0, 0, []
     for c in candidates:
-        if (why := refusal(c)):
+        if not connected_as(c) and (why := refusal(c)):
             print(_("Skipped: {reason}", reason=why))
             rc = 1
             continue
@@ -370,11 +393,16 @@ def main(argv: list[str]) -> int:
         one = connect_one(c, remote, intent, dry, decide(c, remote, opts, yes), verbose)
         rc = one or rc
         done += one == 0
+        if one == 0 and not dry and repo_guard.holds_nothing(c) and any(x.name not in (".git", ".agent-memory", *local) for x in c.iterdir()):
+            drafts.append(c.name)
         if one == 0 and not dry and look:
             subprocess.run([*hubconf.launch(BIN / "first-look.py"), c.name])
     if not dry and done:
         if not verbose:
             print(_("The steps of connecting: {log}", log=connect_log()))
+        if drafts:
+            print(_("{names}: the files aren't committed yet, and a session in a worktree sees only what is.",
+                    names=", ".join(drafts)))
         print(next_step())
     return rc
 

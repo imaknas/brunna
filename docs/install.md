@@ -68,7 +68,8 @@ alert say it is about to expire; do the same two steps again.
     sets `runtime.default: none`: agent features (dispatching agents to mailbox requests, session hooks) are then off,
     and `brunna doctor` lists each one. Claude Code needs [nvm](https://github.com/nvm-sh/nvm) with a default node
     (`nvm install --lts`): brunna keeps a checked copy of it under nvm's npm, and looks for node nowhere else;
-  - `gh`, logged in (`gh auth login`) before `brunna init`, to create GitHub repos on onboarding: init reads
+  - `gh`, logged in (`gh auth login`) before `brunna init`, to create GitHub repos on onboarding (a folder with no history
+    yet starts with an empty commit: none of its files is committed or published until you or an agent does): init reads
     `github.owner` from it. Without it, `brunna onboard` keeps a new project on this machine and says so (`--public`
     fails instead, before anything is made); set `github.owner` in `brunna.json` later to have repos created;
   - `jq`, only on a remote machine whose shell scripts run without the platform's Python;
@@ -131,7 +132,8 @@ names and recent activity.
 ## Where things live
 
 The repo holds no user data. `brunna init` creates an **instance directory**, `~/.brunna` by default, and
-`<repo>/.hub-home` points to it:
+`<repo>/.hub-home` points to it. It takes a new or an empty folder, never your home folder, one that holds other things
+or one inside the hub's; an instance an earlier install left there is used as it is, every setting kept:
 
 | | What | Notes |
 |---|---|---|
@@ -153,6 +155,8 @@ It stops this hub's scheduler, watchdog and the background services it generated
 of each connected project: the block in the rules file, the hooks in the agent's settings, the sandbox rules and the
 git hooks it wrote. Your own lines and hooks next to them stay, and the projects' code is never touched. It asks, at
 the terminal, before removing brunna from your AI apps' tools (a setting for your user). Your notes stay: the
-settings folder (`~/.brunna`), the memory repos and each project's `.agent-memory`. `--purge` removes those too,
-and they can't be brought back. nvm, node, the AI agents, uv and git stay. The last step is yours: it prints the
-`rm -rf` for the hub folder.
+settings folder (`~/.brunna`), the memory repos and each project's `.agent-memory`, and an install after this one uses
+them again. `--purge` removes those too, and they can't be brought back: it asks that on its own, and Enter is no
+(`--yes` answers it as well). Your own files in the settings folder stay, and are named; a settings folder an earlier
+version put in a folder of yours is left whole, for you to remove brunna's part. What can't be removed is said and the rest goes on. nvm, node, the AI agents, uv and git stay. The last step is yours: it
+prints the `rm -rf` for the hub folder.

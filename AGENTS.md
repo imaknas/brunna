@@ -127,7 +127,7 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
 
 - **Start a new project, or connect an existing folder to this system**:
   `bin/onboard-project.sh [--public] [--no-remote] ~/workspace/<name>` (run on the hub machine): fully automatic (it
-  does the git init, adds the first commit, creates the GitHub repo; with no `github.owner` set it stays local and says
+  does the git init, adds an empty first commit (the folder's files are its owner's to commit), creates the GitHub repo; with no `github.owner` set it stays local and says
   so); details in its header comment and
   `.claude/skills/new-or-onboard-project/SKILL.md`
 - **New machine, or a project's local folder is gone**: `bin/recover-project.sh <name>`

@@ -39,12 +39,13 @@
 #   1. Precondition checks and automatic fill-in:
 #        - create the directory if it doesn't exist
 #        - git init if it's not a git repo
-#        - no commits at all: commit the existing content (possibly empty; a minimal README.md is added) as the
-#          first commit: in this case there's no "work the user isn't ready with" to protect, so it can be done
-#          automatically
+#        - no commits at all: an empty first commit. What is in the folder stays as it is, not committed, for its owner
+#          or an agent's session to commit; nothing of it is looked at, or published
+#        - inside another repo and none itself, a repo whose files are elsewhere, no commits beside other branches that
+#          have some: refused (bin/repo_guard.py)
 #        - commits exist but the working tree is dirty: fail right away, no guessing, no clearing
 #        - no origin, no --no-remote and github.owner set: create a GitHub repo automatically (private by default) and
-#          push what was just committed
+#          push the current branch
 #   2. git worktree add --orphan -b agent-memory .agent-memory
 #   3. copy the AGENT.md/STATE.md skeleton, create an empty memory/, commit on the agent-memory branch
 #   4. write .agent-memory/ into the local .git/info/exclude (the committed .gitignore is untouched)
@@ -64,6 +65,10 @@
 #   11. register in agent-hub's own project registry projects/<name>.yaml (native or hosted, always registered):
 #       on a new machine or after a local folder is lost, this is the only place to find "which projects were ever
 #       onboarded here", independent of any single project's own repo content
+#
+# A run that stopped part-way is finished by running it again: each step does only what isn't done. Notes in the folder
+# (.agent-memory) are taken up only when they are this repo's own: a copy of a connected project still names the
+# original's, and is refused with how to make it a project of its own.
 set -euo pipefail
 
 AGENT_HUB="${AGENT_HUB_ROOT:-${BRUNNA_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
@@ -146,6 +151,8 @@ if [ "$NO_REMOTE" != true ] && ! { [ -e "$1/.git" ] && sgit -C "$1" remote get-u
     NO_OWNER=true   # said once the guards below have passed
   fi
 fi
+# a folder that isn't connected as it is: refused before anything is made
+WHY="$("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/repo_guard.py" check "$1" 2>&1)" || fail "$WHY"
 mkdir -p "$1"
 # the real path (-P): a folder given through a symlink is onboarded where it really is (docs/design/newcomer-path.md B6)
 PROJ_PATH="$(cd "$1" && pwd -P)"
@@ -161,7 +168,53 @@ cd "$PROJ_PATH"
 # only at whether .agent-memory exists locally isn't enough. The only exception is resume (local steps done, the hub
 # machine's steps not yet), see below.
 ROSTER=$("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hubconf.py" roster) || fail "$(hub_msg "cannot read the project registry ({path})" path="$AGENT_HUB/projects")"
+# what is left after the registry entry is written: its commit, the push grant, the config applied
+register_rest() {
+  # Commit+push agent-hub right after registering: it used to only write the file without committing, so the
+  # librarian/mirror-backup on the hub machine only saw a new project once someone happened to commit by hand (a
+  # project once got stuck locally that way). Only these three files are committed; nothing else uncommitted in
+  # agent-hub is touched.
+  # The roster is regenerated every night as well: its failure is said, never a reason to leave the registration
+  # uncommitted and skip the steps after it (11-23)
+  "$AGENT_HUB/bin/gen-index-roster.sh" \
+    || hub_say "Warning: the roster in index.md wasn't regenerated; the librarian does it tonight" >&2
+  if "$AGENT_HUB/bin/commit-hub-files.sh" "register $PROJ_NAME (onboard-project.sh)" \
+      "projects/$PROJ_NAME.yaml" mirror-list.txt index.md 2>&4; then
+    hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml), and committed" name="$PROJ_NAME"
+  else
+    hub_say "Warning: committing/pushing brunna's registry files failed; do it by hand (the registration itself is written)" >&2
+    [ -z "$LOG" ] || hub_say "  What it said: {log}" log="$LOG" >&2
+    held="$(git -C "$AGENT_HUB" rev-parse --path-format=absolute --git-path agent-hub-op.lock 2>/dev/null || true)"
+    if [ -n "$held" ] && [ -d "$held" ]; then
+      hub_say "  A run that stopped may have left its lock: if nothing of brunna's is at work, rmdir {path}, then run this again" path="$(printf %q "$held")" >&2
+    fi
+    hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml); committing/pushing brunna failed (see the warning)" name="$PROJ_NAME"
+  fi
+  # A sandboxed project with a remote: which branches the platform may push for it (docs/design/platform-push.md section
+  # 2), and its push grant when that isn't none; the decision and any failure are said by git_push_grant.py itself
+  # (decided already, in a run that went on from one that stopped: left as it is)
+  if [ -n "$origin_url" ] && ! grep -qE '^ *git_push:' "$HUB_CONFIG/projects/$PROJ_NAME.yaml" 2>/dev/null; then
+    "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/git_push_grant.py" onboard "$PROJ_NAME" ${PUSH_ARGS[@]+"${PUSH_ARGS[@]}"} >&3 \
+      || hub_say "Warning: the platform's push for {name} was not set up; run brunna push setup {name}" name="$PROJ_NAME" >&2
+  fi
+  # The registration changed the config: apply it now and record that, or the status page keeps saying the config changed
+  # but was not applied until someone runs brunna config apply (found on a clean macOS, 11-03). Quiet either way: where it
+  # can't finish (no service manager, a linked worktree of the hub) doctor and the status page already say why.
+  "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/agenthub" config apply >/dev/null 2>&1 || true
+
+  [ -n "$LOG" ] || echo
+  hub_say "Done: {name} is connected to brunna." name="$PROJ_NAME" >&3
+}
 RECOVER_HINT="$(hub_msg "To reconnect an existing project (new machine, folder gone, fresh clone) use bin/recover-project.sh {name} [path]" name="$PROJ_NAME")"
+registered_at="$(awk -F'\t' -v n="$PROJ_NAME" '$1==n{print $2; exit}' <<<"$ROSTER")"
+if [ -n "$registered_at" ] && [ "$(cd "$registered_at" 2>/dev/null && pwd -P)" = "$PROJ_PATH" ] \
+    && git -C "$HUB_CONFIG" status --porcelain -- "projects/$PROJ_NAME.yaml" 2>/dev/null | grep -qE '^(\?\?|A )'; then
+  # the last run stopped between writing its registry entry and committing it: only what comes after is left
+  hub_say "(The last run stopped after registering {name}; doing what was left)" name="$PROJ_NAME"
+  origin_url=$(sgit remote get-url origin 2>/dev/null || true)
+  register_rest
+  exit 0
+fi
 if awk -F'\t' -v n="$PROJ_NAME" '$1==n{f=1} END{exit !f}' <<<"$ROSTER"; then
   fail "$(hub_msg "'{name}' is already in the project registry (projects/{name}.yaml): it cannot be onboarded again. {hint}" name="$PROJ_NAME" hint="$RECOVER_HINT")"
 fi
@@ -171,6 +224,71 @@ fi
 if [ -d .git ] && existing_origin=$(sgit remote get-url origin 2>/dev/null); then
   same=$(awk -F'\t' -v o="$existing_origin" -v n="$PROJ_NAME" '$3==o && $1!=n{print $1}' <<<"$ROSTER")
   [ -z "$same" ] || fail "$(hub_msg "this repo (origin {origin}) was onboarded as '{name}' (under another folder name). Reconnect it with bin/recover-project.sh {name} [path]; to rename it, use bin/rename-project.sh" origin="$existing_origin" name="$same")"
+fi
+
+# notes already here: only this repo's own are taken up. A copy of a connected project (cp -a) holds a .agent-memory whose
+# .git still names the original's repo: git run in it would work on the original's notes and settings
+RESUME=false
+notes_not_ours() {   # why, and how to connect this folder as a project of its own
+  local id; id="$(sed -n 's/^gitdir: *//p' .agent-memory/.git 2>/dev/null)"
+  case "$id" in */.git/worktrees/?*) id="${id##*/}" ;; *) id="" ;; esac
+  fail "$(hub_msg "the notes in {notes} aren't this folder's ({owner}): it looks like a copy of another project, and connecting it would take over that project's notes. To connect it as a project of its own, remove the copied notes (the other project keeps its own), then run this again:
+  {commands}" notes="$PROJ_PATH/.agent-memory" owner="$1" \
+    commands="rm -rf $(printf %q "$PROJ_PATH/.agent-memory")${id:+ $(printf %q "$PROJ_PATH/.git/worktrees/$id")}; git -C $(printf %q "$PROJ_PATH") branch -D agent-memory")"
+}
+if [ -e .agent-memory ] || [ -L .agent-memory ]; then
+  if [ -L .agent-memory ] || [ ! -f .agent-memory/.git ] || [ ! -e .git ]; then
+    fail "$(hub_msg "{path} isn't a notes folder of this repo's: move it away, then run this again" path="$PROJ_PATH/.agent-memory")"
+  fi
+  notes_git="$(sgit -C .agent-memory rev-parse --git-common-dir 2>/dev/null)" || notes_git=""
+  [ -z "$notes_git" ] || notes_git="$(cd .agent-memory && cd "$notes_git" && pwd -P)"
+  if [ "$notes_git" != "$(cd "$(sgit rev-parse --git-common-dir)" && pwd -P)" ]; then
+    if [ -z "$notes_git" ]; then   # what its .git names isn't there: a folder that was moved, most likely
+      fail "$(hub_msg "{notes} names a repo that isn't there ({repo}). If this folder was moved, run {command}, then run this again" notes="$PROJ_PATH/.agent-memory" repo="$(sed -n 's/^gitdir: *//p' .agent-memory/.git)" command="git -C $(printf %q "$PROJ_PATH") worktree repair .agent-memory")"
+    fi
+    notes_not_ours "$notes_git"
+  fi
+  [ "$(sgit -C .agent-memory symbolic-ref -q HEAD)" = refs/heads/agent-memory ] \
+    || fail "$(hub_msg "{path} isn't a notes folder of this repo's: move it away, then run this again" path="$PROJ_PATH/.agent-memory")"
+  # whose memory repo they are sent to: a copy that was repaired still names the other project's. One nothing was pushed
+  # to yet is nobody's
+  notes_url="$(sgit remote get-url "$MEMORY_REMOTE" 2>/dev/null || true)"
+  if [ -n "$notes_url" ] && [ "${notes_url##*/}" != "$PROJ_NAME-memory.git" ]; then
+    case "$notes_url" in
+      /*) ! git --git-dir="$notes_url" show-ref --verify --quiet refs/heads/agent-memory 2>/dev/null || notes_not_ours "$notes_url" ;;
+      *) notes_not_ours "$notes_url" ;;
+    esac
+  fi
+  # the hub machine's bare repo, when it has the branch: these notes' own when its commits are in their history (the last
+  # run stopped after pushing them); otherwise another project's of this name
+  pushed="$(mini_sh "git --git-dir=\"$GO_SH/${PROJ_NAME}-memory.git\" rev-parse -q --verify refs/heads/agent-memory" 2>/dev/null || true)"
+  if [ -n "$pushed" ] && ! { [ -n "$notes_url" ] && sgit -C .agent-memory merge-base --is-ancestor "$pushed" HEAD 2>/dev/null; }; then
+    fail "$(hub_msg ".agent-memory already exists and the hub machine already has its bare repo (agent-memory branch pushed): this project should already be onboarded")"
+  fi
+  RESUME=true
+fi
+# the hub machine's place for this project's notes may be a repo, or a folder, of the user's: only a memory repo's is used
+mini_sh "b=\"$GO_SH/${PROJ_NAME}-memory.git\"; [ ! -e \"\$b\" ] || { refs=\$(git --git-dir=\"\$b\" for-each-ref --format='%(refname)' 2>/dev/null) || exit 3
+[ -z \"\$(printf '%s\n' \"\$refs\" | grep -vxE 'refs/heads/agent-memory|refs/(brunna|agent-hub)/.*')\" ] || exit 3; }" || { rc=$?
+  [ $rc != 3 ] || fail "$(hub_msg "{path} is there and isn't a repo of brunna's notes: move it away, or give this folder another name, then run this again (nothing was done)" path="$GO_REMOTE/$PROJ_NAME-memory.git")"
+  exit $rc; }
+# the name brunna's remote for the notes has may be the user's own remote's: only one that names a memory repo of this hub's
+# is replaced
+if [ -e .git ]; then
+  notes_url="$(sgit remote get-url "$MEMORY_REMOTE" 2>/dev/null || true)"
+  case "$notes_url" in
+    ""|"$_GIT_ORIGIN"/*-memory.git|"${MINI_HOST:-/}:~/git-origin/"*-memory.git) ;;
+    *) fail "$(hub_msg "this repo has a remote named {name} ({url}), the name brunna's own for the notes has: git -C {path} remote rename {name} <another name>, then run this again (nothing was done)" name="$MEMORY_REMOTE" url="$notes_url" path="$PROJ_PATH")" ;;
+  esac
+fi
+# a GitHub repo the last run made (brunna.creating, set before it and taken away after the push) and didn't push to yet
+if [ -e .git ] && creating="$(sgit config --local --get brunna.creating)"; then
+  made="$(sgit remote get-url origin 2>/dev/null || true)"; made="${made%.git}"
+  branch="$(sgit branch --show-current)"
+  if [ -n "$made" ] && [ "${made%"$creating"}" != "$made" ] && ! sgit rev-parse -q --verify "refs/remotes/origin/$branch" >/dev/null; then
+    fail "$(hub_msg "the last run made the GitHub repo {repo}, this folder's origin, and stopped before pushing to it: {command}, then run this again" repo="$creating" command="git -C $(printf %q "$PROJ_PATH") push -u origin $(printf %q "$branch")")"
+  fi
+  [ -z "$made" ] || sgit config --local --unset brunna.creating
 fi
 
 # --- 1. precondition checks and automatic fill-in ---
@@ -188,45 +306,50 @@ if [ -n "$MINI_HOST" ]; then
 fi
 $on_hub && fail "$(hub_msg "origin points at the hub machine, which the current design never does: this project is probably left over from the old onboarding; deal with it by hand first")"
 
-if sgit rev-parse HEAD >/dev/null 2>&1; then
+if sgit rev-parse HEAD >/dev/null 2>&1 && [ -z "$(sgit ls-tree HEAD)" ]; then
+  :   # an empty first commit (a run that stopped made it): what is in the folder is its owner's to commit
+elif sgit rev-parse HEAD >/dev/null 2>&1; then
   # There's commit history: this is the case where the user's real work needs protecting; the working tree must be
   # clean, no guessing, no automatic clearing.
-  [ -z "$(sgit status --porcelain)" ] || fail "$(hub_msg "the working tree is not clean (uncommitted changes or untracked files): clean it up yourself, then run again")"
+  # What an earlier run that stopped left (the notes, the agents' local files) is the platform's, not theirs
+  LOCAL=()
+  while IFS= read -r f; do [ -z "$f" ] || LOCAL+=(":(exclude,glob)**/${f#\*\*/}"); done \
+    < <("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/repo_guard.py" local)
+  [ -z "$(sgit status --porcelain -- . ":(exclude).agent-memory" ${LOCAL[@]+"${LOCAL[@]}"})" ] || fail "$(hub_msg "the working tree is not clean (uncommitted changes or untracked files): clean it up yourself, then run again")"
 else
-  # A brand-new repo with no commits at all: there's no "work the user isn't ready with" to protect here, so the
-  # existing content (possibly empty) is committed as the initial content.
-  # Check for emptiness with find, excluding .git itself: after git init .git always exists, and `ls -A` counts it,
-  # so ls -A alone can never tell "empty".
-  if [ -z "$(find . -mindepth 1 -not -path './.git' -not -path './.git/*')" ]; then
-    printf '# %s\n' "$PROJ_NAME" > README.md
-  fi
-  sgit add -A
-  sgit commit -q -m "chore: initial commit"
+  # No commits at all: the worktree for the notes needs one, so an empty one is made (--only: what may be staged stays so).
+  # What is in the folder is its owner's to commit. The agents' files of this machine never are (sync-local-setup excludes
+  # the installed ones' in every repo)
+  exclude="$(sgit rev-parse --git-path info/exclude)"; mkdir -p "$(dirname "$exclude")"
+  while IFS= read -r f; do
+    ! grep -qxF "$f" "$exclude" 2>/dev/null || continue
+    [ ! -s "$exclude" ] || [ -z "$(tail -c1 "$exclude")" ] || echo >> "$exclude"
+    printf '%s\n' "$f" >> "$exclude"
+  done < <("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/repo_guard.py" local)
+  sgit commit -q --only --allow-empty -m "chore: initial commit"
+  [ -z "$(find . -mindepth 1 -maxdepth 1 -not -name .git | head -1)" ] \
+    || hub_say "The files in the folder stay as they are, not committed: they are yours, or an agent's session's, to commit"
 fi
 
-RESUME=false
-if [ -e .agent-memory ]; then
-  # Checking whether the bare repo's directory exists isn't enough: `git init --bare` creates the directory by
-  # itself, which doesn't mean the agent-memory branch was ever pushed. Check whether that ref exists.
-  if mini_sh "cd $GO_SH/${PROJ_NAME}-memory.git 2>/dev/null && git show-ref --verify --quiet refs/heads/agent-memory" 2>/dev/null; then
-    fail "$(hub_msg ".agent-memory already exists and the hub machine already has its bare repo (agent-memory branch pushed): this project should already be onboarded")"
-  fi
-  # .agent-memory exists locally, but the hub machine has no matching bare repo with real content: exactly the
-  # trace of "the hub machine was unreachable, so the last onboarding got stuck halfway" (the local steps all done,
-  # the hub machine's steps never got to run, or failed halfway). Not treated as an error: continue from the hub
-  # machine's steps.
-  RESUME=true
-  hub_say "(The local steps are done, but the hub machine has no bare repo with content for this project: it looks like the last run was interrupted; continuing with the hub machine's steps, without redoing what is done)"
-elif git show-ref --verify --quiet refs/heads/agent-memory; then
+if $RESUME; then
+  hub_say "(Notes from a run that stopped are here; continuing, without redoing what is done)"
+elif sgit show-ref --verify --quiet refs/heads/agent-memory; then
   fail "$(hub_msg "the agent-memory branch exists but the .agent-memory worktree does not: probably a run that failed halfway; clean up by hand first (git branch -D agent-memory), then run again")"
 fi
 
 if [ -z "$origin_url" ] && [ "$NO_REMOTE" != true ]; then
   # GH_OWNER: the settings' github.owner, read above
-  gh repo create "$GH_OWNER/$PROJ_NAME" $VISIBILITY --source=. --remote=origin
-  sgit remote set-url origin "git@github.com:${GH_OWNER}/${PROJ_NAME}.git"
   outer_branch=$(sgit branch --show-current)
-  sgit push -u origin "$outer_branch"
+  push_again="git -C $(printf %q "$PROJ_PATH") push -u origin $(printf %q "$outer_branch")"
+  sgit config --local brunna.creating "$GH_OWNER/$PROJ_NAME"
+  gh repo create "$GH_OWNER/$PROJ_NAME" $VISIBILITY --source=. --remote=origin || {
+    sgit config --local --unset brunna.creating
+    fail "$(hub_msg "the GitHub repo {repo} was not created (see above). If a run that stopped made it already: {command}, then run this again" repo="$GH_OWNER/$PROJ_NAME" command="git -C $(printf %q "$PROJ_PATH") remote add origin git@github.com:$GH_OWNER/$PROJ_NAME.git && $push_again")"
+  }
+  sgit remote set-url origin "git@github.com:${GH_OWNER}/${PROJ_NAME}.git"
+  sgit push -u origin "$outer_branch" \
+    || fail "$(hub_msg "the GitHub repo is made and is this folder's origin, but the push failed (see above): {command}, then run this again" command="$push_again")"
+  sgit config --local --unset brunna.creating
   origin_url=$(sgit remote get-url origin)
 fi
 
@@ -239,11 +362,22 @@ else
   hub_say "[1/11] Preconditions OK: {name} (no remote, stays local only)" name="$PROJ_NAME"
 fi
 
-if [ "$RESUME" != true ]; then
+if [ ! -e .agent-memory ]; then
   # --- 2. create the orphan worktree ---
-  sgit worktree add --orphan -b agent-memory .agent-memory -q
+  # -f: a worktree git still lists at this path, its folder gone, is no reason to stop
+  sgit worktree add -f --orphan -b agent-memory .agent-memory -q
   hub_say "[2/11] Created the .agent-memory worktree (agent-memory branch, fully separate from the main branch)"
 
+fi
+# where the notes go, before anything below may send them: a copied folder's settings still name the original's repo.
+# remote add isn't idempotent: in a run that goes on from one that stopped it may be set already
+if sgit remote get-url "$MEMORY_REMOTE" >/dev/null 2>&1; then
+  sgit remote set-url "$MEMORY_REMOTE" "$(mini_memory_url "$PROJ_NAME")"
+else
+  sgit remote add "$MEMORY_REMOTE" "$(mini_memory_url "$PROJ_NAME")"
+fi
+
+if ! sgit -C .agent-memory rev-parse -q --verify HEAD >/dev/null; then
   # --- 3. copy the skeleton, commit ---
   cp "$TEMPLATES/AGENT.md" .agent-memory/AGENT.md
   # the placeholder is content (the content language); the librarian rewrites it
@@ -255,60 +389,51 @@ if [ "$RESUME" != true ]; then
   # New projects get engineering registered by default since 2026-09-27 and multi-agent-review since 2026-10-27;
   # existing projects were all given them the same day.
   printf 'engineering\nmulti-agent-review\n' > .agent-memory/RULES
-  ( cd .agent-memory && sgit add -A && sgit commit -q -m "init: brunna memory skeleton (AGENT.md/STATE.md/memory)" )
+  sgit -C .agent-memory add -- AGENT.md STATE.md RULES memory/.gitkeep
+  sgit -C .agent-memory commit -q -m "init: brunna memory skeleton (AGENT.md/STATE.md/memory)"
   hub_say "[3/11] Skeleton files in place and committed on the agent-memory branch"
-
-  # --- 4. ignore .agent-memory/ ---
-  # Written into the local .git/info/exclude, not .gitignore: .gitignore gets committed, and not even the name
-  # `.agent-memory/` should go into the repo (whether it goes public later is undecided).
-  # sync-local-setup.sh (steps 5-6, every SessionStart, recover) also makes sure of this.
-  "$AGENT_HUB/bin/sync-local-setup.sh" --quiet . >/dev/null
-  sgit check-ignore -q .agent-memory || fail "$(hub_msg ".agent-memory is not ignored, stopping (otherwise git add -A would add it as an embedded repo)")"
-  hub_say "[4/11] .agent-memory/ is excluded in .git/info/exclude (.gitignore untouched)"
-
-  # --- 5-6. Local-only setup: the hooks (.claude/settings.local.json) and the agent-hub block in CLAUDE.local.md:
-  # neither goes into the repo (they contain the hub's path and names, which a public repo would leak).
-  # Handed to sync-local-setup.sh, the same logic as recover and every SessionStart.
-  setup_said="$("$AGENT_HUB/bin/sync-local-setup.sh" .)" || { setup_rc=$?; printf '%s\n' "$setup_said"; exit "$setup_rc"; }
-  [ -z "$setup_said" ] || printf '%s\n' "$setup_said"
-  # its warnings (a tracked rules file, this machine's paths in committed files) reach the person under --log too: a ⚠️
-  # line of its own, or the block a ⚠️ opens
-  [ -z "$LOG" ] || LC_ALL=C awk '/⚠️/ { block = !/^sync-local-setup:/; print; next } /^sync-local-setup:/ { block = 0 } block' \
-    <<<"$setup_said" >&3
-  # say only what this runtime really has (with no coding agent there is neither; sync-local-setup said why)
-  rt_has() { "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hub-runtime" has "$1" >/dev/null 2>&1; }
-  if rt_has instructions && rt_has lifecycle; then
-    hub_say "[5-6/11] Hooks and the rules-file block are in place (not version-controlled)"
-  elif rt_has instructions; then
-    hub_say "[5-6/11] The rules-file block is in place (not version-controlled); this runtime has no hooks"
-  elif rt_has lifecycle; then
-    hub_say "[5-6/11] Hooks are in place (not version-controlled); this runtime has no rules file"
-  else
-    hub_say "[5-6/11] No hooks and no rules-file block: this runtime has neither ({settings} runtime.default)"
-  fi
-
-  # --- 7. commit nothing to the outer repo ---
-  # This used to commit .gitignore (with the tool's name in the message, even); now the local setup is all in
-  # ignored/excluded files, and this machinery never shows up in the project repo's history.
-  hub_say "[7/11] No changes to the outer repo, nothing committed"
-else
-  hub_say "[2-7/11] Resume mode: done by the previous run, skipped"
 fi
 
+# --- 4. ignore .agent-memory/ ---
+# Written into the local .git/info/exclude, not .gitignore: .gitignore gets committed, and not even the name
+# `.agent-memory/` should go into the repo (whether it goes public later is undecided).
+# sync-local-setup.sh (steps 5-6, every SessionStart, recover) also makes sure of this.
+"$AGENT_HUB/bin/sync-local-setup.sh" --quiet . >/dev/null
+sgit check-ignore -q .agent-memory || fail "$(hub_msg ".agent-memory is not ignored, stopping (otherwise git add -A would add it as an embedded repo)")"
+hub_say "[4/11] .agent-memory/ is excluded in .git/info/exclude (.gitignore untouched)"
+
+# --- 5-6. Local-only setup: the hooks (.claude/settings.local.json) and the agent-hub block in CLAUDE.local.md:
+# neither goes into the repo (they contain the hub's path and names, which a public repo would leak).
+# Handed to sync-local-setup.sh, the same logic as recover and every SessionStart.
+setup_said="$("$AGENT_HUB/bin/sync-local-setup.sh" .)" || { setup_rc=$?; printf '%s\n' "$setup_said"; exit "$setup_rc"; }
+[ -z "$setup_said" ] || printf '%s\n' "$setup_said"
+# its warnings (a tracked rules file, this machine's paths in committed files) reach the person under --log too: a ⚠️
+# line of its own, or the block a ⚠️ opens
+[ -z "$LOG" ] || LC_ALL=C awk '/⚠️/ { block = !/^sync-local-setup:/; print; next } /^sync-local-setup:/ { block = 0 } block' \
+  <<<"$setup_said" >&3
+# say only what this runtime really has (with no coding agent there is neither; sync-local-setup said why)
+rt_has() { "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hub-runtime" has "$1" >/dev/null 2>&1; }
+if rt_has instructions && rt_has lifecycle; then
+  hub_say "[5-6/11] Hooks and the rules-file block are in place (not version-controlled)"
+elif rt_has instructions; then
+  hub_say "[5-6/11] The rules-file block is in place (not version-controlled); this runtime has no hooks"
+elif rt_has lifecycle; then
+  hub_say "[5-6/11] Hooks are in place (not version-controlled); this runtime has no rules file"
+else
+  hub_say "[5-6/11] No hooks and no rules-file block: this runtime has neither ({settings} runtime.default)"
+fi
+
+# --- 7. commit nothing to the outer repo ---
+# This used to commit .gitignore (with the tool's name in the message, even); now the local setup is all in
+# ignored/excluded files, and this machinery never shows up in the project repo's history.
+hub_say "[7/11] No changes to the outer repo, nothing committed"
+
 # --- 8. create the bare repo on the hub machine, push the agent-memory branch ---
-mini_sh "mkdir -p $GO_SH && git init --bare -q $GO_SH/${PROJ_NAME}-memory.git"
+mini_sh "mkdir -p \"$GO_SH\" && git init --bare -q \"$GO_SH/${PROJ_NAME}-memory.git\""
 # Note: the remote branch is deliberately named agent-memory like the local one, not main: a different name makes
 # branch.agent-memory.merge point at refs/heads/main, which works (it's the only ref on the remote anyway) but looks
 # like a misconfiguration, and people (or other agents) easily mistake it for a bug and go digging.
-# remote add isn't idempotent: in resume mode the memory remote may already be set from last time (before the hub
-# machine's steps failed); if it exists, change its URL, only add it if it doesn't.
-( cd .agent-memory && \
-  if sgit remote get-url "$MEMORY_REMOTE" >/dev/null 2>&1; then
-    sgit remote set-url "$MEMORY_REMOTE" "$(mini_memory_url "$PROJ_NAME")"
-  else
-    sgit remote add "$MEMORY_REMOTE" "$(mini_memory_url "$PROJ_NAME")"
-  fi && \
-  sgit push -u "$MEMORY_REMOTE" agent-memory:agent-memory -q )
+sgit -C .agent-memory push -u "$MEMORY_REMOTE" agent-memory:agent-memory -q
 # The hub machine's git init.defaultBranch is main, so a new bare repo's HEAD points at refs/heads/main by default;
 # but only agent-memory is ever pushed here, main never exists, HEAD dangles, and the plain git clone in the next
 # step gets nothing. Point HEAD at the right branch explicitly.
@@ -321,7 +446,17 @@ fi
 
 # --- 9. clone a working copy on the hub machine for the librarian ---
 # without symlinks (core.symlinks=false): the librarian reads its files, and a committed link must not point it elsewhere
-mini_sh "mkdir -p ~/.memory-copies && git clone -q --config core.symlinks=false $GO_SH/${PROJ_NAME}-memory.git ~/.memory-copies/${PROJ_NAME}"
+# cloned beside its place and moved there, so one that stops half-way leaves nothing in it; one that is there already is
+# kept when it is a copy of these notes
+mini_sh "set -e; c=~/.memory-copies/${PROJ_NAME}; b=\"$GO_SH/${PROJ_NAME}-memory.git\"; mkdir -p ~/.memory-copies
+if [ -e \"\$c\" ]; then
+  [ -e \"\$c/.git\" ] && git --git-dir=\"\$b\" cat-file -e \"\$(git -C \"\$c\" rev-parse -q --verify HEAD)\" 2>/dev/null && [ \"\$(git -C \"\$c\" remote get-url origin)\" -ef \"\$b\" ] || exit 3
+else
+  t=~/.memory-copies/.new-${PROJ_NAME}; rm -rf \"\$t\"; mkdir \"\$t\"; trap 'rm -rf \"\$t\"' EXIT
+  git clone -q --config core.symlinks=false \"\$b\" \"\$t/c\" && mv \"\$t/c\" \"\$c\"
+fi" || { rc=$?
+  [ $rc != 3 ] || fail "$(hub_msg "{path} is there and isn't a copy of this project's notes: move it away, then run this again" path="~/.memory-copies/$PROJ_NAME")"
+  exit $rc; }
 if on_mini; then
   hub_say "[9/11] Cloned the librarian's memory copy to ~/.memory-copies/{name}" name="$PROJ_NAME"
 else
@@ -329,7 +464,10 @@ else
 fi
 
 # --- 10. add to the mirror-backup list only when there's an external origin ---
-if [ -n "$origin_url" ]; then
+# (what the config takes there, bin/config-check: one more line it refuses would make the whole config invalid)
+if [ -n "$origin_url" ] && ! [[ "$origin_url" =~ ^(git@[A-Za-z0-9_.-]+:|https://[A-Za-z0-9_.-]+/)[A-Za-z0-9_./-]+$ ]]; then
+  hub_say "[10/11] The mirror backup takes no remote such as {origin}, not added to it" origin="$origin_url"
+elif [ -n "$origin_url" ]; then
   source "$AGENT_HUB/bin/hubpaths.sh"
   touch "$HUB_CONFIG/mirror-list.txt"
   if ! grep -qxF "$origin_url" "$HUB_CONFIG/mirror-list.txt"; then
@@ -347,32 +485,4 @@ manifest_origin="${origin_url:-(native)}"
 "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/registry.py" add "$PROJ_NAME" "$PROJ_PATH" "$manifest_origin" \
     "$GO_REMOTE/${PROJ_NAME}-memory.git" ${ONBOARD_REGISTRY_EXTRA:+--extra "$ONBOARD_REGISTRY_EXTRA"} \
   || fail "$(hub_msg "adding to the project registry failed (projects/{name}.yaml)" name="$PROJ_NAME")"
-# Commit+push agent-hub right after registering: it used to only write the file without committing, so the
-# librarian/mirror-backup on the hub machine only saw a new project once someone happened to commit by hand (a
-# project once got stuck locally that way). Only these three files are committed; nothing else uncommitted in
-# agent-hub is touched.
-# The roster is regenerated every night as well: its failure is said, never a reason to leave the registration
-# uncommitted and skip the steps after it (11-23)
-"$AGENT_HUB/bin/gen-index-roster.sh" \
-  || hub_say "Warning: the roster in index.md wasn't regenerated; the librarian does it tonight" >&2
-if "$AGENT_HUB/bin/commit-hub-files.sh" "register $PROJ_NAME (onboard-project.sh)" \
-    "projects/$PROJ_NAME.yaml" mirror-list.txt index.md 2>&4; then
-  hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml), and committed" name="$PROJ_NAME"
-else
-  hub_say "Warning: committing/pushing brunna's registry files failed; do it by hand (the registration itself is written)" >&2
-  [ -z "$LOG" ] || hub_say "  What it said: {log}" log="$LOG" >&2
-  hub_say "[11/11] Registered in brunna's project registry (projects/{name}.yaml); committing/pushing brunna failed (see the warning)" name="$PROJ_NAME"
-fi
-# A sandboxed project with a remote: which branches the platform may push for it (docs/design/platform-push.md section
-# 2), and its push grant when that isn't none; the decision and any failure are said by git_push_grant.py itself
-if [ -n "$origin_url" ]; then
-  "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/git_push_grant.py" onboard "$PROJ_NAME" ${PUSH_ARGS[@]+"${PUSH_ARGS[@]}"} >&3 \
-    || hub_say "Warning: the platform's push for {name} was not set up; run brunna push setup {name}" name="$PROJ_NAME" >&2
-fi
-# The registration changed the config: apply it now and record that, or the status page keeps saying the config changed
-# but was not applied until someone runs brunna config apply (found on a clean macOS, 11-03). Quiet either way: where it
-# can't finish (no service manager, a linked worktree of the hub) doctor and the status page already say why.
-"$AGENT_HUB/bin/py" "$AGENT_HUB/bin/agenthub" config apply >/dev/null 2>&1 || true
-
-[ -n "$LOG" ] || echo
-hub_say "Done: {name} is connected to brunna." name="$PROJ_NAME" >&3
+register_rest

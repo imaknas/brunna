@@ -118,6 +118,19 @@ class Connect(unittest.TestCase):
         self.assertEqual(rc, 0, out)
         self.assertIn('layout_intent={"split": true}', out)
 
+    def test_a_root_is_added_to_the_settings_by_replacing_the_file(self):
+        cfg = self.tmp / "brunna.json"
+        cfg.write_text('{"v": 1}')
+        cfg.chmod(0o600)
+        os.link(cfg, self.tmp / "before")
+        with mock.patch.object(connect.hubconf, "config_path", lambda: cfg), \
+                mock.patch.object(connect.subprocess, "run"):
+            rc, out, err = self.run_connect("--add-root", str(self.code))
+        self.assertEqual(rc, 0, out + err)
+        self.assertEqual(json.loads(cfg.read_text())["connect"]["roots"], [str(self.code)])
+        self.assertEqual((self.tmp / "before").read_text(), '{"v": 1}', "never written in place")
+        self.assertEqual(cfg.stat().st_mode & 0o777, 0o600)
+
     def test_unsaved_changes_are_skipped(self):
         app = repo(self.code / "app")
         (app / "README").write_text("changed\n")
@@ -191,6 +204,7 @@ class Connect(unittest.TestCase):
                                               (["none"], set(), "No AI agent is set up", "Start a new session")):
             with self.subTest(installed=installed), mock.patch.object(connect.subprocess, "run", run), \
                     mock.patch.object(connect, "sgit", lambda *a: subprocess.CompletedProcess(a, 0, "", "")), \
+                    mock.patch.object(connect.repo_guard, "refusal", lambda p: None), \
                     mock.patch.object(connect.hubconf, "LOGS", self.tmp / "logs"), \
                     mock.patch("runtime_ports.installed", lambda: installed), \
                     mock.patch("runtime_ports.capabilities", lambda n=None: caps), \

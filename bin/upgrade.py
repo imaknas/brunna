@@ -57,6 +57,7 @@ import pathlib
 import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 
@@ -80,6 +81,9 @@ BREAKING_TITLE = re.compile(r"^[a-z]+(\([^)]*\))?!: ")
 WRAPPER_MARKS = tuple(f"written by {n} install-cli" for n in names.all("cli"))   # either name wrote it
 # install-cli's exec line: through bin/py to bin/agenthub (until v0.7), or bin/brunna directly
 WRAPPER_EXEC = re.compile(r'^exec (?:"[^"\n]*/bin/py" "[^"\n]*/bin/(?:agenthub|brunna)"|"[^"\n]*/bin/brunna") "\$@"$', re.M)
+# the wrapper whole, as any version wrote it: its comment and its exec line (or cut off after the comment). Anything more in
+# it is somebody's own script
+WRAPPER = re.compile(r'#!/bin/sh\n#([^\n]*)\n?(?:exec (?:"[^"\n]*/bin/py" )?"([^"\n]*)/bin/(?:agenthub|brunna)" "\$@"\n?)?')
 
 USAGE_TEXT = """usage: brunna upgrade [--to <tag> | --main] [--check] [--yes]
   (no option)   the newest release; a checkout on main follows main instead
@@ -327,6 +331,20 @@ def py_step(*argv) -> list[str]:
     return [sys.executable, *map(str, argv)]
 
 
+def own_wrapper(path) -> str | None:
+    """Whether this file is an install-cli wrapper and nothing more, so brunna's to replace or remove: the hub it runs ("" when
+    it is cut off before that), None for anything else (a link too, whatever it points to)."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            return None
+        with open(path, "rb") as f:
+            text = f.read(4096).decode()
+    except (OSError, UnicodeDecodeError):
+        return None
+    m = WRAPPER.fullmatch(text)
+    return (m.group(2) or "") if m and (m.group(2) or any(x in m.group(1) for x in WRAPPER_MARKS)) else None
+
+
 def cli_wrapper() -> pathlib.Path | None:
     """The CLI on PATH, under either name (docs/design/rename-brunna.md), when it is install-cli's wrapper (never
     someone else's program of that name)."""
@@ -365,7 +383,7 @@ def step_list(full: bool) -> list[tuple[str, list[str]]]:
     if full:
         steps.append(("user settings", py_step(b / "agenthub", "user-settings", "--update")))
     w = cli_wrapper()
-    if w:
+    if w and own_wrapper(w) is not None:   # one the user made theirs (a link, more lines in it) install-cli leaves
         steps.append(("install-cli", py_step(b / "agenthub", "install-cli", "--dir", w.parent)))
     return steps
 

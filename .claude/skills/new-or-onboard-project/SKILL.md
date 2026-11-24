@@ -10,8 +10,8 @@ what they already do (no `git init` first, no `gh repo create`):
 
 - `agenthub connect <folder>`: existing folders. It works out the layout (one folder, one repo, a monorepo, or a folder
   holding several repos), says what connecting does, asks per layout, and calls `onboard-project.sh` for each project.
-- `agenthub onboard <path>` (= `bin/onboard-project.sh`): one project, new or existing. It does the git init, the first
-  commit and the GitHub repo.
+- `agenthub onboard <path>` (= `bin/onboard-project.sh`): one project, new or existing. It does the git init, an empty
+  first commit and the GitHub repo. What is in the folder stays uncommitted.
 
 ## Decision 1: a brand-new project, or existing folders?
 
@@ -20,7 +20,8 @@ what they already do (no `git init` first, no `gh repo create`):
 - **Existing folders** (the user says "connect this" or points at a path that already has things in it): skip decision 3,
   look at decisions 4 and 5, then run `agenthub connect <folder>`. A repo with unsaved changes is skipped and the reason
   printed: **don't clean it up for the user and re-run**. Pass the message on unchanged and let them decide whether to
-  commit or discard those changes. This protects their work that isn't ready yet.
+  commit or discard those changes. This protects their work that isn't ready yet. The same for a folder inside another
+  repo, or a repo with nothing on its current branch: the user decides.
 
 ## Decision 2: which path does the project go in?
 
@@ -33,11 +34,10 @@ what they already do (no `git init` first, no `gh repo create`):
 ## Decision 3: does a brand-new project need language scaffolding?
 
 If the user named a language or framework ("create a Rust project", "use Python"), first run the matching init command
-in the directory (`cargo init`, `uv init`, `npm init` etc.), **then** onboard it: the first commit is then the real
-scaffolding, not just a placeholder README.md.
+in the directory (`cargo init`, `uv init`, `npm init` etc.), **then** onboard it. Onboarding commits nothing of it: the
+project's own session commits the scaffolding afterwards, with a `.gitignore` in place (and pushes it, as the user decides).
 
-If the user named no language and just wants a place to keep things (research notes and the like), no scaffolding: the
-placeholder README.md is enough.
+If the user named no language and just wants a place to keep things (research notes and the like), no scaffolding.
 
 ## Decision 4: should the GitHub repo be public or private?
 

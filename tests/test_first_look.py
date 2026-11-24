@@ -46,7 +46,7 @@ class FirstLook(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
-    def run_main(self, answer=None, ready=True):
+    def run_main(self, answer=None, ready=True, tree=("README.md",)):
         calls = []
 
         def fake_run(argv, **kw):
@@ -59,7 +59,7 @@ class FirstLook(unittest.TestCase):
         out = io.StringIO()
         with mock.patch.object(llm_ready, "unsupported", lambda point: None if ready else "no model"), \
                 mock.patch.object(project_git, "data", lambda *a: {"readme": "An app.", "commits": ["2026-11-01 init"],
-                                                                   "tree": ["README.md"], "commit_count": 1}), \
+                                                                   "tree": list(tree), "commit_count": 1}), \
                 mock.patch.object(fl.subprocess, "run", fake_run), redirect_stdout(out):
             rc = fl.main(["app"])
         return rc, out.getvalue(), calls
@@ -86,6 +86,12 @@ class FirstLook(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("brunna llm setup", out)
         self.assertEqual(calls, [])
+        self.assertEqual(self.state(), PLACEHOLDER)
+
+    def test_with_nothing_committed_no_model_is_asked(self):
+        rc, out, calls = self.run_main({"state": "# STATE\n\n## Tasks\n\n- (none)\n", "summary": "x"}, tree=())
+        self.assertEqual((rc, calls), (0, []))
+        self.assertIn("brunna first-look app", out)
         self.assertEqual(self.state(), PLACEHOLDER)
 
     def test_an_existing_state_or_notes_are_left_alone(self):
