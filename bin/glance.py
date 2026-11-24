@@ -132,7 +132,8 @@ def text(g: dict) -> str:
     lines.append(_("Mail: {n} open", n=g["mail"]["total"]) + "".join(
         f" · {x['project']} {x['open']}" for x in g["mail"]["projects"]))
     h = g["health"]
-    lines.append({"ok": _("Health: ok"), "problem": _("Health: problems"),
+    notes = len(h["alerts"])   # a reminder (the nightly tidy-up off, no alerts) breaks nothing, but plain "ok" hides it
+    lines.append({"ok": _("Health: ok, {n} worth a look", n=notes) if notes else _("Health: ok"), "problem": _("Health: problems"),
                   "unknown": _("Health: not known yet (the status page has not run)")}[h["state"]])
     lines += [f"  {'⚠️' if a['level'] == 'bad' else '🔔'} {a['text'][:140]}" for a in h["alerts"][:10]]
     if not g["scheduler"]["alive"]:
