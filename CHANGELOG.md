@@ -3,6 +3,103 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.21.0 (2026-11-24)
+
+### New
+
+- **ideas:** The platform notices an idea sandbox that has grown into a project
+- **seatbelt:** The git broker's profiles, its socket rule and policy entry
+- **git:** The git broker's allowlists, pure
+- **git:** The git broker's channel, writer and config op, and the wrapper
+- **git:** Brunna push, the owner's push of a sandboxed project
+- **git:** The platform's push grant, a write deploy key per repo
+- **onboard:** Onboarding asks whether to sandbox and what the platform may push
+- **cli:** The owner's help and to-dos ask nothing of the owner but answers
+- **registry:** Enforce.git_push, push_dir and git_push settings
+- **push:** The checks that replace the owner's look
+- **push:** The platform pushes a sandboxed project on its session's request
+- **policy:** The push request folder, writable by a sandboxed project's sessions only
+- **push:** Doctor probes each project's push credential as the worker would
+- **alerts:** A login nothing on the machine uses can be left unalerted
+- **push:** Brunna push <project> works from any folder that isn't a sandboxed project's
+- **release:** Brunna release publishes a GitHub release of a sandboxed project
+- **release:** The owner's decisions: reads before the question, help all only, a rules line
+- **alert:** An alert goes first to whoever can fix it
+- **conformance:** No plugin loads in a platform run
+- **glance:** Needs_you items carry the platform's prompt or command
+- **surface:** Brunna surface, a session's view for surface adapters
+- **integrations:** A display-only Claude Code mod, installed from the hub's checkout
+- **capabilities:** Pdf, a sandboxed project's page printed to PDF by the platform
+- **registry:** Manifest.update takes the part of an entry that changes
+
+### Fixed
+
+- **git:** Name the platform's bare repos with --git-dir, never -C
+- **git:** Bare repos by --git-dir only where they are bare
+- **git:** Memory_paths and the last callers name a bare repo, never enter it
+- **overview:** Status lists the registry's services, not only services.tsv
+- **hubbus:** A busy session holds a letter only briefly, and idle sessions are picked first
+- **hubbus:** A busy-ended session's hook doesn't take the letter back, and an ack mid-tick isn't overruled
+- **ideas:** The rules text says what an idea sandbox really blocks
+- **git:** The broker's limits and checks after slice a's code review
+- **git:** Brunna push moves a ref to commits the remote already has
+- **project-git:** A project's job gets a built environment and the real git
+- **git:** Brunna push pinned to what was shown, local origins checked
+- **git:** The push grant stages its new key in the private temp area
+- **git:** Push setup repairs a grant GitHub dropped and keeps the policy it has
+- **git:** The push grant after its code review
+- **git:** Push setup writes only the git_push block of a registry entry
+- **policy:** Deny only sandboxed projects' push request folders
+- **push:** Review fixes before the merge
+- **push:** The grant's key copy in the run's own folder
+- **push:** Declared values as substrings; a tree walked once per tree
+- **push:** A bounded take-in, leases that never push, the worker's memory
+- **git:** The probe's http and git origins; setup records the visibility
+- **push:** An append-only store that fails closed; paths bounded in bytes
+- **push:** Leases deny every session command; to-dos close when settled
+- **push:** No joined path under the request root
+- **push:** A store no name can split; a matcher that can't fail
+- **lease:** Leases ask before every session command
+- **push:** An unremovable entry blocks nothing; a stuck worker is stopped
+- **push:** Dotenv's bad statements skipped; raw name bytes; the deadline per place
+- **git:** Push setup reads gh's read_only as well as readOnly
+- **git:** Ask before the owner's gh login adds a deploy key
+- **git:** Read a gh login with an underscore or quotes
+- **scheduler:** A manual run's result clears or sets the job's failing mark
+- **git-fence:** An empty .git file is no finding
+- **release:** A failed tag read-back never skips the record and the letter
+- **push:** A branch named like a commit id isn't pushed
+- **release:** The tag is pinned at the shown commit before any release exists
+- **release:** Re-review: honest wording, the remaining window, after-pin recovery
+- **conformance:** Session-write's control lifts the folder's writability too
+- **alert:** One alert per failing job, and a recovery is not pushed to the owner
+- **alert:** No log line when no channel is set up; step 2's checks answered
+- **alert:** A changing list still escalates, a failed take-back is retried
+- **alert:** The git fence's findings and safety refusals stay the owner's
+- **skills:** A plugin's manifest inside a skill is refused
+- **worktree:** A sandboxed project's worktree has its settings from the make
+- **claude:** The foreign-control check names plugins and plugin keys
+- **claude:** A run without --restricted never starts beside a plugin
+- **integrations:** The Claude Code mod handles its own failed calls
+- **surface:** The read-only label names the assistant as the catalogs do
+- **glance:** A needs_you command is brunna and plain words, by the schema
+- **integrations:** The Claude Code mod blanks what a project's settings env hands brunna
+- **testguard:** A test run leaves no disk image attached
+- **sessions:** Claude Code 2.1.330's data-flow ledger is passed over, not skipped
+- **capabilities:** Pdf after its code review
+- **onboard:** A linked worktree's roster is the machine's, and a roster failure no longer skips the registration's commit
+- **alerts:** A check that found something hasn't failed
+- **alerts:** A check that couldn't check isn't a finding
+- **alerts:** The secrets check declares found_exit
+- **registry:** Code the checkout has moved on from doesn't write the live index
+- **services:** Long-running services follow the platform's code once it is landed
+- **services:** What the code review of following new code found
+- **hubconf:** The start's commit never stops a process from starting
+
+### Reverted
+
+- **push:** Branches named like a commit id are pushed again
+
 ## v0.20.0 (2026-11-15)
 
 ### New
