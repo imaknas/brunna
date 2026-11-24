@@ -2336,9 +2336,10 @@ def cmd_land(argv: list[str]) -> int:
     were none), the scheduler and watchdog (pairwise: the other spelling's units go), and the config applied (services
     re-rendered). Each leaves an unchanged thing alone. All run whatever the others said; the worst exit code is
     returned.
-    First, what sandboxed code reads moves out of .state at once (hubconf.move_shared; docs/design/capabilities.md 11-08),
-    so the services that keep the code they started with don't meet it half moved: cap-runner and lease-runner exit by
-    themselves once bin/ has changed and they are idle, and launchd or systemd starts them on the new code (code_stamp)."""
+    First, what sandboxed code reads moves out of .state at once (hubconf.move_shared; docs/design/capabilities.md 11-08).
+    Last, the commit is marked landed (hubconf.mark_landed): only then do the long-running services move to it,
+    cap-runner and lease-runner exiting by themselves once nothing is in flight and launchd or systemd starting them on
+    the new code (code_watch; docs/design/service-code.md D1), so none starts before the steps above are done."""
     import upgrade
     left = hubconf.move_shared()
     for p in left:
@@ -2350,7 +2351,13 @@ def cmd_land(argv: list[str]) -> int:
         steps.append([*hubconf.launch(BIN / "agenthub"), "install-cli", "--dir", str(w.parent)])
     steps += [[*hubconf.launch(BIN / "agenthub"), "init", "--scheduler-only"],
               [*hubconf.launch(BIN / "agenthub"), "config", "apply"]]
-    return max([1 if left else 0, *(subprocess.run(s).returncode for s in steps)])
+    rc = max([1 if left else 0, *(subprocess.run(s).returncode for s in steps)])
+    try:
+        hubconf.mark_landed()
+    except OSError as e:   # the services then move after code_watch.LAND_GRACE_S instead
+        print(_("✗ {path} could not be written: {why}", path=hubconf.landed_file(), why=e.strerror or e), file=sys.stderr)
+        rc = max(rc, 1)
+    return rc
 
 
 def user_install(name: str) -> int:

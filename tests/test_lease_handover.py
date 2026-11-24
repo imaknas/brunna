@@ -221,67 +221,137 @@ class EarlierTasks(HandoverIds):
                           ("lease-old-1-task-1", "not_needed")])
 
 
-class RestartOnCodeChange(unittest.TestCase):
+class FollowCode(unittest.TestCase):
+    """docs/design/service-code.md D3: once the checkout's commit has moved on, the runner stops the leases between turns
+    and exits at the first moment nothing is in flight."""
+
     def setUp(self):
         self.m = load_runner()
-        self.m.DIR = pathlib.Path(tempfile.mkdtemp())  # log() writes in DIR: must not write into the real runner.log
+        self.m.DIR = pathlib.Path(tempfile.mkdtemp())  # log() and save() write in DIR: never the real runner's
         self.addCleanup(shutil.rmtree, self.m.DIR, ignore_errors=True)
-        self.m.CODE_AT_START = 100.0
+        self.stale = False
+        self.drains = []
+        self.m.WATCH = mock.Mock(stale=lambda: self.stale, draining=self.drains.append)
+        self.addCleanup(setattr, self.m, "WATCH", None)
         self.exited = []
         p = mock.patch.object(self.m.os, "_exit", lambda code: self.exited.append(code))
         p.start()
         self.addCleanup(p.stop)
         self.addCleanup(self.m.LEASES.clear)
+        self.addCleanup(self.m.CHILDREN.clear)
 
-    def add(self, state):
+    def add(self, state, **attrs):
         l = self.m.Lease({"lease_id": f"5555555{len(self.m.LEASES)}-5555-4555-8555-555555555555", "project": "p",
                           "cwd": "/tmp"})
         l.state = state
+        for k, v in attrs.items():
+            setattr(l, k, v)
         self.m.LEASES[l.id] = l
+        return l
 
-    def check(self, stamp, now=10_000.0):
-        with mock.patch.object(self.m.hubconf, "code_stamp", return_value=stamp), \
-                mock.patch.object(self.m.time, "time", return_value=now):
-            self.m.restart_if_code_changed()
-
-    def test_still_being_edited_waits(self):
-        self.add("idle_stopped")
-        self.check(200.0, now=200.0 + self.m.CODE_SETTLE_S - 1)
-        self.assertEqual(self.exited, [])
-        self.check(200.0, now=200.0 + self.m.CODE_SETTLE_S + 1)
-        self.assertEqual(self.exited, [0])
+    def proc(self):
+        """A lease process that ends when its stdin closes, as the agent does."""
+        p = subprocess.Popen([sys.executable, "-c", "import sys; sys.stdin.read()"], stdin=subprocess.PIPE, text=True)
+        self.addCleanup(lambda: p.poll() is None and p.kill())
+        return p
 
     def test_unchanged_code_keeps_running(self):
-        self.check(100.0)
+        self.add("running", proc=self.proc())
+        self.assertFalse(self.m.follow_code())
         self.assertEqual(self.exited, [])
 
-    def test_changed_and_idle_restarts(self):
+    def test_leases_between_turns_are_stopped_then_it_exits(self):
+        p = self.proc()
+        between = self.add("running", proc=p)
         self.add("idle_stopped")
         self.add("detached")
-        self.check(200.0)
+        self.stale = True
+        self.m.follow_code()
+        self.assertEqual(self.exited, [0])
+        self.assertEqual(between.state, "idle_stopped", "stopped as an idle stop does: the next message resumes it")
+        self.assertIsNone(between.proc)
+        self.assertIsNotNone(p.poll(), "its process has ended")
+        saved = json.loads((self.m.DIR / "leases.json").read_text())
+        self.assertEqual(saved[between.id]["state"], "idle_stopped")
+
+    def test_a_turn_or_an_answer_awaited_keeps_it_until_it_ends(self):
+        for name, attrs in {"in a turn": {"in_turn": True}, "waiting": {"waiting": 1}}.items():
+            with self.subTest(name):
+                self.m.LEASES.clear()
+                self.exited.clear()
+                p = self.proc()
+                busy = self.add("running", proc=p, **attrs)
+                other = self.add("running", proc=self.proc())
+                self.stale = True
+                self.assertFalse(self.m.follow_code())
+                self.assertEqual(self.exited, [])
+                self.assertIsNone(p.poll(), "the lease mid-work keeps its process")
+                self.assertEqual(other.state, "running", "nothing is stopped while one is mid-work")
+                self.assertIn(busy.id[:8], self.drains[-1], "the record says what holds it")
+                busy.in_turn, busy.waiting = False, 0   # its turn ends
+                self.m.follow_code()
+                self.assertEqual(self.exited, [0])
+
+    def test_flags_a_dead_process_left_never_hold_it(self):
+        dead = subprocess.Popen([sys.executable, "-c", "pass"])
+        dead.wait()
+        self.add("running", proc=dead, in_turn=True, waiting=2)
+        self.add("resuming")    # a start that raised: no process
+        self.add("detaching")   # a handover a restart cut short (persisted)
+        self.stale = True
+        self.m.follow_code()
         self.assertEqual(self.exited, [0])
 
-    def test_changed_but_busy_waits(self):
-        for state in self.m.BUSY:
-            with self.subTest(state):
-                self.m.LEASES.clear()
-                self.add(state)
-                self.check(200.0)
-                self.assertEqual(self.exited, [])
+    def test_a_request_in_flight_holds_it(self):
+        # a message taken (its client_msg_id recorded) but not yet written to the session: the runner must not exit
+        # between the two, or the resend would be answered "duplicate" and the message lost
+        self.stale = True
+        with self.m.in_flight():
+            self.assertFalse(self.m.follow_code())
+            self.assertEqual(self.exited, [])
+            self.assertEqual(self.drains[-1], self.m._("{n} {n:request or handover|requests or handovers} in flight",
+                                                       n=1))
+        self.m.follow_code()
+        self.assertEqual(self.exited, [0])
 
+    def test_a_handover_holds_it_from_before_its_thread_starts(self):
+        release = __import__("threading").Event()
+        with mock.patch.object(self.m, "detach", lambda l, r: release.wait(5)):
+            self.m.spawn_detach(self.add("running"), "user")
+            self.stale = True
+            self.assertFalse(self.m.follow_code())
+            release.set()
+        for _ in range(100):
+            if not self.m.ACTIVE:
+                break
+            __import__("time").sleep(0.02)
+        self.m.follow_code()
+        self.assertEqual(self.exited, [0])
 
-class CodeStamp(unittest.TestCase):
-    def test_changes_when_a_bin_file_changes(self):
-        import hubconf
-        tmp = pathlib.Path(tempfile.mkdtemp())
-        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        (tmp / "bin").mkdir()
-        f = tmp / "bin" / "x.py"
-        f.write_text("1")
-        with mock.patch.object(hubconf, "ROOT", tmp):
-            before = hubconf.code_stamp()
-            subprocess.run(["touch", "-t", "203001010000", str(f)], check=True)
-            self.assertGreater(hubconf.code_stamp(), before)
+    def test_a_bridge_still_sending_holds_it(self):
+        bridge = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        self.addCleanup(lambda: bridge.poll() is None and bridge.kill())
+        self.m.CHILDREN.append(bridge)
+        self.stale = True
+        self.assertFalse(self.m.follow_code())
+        bridge.kill()
+        bridge.wait()
+        self.m.follow_code()
+        self.assertEqual(self.exited, [0])
+
+    def test_stop_proc_clears_an_awaited_answer(self):
+        l = self.add("running", proc=self.proc(), waiting=1)
+        self.m.stop_proc(l, "terminal")
+        self.assertEqual(l.waiting, 0)
+
+    def test_an_error_in_the_check_does_not_end_the_thread(self):
+        self.m.WATCH = mock.Mock(stale=mock.Mock(side_effect=[OSError("mid-checkout"), True]))
+        self.add("idle_stopped")
+        with mock.patch.object(self.m.time, "sleep", side_effect=[None, None, StopIteration]):
+            with self.assertRaises(StopIteration):
+                self.m.code_loop()
+        self.assertEqual(self.exited, [0], "the second check, after the error, still exits")
+        self.assertIn("follow_code", (self.m.DIR / "runner.log").read_text())
 
 
 if __name__ == "__main__":

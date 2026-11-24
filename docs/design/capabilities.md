@@ -479,7 +479,7 @@ tools can read other projects' transcripts there, as today.
    main checkout's, gitignored, written only by the platform, nothing private), which is `read`: the registry cache and index
    (`registry.CACHE`, `REGISTRY_INDEX`), brunna test's worker slots (`test_slots()`) and the renames record (`renames()`).
    `brunna land` moves all three at once after the merge (`move_shared`; cap-runner and lease-runner restart themselves on the
-   new code once idle, `code_stamp`); a later first look moves what is left. Only the main checkout's own code in its own state
+   new code once land is done and nothing is in flight, `code_watch`, service-code.md); a later first look moves what is left. Only the main checkout's own code in its own state
    moves (`ROOT == MAIN`, no STATE override), never read in both places; a copy that differs or a move that fails stays, is
    said, and doctor shows it red (`shared_leftovers`); two renames records are merged by key unless a key differs. Until they
    restart, services still on the old code fail closed (a sandboxed cap-run or complete is refused, not run unconfined). Only a confined job's run settings list `.state` beside its own

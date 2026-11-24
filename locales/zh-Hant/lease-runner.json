@@ -22,7 +22,6 @@
  "Sent a minimal handover. Reason: {why}": "已送出最小交接。原因:{why}",
  "idle_loop {id}: {e!r}": "idle_loop {id}:{e!r}",
  "prune_files: {e!r}": "prune_files:{e!r}",
- "bin/ changed and no lease is running: exiting so launchd restarts with the new code": "bin/ 的程式改過了,沒有租約在跑:結束,讓 launchd 用新的程式重啟",
  "{id} show_file refused: {path}: {why}": "{id} show_file 拒絕:{path}:{why}",
  "{project} has a lease that is answering, waiting for a reply, open in a terminal, or being detached": "{project} 有深談正在回答、等回覆、在終端機或正在收回",
  "This project has no work mode (enforce.work in its registry entry); this lease is read-only again": "這個專案沒有開 work 模式(登錄的 enforce.work),這段深談改回唯讀",
@@ -48,5 +47,11 @@
  "{project}: the earlier to-dos could not be read, the handover goes without them: {e!r}": "{project}:讀不到之前的待辦,交接不帶它們:{e!r}",
  "{id}: handover task ref {ref} is not an earlier item (or is used twice); sent as a new task": "{id}:交接的待辦 ref {ref} 不是之前的那幾件(或用了兩次),當成新的待辦送出",
  "{id}: handover ended item is not an earlier item; ignored": "{id}:交接列為已結束的那件不是之前的待辦,不處理",
- "this conversation was written by version {version}, and the platform's copy {current} failed resuming one ({reason}): not resumed": "這段對話是版本 {version} 寫的,而平台的版本 {current} 接續這種對話失敗({reason}):不接續"
+ "this conversation was written by version {version}, and the platform's copy {current} failed resuming one ({reason}): not resumed": "這段對話是版本 {version} 寫的,而平台的版本 {current} 接續這種對話失敗({reason}):不接續",
+ "follow_code: {e!r}": "follow_code:{e!r}",
+ "the platform's code has moved on and nothing is in flight: exiting so the service manager starts the new code": "平台的程式已經換新,手上沒有事:結束,讓服務管理員用新的程式重啟",
+ "{n} {n:request or handover|requests or handovers} in flight": "{n} 個請求或交接正在進行",
+ "lease {ids} in a turn or waiting for the owner's answer": "租約 {ids} 正在回答或等主人回覆",
+ "a handover is still being sent": "交接還在送出",
+ "registrar.py could not be loaded: {e!r}": "registrar.py 載入不了:{e!r}"
 }

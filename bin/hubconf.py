@@ -1065,11 +1065,38 @@ def code_rev() -> str | None:
     every few seconds): the identity of the platform's code (docs/design/service-code.md D1). git moves the ref after it
     has written the tree, both for merge-branch's fast-forward and upgrade's checkout, so a new value means every file
     is in place. None when ROOT isn't itself a checkout (an exported test tree) or HEAD can't be read."""
-    import gitdirs
+    try:
+        import gitdirs
+    except ImportError:   # a copy of a few platform files (a test's, an old install's): no checkout to follow
+        return None
     found = gitdirs.dirs(ROOT)
     if not found or found.top != ROOT.resolve():
         return None
     return gitdirs.head(found)
+
+
+try:   # the code this process started with: every platform process imports hubconf first (service-code.md D2)
+    LOADED_REV = code_rev()
+except (OSError, ValueError):
+    LOADED_REV = None
+
+
+def landed_file() -> pathlib.Path:
+    return STATE / "code-landed"
+
+
+def mark_landed() -> None:
+    """`brunna land` is done with the checkout's commit (after merge-branch's fast-forward, and as upgrade's land step,
+    after setup-python and the config steps): the long-running services move to it now (code_watch, D1)."""
+    if (rev := code_rev()):
+        write_atomic(landed_file(), rev + "\n")
+
+
+def landed_rev() -> str | None:
+    try:
+        return landed_file().read_text().strip() or None
+    except OSError:
+        return None
 
 
 def code_stamp() -> float:

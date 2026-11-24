@@ -1,8 +1,9 @@
 # Long-running services follow the platform's code
 
-> brunna session · 2026-11-24 · r1. Follows the 11-24 incident below; replaces the `code_stamp` restart that lease-runner
-> and cap-runner have had since 10-25 (`known-issues.md`, "A long-running service runs the code loaded when it
-> started").
+> brunna session · 2026-11-24 · r2 (after a blind review: work in flight across the exit, flags a dead process leaves,
+> land's steps after the move, the start's code rather than a later import, dynamic loads, the manager's pid). Follows the
+> 11-24 incident below; replaces the `code_stamp` restart that lease-runner and cap-runner have had since 10-25
+> (`known-issues.md`, "A long-running service runs the code loaded when it started").
 
 ## Why
 
@@ -48,19 +49,29 @@ The gaps, from that and from reading the code:
 loose ref or in `packed-refs`, through the `.git` file of a linked worktree and its `commondir`), never by running git: it
 is cheap enough to read every couple of seconds and on every index write.
 
-Why the commit and not the files' times: git writes the new tree first and moves the ref last, both for `merge
---ff-only` (merge-branch) and for the detached checkout of a tag (upgrade). Once HEAD names the new commit, every file
-is in place, so no settle is needed and nothing is restarted onto a half-written tree. It covers everything the commit
-holds (`modules/`, `contracts/`, templates, the platform's own registry entry), on macOS and Linux alike.
+Why the commit and not the files' times: git writes the new tree first and moves the ref last, for `merge --ff-only`
+(merge-branch, upgrade on main), `checkout --detach` (upgrade to a tag) and `checkout -B`. Once HEAD names the new commit
+every file is in place, and the commit covers everything it holds (`modules/`, `contracts/`, templates, the platform's own
+registry entry), on macOS and Linux alike.
 
-Not a git checkout (an exported test tree): `code_rev()` is None; the services fall back to `code_stamp()` with the
-60-second settle as before, and the index guard (D2) is off (there is nothing to compare).
+**The services move when the commit is landed, not when HEAD moves.** What follows the move must be done before new code
+starts: `brunna land` moves what sandboxed code reads out of `.state`, rebuilds the index and applies the config; upgrade
+runs `setup-python` (new packages) and `config migrate` first. So `land` ends by writing the commit to
+`<state>/code-landed` (`hubconf.mark_landed`), and a service follows a commit only once it is marked there (merge-branch
+runs land after its fast-forward; upgrade's step list ends with land). A checkout moved some other way (a manual `git
+pull`, a land that failed) is followed after `LAND_GRACE_S` (10 minutes) with no land. HEAD itself stays the test for D2:
+old code must not write even before the land is done.
+
+Not a git checkout (an exported test tree) or a HEAD it can't read (a reftable repo): `code_rev()` is None; the services
+fall back to `code_stamp()` with the 60-second settle as before, and the index guard (D2) is off.
 
 ### D2. Old code never writes the live index
 
-`registry` notes `code_rev()` when it is imported. `refresh()` writes the cache and `index.json` only when the checkout
-still has that commit; otherwise it validates and returns the index as a linked worktree's refresh does, writes
-nothing, and says once on stderr that newer code is in place. The writer is held to it, whoever it is: a service, a job
+`hubconf` notes `code_rev()` when it is imported (`LOADED_REV`): every platform process imports it first, so it is the
+code the process started with, even for a process that imports `registry` lazily after a merge. `refresh()` writes the
+cache and `index.json` only while the checkout still has that commit, asked again just before each write; otherwise it
+validates and returns the index as a linked worktree's refresh does, writes nothing, and says once on stderr that newer
+code is in place. The writer is held to it, whoever it is: a service, a job
 that started before a merge, a command caught mid-merge. The index is then rewritten by the next process on the current
 code: `brunna land` right after the merge, the scheduler's tick, any command.
 
@@ -73,40 +84,60 @@ only for the projects a lease may attach to, and a process on old code is about 
 
 A small shared helper, `bin/code_watch.py`:
 
-- `Watch(name)` notes `code_rev()` (or `code_stamp()`) at start and writes the service's record,
+- `Watch(name)` takes the process's own `LOADED_REV` (or `code_stamp()`) and writes the service's record,
   `<state>/services/<name>.json` = `{pid, rev, started}`;
-- `stale()` says whether the checkout has moved on (with the settle only on the `code_stamp` fallback);
+- `stale()` says whether the checkout has moved on to a commit that is landed or has waited `LAND_GRACE_S` (D1; the
+  settle only on the `code_stamp` fallback);
+- `draining(why)` adds to the record when the service first found itself held and what holds it now;
 - every check is wrapped: an error while reading git's files is "not stale this time" and is logged, never the end of
   the thread or the service.
 
-**lease-runner.** A watcher thread checks every 2 seconds. When the code has moved on, under the runner's lock:
+**lease-runner.** A watcher thread checks every 2 seconds. When the code has moved on (and is landed), under the
+runner's lock, it stays while anything is in flight, judged by what is alive, never by a flag that could outlive it:
 
-- a lease that is mid-work keeps the runner alive: in a turn, waiting for the owner's answer to a permission or a
-  question, or attaching, resuming or detaching (handing over);
-- the process of every other lease (`running` between turns) is stopped as an idle stop does it: state `idle_stopped`,
-  and the next message resumes it with `--resume`, which the idle stop and the mode switch already exercise;
-- once no lease is mid-work, the runner saves its leases and exits; the service manager starts it on the new code
-  (`throttle_s: 10`).
+- a POST being handled, counted from its first line to its reply (`in_flight`). Without it a message could be taken
+  (its `client_msg_id` recorded and saved) and the runner exit before writing it to the session: the resend would be
+  answered "duplicate" and the message lost. It also covers a rename or an upgrade's subprocesses, which the service
+  manager would kill with the runner;
+- a handover, counted from before its thread starts (`spawn_detach`; the handler that starts it returns at once), and
+  the `hubbus bridge` it starts until that ends (systemd ends what is left in the unit's group when it restarts);
+- a lease process that is alive and in a turn or waiting for the owner's answer. `waiting` is cleared whenever its
+  process stops or dies; a lease left `resuming` by a start that raised, or `detaching` by a runner that died mid-handover,
+  holds nothing (those states are what they were before; how a cut handover is finished is not this change's).
 
-So the drain is bounded by the turn in progress, not by the conversation. A message that reaches the runner while it
-drains is handled as now (it may start a turn, which the drain then waits for); a request that arrives in the ten
-seconds the runner is down fails to connect, as during today's restarts, and the assistant sends it again
-(`client_msg_id` makes a resend safe).
+When nothing is, the process of every lease between turns is stopped as an idle stop does it (state `idle_stopped`; the
+next message resumes it with `--resume`, which the idle stop and the mode switch already exercise), the leases are
+saved, and the runner exits; the service manager starts it on the new code (`throttle_s: 10`; systemd's `RestartSec` makes
+it 10 s every time, launchd only when the job ran less than that). While held, the record says what holds it (D5).
+
+`stop_proc` runs under the lock and may hold requests for up to 25 s per lease (15 s for the process to end on its stdin
+closing, 10 more after a terminate), as the mode switch and quiesce already do; in practice the agent exits at once.
+
+A message that reaches a draining runner is handled as now: it may start a turn, which the drain then waits for. With one
+owner talking to one lease at a time the drain is the turn in progress; turns overlapping across leases without a gap
+would hold it longer, and D5 says so if it ever lasts. Refusing new turns while draining (503) would change the
+contract the assistant reads, for a case that doesn't happen. A request in the ten seconds the runner is down fails to
+connect, as during every restart today.
 
 **cap-runner.** Its loop checks every second (as now) and exits once nothing is running or queued (as now). It keeps
-taking requests while it drains: a request left in `requests/` is refused as too old after 10 minutes, and a running
-agent call may last an hour, so not taking them would refuse work rather than delay it. Its drain is bounded by the load,
-which the visibility check below watches.
+taking and starting requests while it drains: the client (`hub-run`) withdraws a request nobody picks up within 30
+seconds and reports the service as down, so a runner that stopped taking them would fail work rather than delay it; and a
+job taken but not started is marked lost by the next runner. Its drain is therefore bounded by the load, and jobs started
+during it run with the old code's sandbox profile, as they did during the old settle. Re-adopting jobs taken but not
+started (so a draining runner could take without starting) is a follow-up.
 
 **status-page** runs `python -m http.server`: no platform code; nothing to follow.
 
 ### D4. A service on old code imports nothing new
 
-Each service imports at start every platform module it otherwise imports lazily (`code_watch.preload([...])`), so a
+Each service imports at start every platform module it otherwise imports lazily (`code_watch.preload(PRELOAD)`), so a
 process that is draining is one consistent snapshot of the code it started with: a handover that runs after a merge runs
-the old handover code with the old modules, not a mix. A test reads each service's source and fails when a function-level
-import of a platform module is missing from its preload list. (Imports made lazily inside those modules are not covered;
-the drain keeps that window to the work in flight.)
+the old handover code with the old modules, not a mix. lease-runner also loads its runtime adapter (`rt()`, whichever the
+configured runtime is) and `registrar.py`, which it used to load from its file at every handover, once at start. A test
+reads each service's source and fails when a function-level import of a platform module is missing from its list.
+
+What this doesn't cover: imports made lazily inside those modules, and files read at call time (templates, locales,
+modules' YAML). The drain keeps that window to the work in flight.
 
 ### D5. The platform checks that every service follows
 
@@ -115,11 +146,14 @@ the drain keeps that window to the work in flight.)
   a registry field would be read by the running code during the very merge that adds it (the 11-24 problem). A test
   fails when a `keepalive` service of the platform's entry or a module is missing from it, or when a service listed as
   following doesn't use `code_watch`.
-- On each run (every 15 minutes, and from `brunna land` through `config apply`), render-services reads each listed
-  service's record: a live pid on a commit other than the checkout's is "on old code since" the first run that saw it.
-  Past `wait_limit_s()` (two hours beyond the longest agent call, as for a unit change that waits) it is a problem:
-  alerted like the others (to brunna first, `alert.route`), shown red on the status page. A missing record is not a
-  problem by itself: a service started before this change writes none until its own restart.
+- On each run (every 15 minutes), render-services reads each listed service's record: a record whose pid is the one the
+  service manager runs the service as (`launchctl print`'s pid, systemd's `MainPID`; not a bare `kill 0`, which a pid
+  reused after a reboot would pass) and whose commit isn't the checkout's is "on old code since" the first run that saw
+  it. Past `wait_limit_s()` (two hours beyond the longest agent call, as for a unit change that waits) it is a problem,
+  alerted like the others and shown red on the status page, naming what the record says holds it (a lease waiting hours
+  for the owner's answer reads as that, not as a broken service). A missing record is not a problem by itself: a
+  service started before this change writes none until its own restart. A module turned off has no services in the
+  index, so its old record is never read.
 - render-services does not restart a service for its code. Only the service knows what is in flight at the moment it
   decides (a message can start a turn between an outside check and an outside kill); the outside's part is to say it
   when that doesn't happen.
@@ -134,7 +168,8 @@ the drain keeps that window to the work in flight.)
 
 ## Steps
 
-1. `hubconf.code_rev()`, with tests for a main checkout, a linked worktree, a packed ref and a detached HEAD.
+1. `hubconf.code_rev()`, with tests for a main checkout, a linked worktree, a packed ref and a detached HEAD;
+   `LOADED_REV`, `mark_landed`/`landed_rev`, land marking it.
 2. The 11-24 reproduction as a test first: a process holding the old validation, a module using a field it doesn't
    know, the checkout moved on; `refresh()` must leave `index.json` as it was. Then D2.
 3. `bin/code_watch.py`; lease-runner (D3, D4) with tests: a stale runner with a lease between turns stops it and exits;
@@ -145,5 +180,8 @@ the drain keeps that window to the work in flight.)
 
 ## Follow-up (not in this change)
 
+- cap-runner taking without starting while it drains (re-adopting queued jobs and their agent-minute reservations).
+- A lease left `detaching` by a runner that died mid-handover stays so (`load()` resets only running, resuming,
+  attaching and crashed), and a new detach is refused.
 - lease-runner's stderr has a `FileNotFoundError` from `index.json.tmp` → `index.json`: two refreshes in one live index
   share the temporary name, and the second rename finds it gone. Fewer old writers (D2) makes it rarer, not impossible.

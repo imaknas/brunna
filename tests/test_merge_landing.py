@@ -50,10 +50,13 @@ class CmdLand(unittest.TestCase):
             return subprocess.CompletedProcess(cmd, codes[len(calls) - 1])
 
         import upgrade
+        # the landed mark goes to the platform's state: recorded here, never written (docs/design/service-code.md D1)
         with mock.patch.object(self.mod.subprocess, "run", fake_run), mock.patch.object(upgrade, "cli_wrapper",
-                                                                                        lambda: None):
+                                                                                        lambda: None), \
+                mock.patch.object(self.mod.hubconf, "mark_landed", lambda: calls.append(["mark_landed"])):
             rc = self.mod.main(["land", *argv])
-        return rc, calls
+        self.assertEqual(calls[-1], ["mark_landed"], "the commit is marked landed after every step")
+        return rc, calls[:-1]
 
     def test_order_and_arguments(self):
         rc, calls = self.land([0, 0, 0, 0], ["--rebuild"])

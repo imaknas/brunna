@@ -210,9 +210,8 @@ class Runner(Golden):
         # show_file refusal, prune, restart
         l = self.lease()
         out.append(("show_file refused", m.show_file(l, "../x.png", None)[1]))
-        with mock.patch.object(m.hubconf, "code_stamp", lambda: 1.0), mock.patch.object(m.os, "_exit", lambda c: None):
-            m.CODE_AT_START = 0.5
-            m.restart_if_code_changed()
+        with mock.patch.object(m, "WATCH", mock.Mock(stale=lambda: True)), mock.patch.object(m.os, "_exit", lambda c: None):
+            m.follow_code()
         # quiesce, follow_move
         busy = self.lease()
         busy.in_turn = True

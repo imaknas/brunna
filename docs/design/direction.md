@@ -36,6 +36,7 @@ that day; they are listed at the end.
 | 11-15 | A letter doesn't wait on a session busy with other work: an idle session is picked first, and a busy one that hasn't acked holds it 10 minutes, then the next is asked | `mailbox-session-first.md` "11-15: a busy session" |
 | 11-15 | A project's model call can be served by a local model the owner pins it to (`llm.points.<project>/<point>`); the project names only a tier, and a provider configured without `llm.use` moves no other point | `llm-providers.md` "Projects' calls on a provider" |
 | 11-16 | brunna never uses the owner's GitHub authority without saying so and an explicit yes; nobody answering is `none` plus a to-do | `platform-push.md` "11-16: the owner is asked before their GitHub login is used" |
+| 11-24 | Old code never writes live shared state; a long-running platform service moves to the new code by itself once the commit is landed and nothing is in flight, and the platform says when one doesn't | `service-code.md` |
 
 **Order of the coding-agent adapters** (decided across 10-29, 11-01 and 11-08; no other doc has it whole):
 

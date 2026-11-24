@@ -42,6 +42,9 @@ found, and a LINE bot was down for a day and a half without anyone knowing):
   - bootstrap failed, a keepalive service is not running, something that should be loaded is not -> report it
   Problems go to Discord (once per set, once more on recovery), exit 1 (the scheduler records job.failed, the status
   page turns red).
+A platform service that keeps running the code of an older commit than the checkout's past the same limit is a problem
+too (FOLLOWS_CODE, old_code; docs/design/service-code.md D5): each exits by itself once it has nothing in flight, and
+this only says when that hasn't happened; it never restarts one for its code.
 A service whose restart loses work in flight (WAIT_FOR_IDLE: cap-runner marks a running job lost) keeps its unit as it
 is while it has some, by the record it keeps in the platform's state while it runs; the change is made on a run when it
 has none, or after two hours beyond the longest agent call (three by default). A change that waits doesn't show in plan either, so a job ending between
@@ -107,6 +110,57 @@ def wait_limit_s() -> int:
 WAITED = hubconf.STATE / "render-services-waiting.json"   # label → when its change first waited
 waiting: list[str] = []   # the last _desired()'s labels left as they are until idle (main says so)
 overdue: list[str] = []   # the last _desired()'s labels changed although busy, after waiting wait_limit_s()
+
+
+# The platform's long-running services and how each follows the platform's code (docs/design/service-code.md D5): the
+# name of the record it keeps through code_watch (it exits by itself once the checkout has moved on and it has nothing in
+# flight), or None for one that runs no platform code. By service name, for the platform's entry and the modules only.
+# Hard-coded like WAIT_FOR_IDLE: a registry field would be read by the running code during the merge that adds it.
+# tests/test_service_code.py fails when a keepalive service of the platform's is missing here
+FOLLOWS_CODE = {"lease-runner": "lease-runner", "cap-runner": "cap-runner", "status-page": None}
+OLD_CODE = hubconf.STATE / "render-services-old-code.json"   # label → when it was first seen on old code
+
+
+def old_code(index: dict) -> list[str]:
+    """Problems: a platform service that has run the code of a commit other than the checkout's for longer than
+    wait_limit_s() since a run of this script first saw it, with what its record says holds it. Only a record whose pid
+    is the one the service manager runs the service as counts: a service with no record (one started before code_watch,
+    which writes none until its own restart), a record left by a process that has ended, or a pid reused after a reboot
+    says nothing here; a service not running is reported anyway."""
+    import code_watch
+    rev = hubconf.code_rev()
+    if rev is None:
+        return []
+    try:
+        seen = json.loads(OLD_CODE.read_text())
+        seen = seen if isinstance(seen, dict) else {}
+    except (OSError, ValueError):
+        seen = {}
+    now, new, problems = time.time(), {}, []
+    docs = [(n, d) for n, d in index["projects"].items() if d.get("type") == "platform"] + \
+        sorted((index.get("modules") or {}).items())
+    for name, doc in docs:
+        for svc in doc.get("services") or []:
+            if not (rec_name := FOLLOWS_CODE.get(svc["name"])):
+                continue
+            rec = code_watch.record(rec_name) or {}
+            old, label = rec.get("rev"), label_of(name, svc)
+            if not old or old == rev:
+                continue
+            try:
+                if int(rec["pid"]) != manager_pid(os.getuid(), label):
+                    continue
+            except (KeyError, TypeError, ValueError):
+                continue
+            first = new[label] = float(seen.get(label) or now)
+            if now - first >= wait_limit_s():
+                problems.append(_("{label} ({project}): still runs the code of {old} {hours:g} hours after the checkout "
+                                  "moved to {new}; it exits by itself once nothing is in flight ({why})", label=label,
+                                  project=name, old=str(old)[:8], hours=round((now - first) / 3600, 1), new=rev[:8],
+                                  why=rec.get("draining") or _("it says nothing holds it: its check may have stopped")))
+    if new != seen:
+        hubconf.write_atomic(OLD_CODE, json.dumps(new))
+    return problems
 
 
 def busy(project: str, svc: dict) -> bool:
@@ -219,6 +273,21 @@ def running(uid: int, label: str) -> str | None:
         if line.strip().startswith("state = "):
             return line.split("=", 1)[1].strip()
     return "unknown"
+
+
+def manager_pid(uid: int, label: str) -> int | None:
+    """The pid the service manager runs a service as; None when it runs none."""
+    if hubconf.service_manager() == "systemd":
+        import systemd_units
+        return systemd_units.main_pid(label)
+    r = launchctl("print", f"gui/{uid}/{label}")
+    for line in r.stdout.splitlines() if r.returncode == 0 else []:
+        if line.strip().startswith("pid = "):
+            try:
+                return int(line.split("=", 1)[1])
+            except ValueError:
+                return None
+    return None
 
 
 def launchctl(*args: str) -> subprocess.CompletedProcess:
@@ -447,6 +516,7 @@ def main() -> int:
             elif label in keepalive and state != "running":
                 problems.append(_("{label} ({project}): the keepalive service is not running (state = {state})", label=label,
                                   project=want[label][0], state=state))
+        problems += old_code(index)
         alert.once("render-services", problems, _("The background services are all back to normal (render-services)"))
     for x in problems:
         print(f"⚠️ {x}")

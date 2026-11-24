@@ -207,10 +207,6 @@ TOP = {"v", "name", "type", "purpose", "paths", "memory", "privacy", "runtime", 
        "publishes", "provides", "consumes", "services", "jobs", "enforce", "network", "allow_write", "gate", "secrets",
        "models", "metered_models", "layout_intent", "agents", "agents_per_day"}
 TOP_V2 = TOP | {"tests", "code", "inputs", "commit_gate"}
-# the code this process validates with (docs/design/service-code.md D2): refresh() writes the live index only while the
-# checkout still has it, so a process started before a merge (a long-running service, a long job, a command caught
-# mid-merge) never overwrites what the new code wrote. None (not a git checkout): nothing to compare
-LOADED_REV = hubconf.code_rev()
 # what the index's documents are: 2 = project v2 (v1 files upgraded as they are read). Readers that need v2 fields
 # (merge-branch) refuse an index of an older format; registry.refresh never overwrites a newer one
 INDEX_FORMAT = 2
@@ -1289,8 +1285,13 @@ _said_superseded = False
 
 
 def superseded() -> bool:
-    """The checkout has moved on from the code this process loaded (LOADED_REV): said once on stderr."""
+    """The checkout has moved on from the code this process started with (hubconf.LOADED_REV, noted when the process
+    imported hubconf, its first platform import: a module imported lazily after a merge is new beside old ones): said
+    once on stderr. refresh() writes the live index only while this is False (docs/design/service-code.md D2), so a
+    process started before a merge (a long-running service, a long job, a command caught mid-merge) never overwrites what
+    the new code wrote. None (not a git checkout): nothing to compare."""
     global _said_superseded
+    LOADED_REV = hubconf.LOADED_REV
     if LOADED_REV is None:
         return False
     try:
@@ -1351,7 +1352,7 @@ def refresh(only: list[str] | None = None, rebuild: bool = False) -> dict:
             doc, errs = None, [_("cannot read the YAML: {error}", error=e)]
         cache = CACHE / f"{stem}.json"
         if not errs:
-            if live:
+            if live and not superseded():
                 cache.write_text(json.dumps(doc, ensure_ascii=False, indent=1, default=str))
             projects[stem] = doc
         else:
@@ -1359,7 +1360,7 @@ def refresh(only: list[str] | None = None, rebuild: bool = False) -> dict:
             if cache.exists():  # keep using the last valid version (upgraded too: it may predate v2)
                 projects[stem] = tiers.upgrade(json.loads(cache.read_text()))
     # projects whose registry file was deleted: drop the cache too (deleting the entry = removing the project)
-    for c in CACHE.glob("*.json") if live else []:
+    for c in CACHE.glob("*.json") if live and not superseded() else []:
         if c.name != "index.json" and c.stem not in {f.stem for f in files}:
             c.unlink()
     modules, mod_errors = load_modules()
@@ -1380,7 +1381,7 @@ def refresh(only: list[str] | None = None, rebuild: bool = False) -> dict:
         j: _("agent job {job} belongs to a sandboxed project and declares no allow list, so it doesn't run until it "
              "declares the tools it needs (an agent job without one loads the project's saved permissions)", job=j)
         for j in unconfined_sandboxed(index)}
-    if live:
+    if live and not superseded():   # asked again: a merge may have landed while this one validated
         tmp = CACHE / "index.json.tmp"
         tmp.write_text(json.dumps(index, ensure_ascii=False, indent=1, default=str))
         tmp.replace(CACHE / "index.json")

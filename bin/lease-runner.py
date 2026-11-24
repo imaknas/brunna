@@ -58,9 +58,15 @@ doesn't count as idle.
 Reclaim: stop the process (busy if a terminal still has it open) → `llm.py run lease-handover -- --resume <id>`
 (retried once if invalid, then a minimal handover) → bus session.report + the project mailbox + progress/task/question
 to the owner (fixed ids, a resend doesn't duplicate) + notes written into memory → run hubbus bridge once right away.
+New code (docs/design/service-code.md D3): every 2 seconds a thread asks whether the checkout's commit has moved on and
+been landed; at the first moment nothing is in flight (a POST being handled, a handover running or still sending, a
+lease process in a turn or waiting for the owner's answer) it stops the processes of leases between turns as an idle stop
+does, saves and exits, and launchd or systemd starts it on the new code. The platform modules it imports lazily, its
+runtime adapter and registrar.py are loaded at start, so while it drains it is one version.
 """
 from __future__ import annotations
 
+import contextlib
 import datetime
 import http.server
 import importlib.util
@@ -77,6 +83,7 @@ import urllib.parse
 import uuid
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import code_watch  # noqa: E402
 import hubconf  # noqa: E402
 import runtime_ports  # noqa: E402
 import i18n  # noqa: E402
@@ -433,6 +440,7 @@ def stop_proc(lease: Lease, new_state: str) -> None:
                 p.kill()
     lease.proc = None
     lease.in_turn = False
+    lease.waiting = 0   # the relay asking died with the process
     lease.set_state(new_state)
 
 
@@ -459,18 +467,18 @@ def reader(lease: Lease, proc: subprocess.Popen) -> None:
                 STATUS["quota"] = {**e.data, "at": iso()}
             lease.emit(e.type, **e.data)
             if e.data.get("_detach"):
-                threading.Thread(target=detach, args=(lease, e.data["_detach"]), daemon=True).start()
+                spawn_detach(lease, e.data["_detach"])
     proc.wait()
     with _lock:
         if lease.proc is not proc or lease.intent_stop:
             return
-        lease.proc, lease.in_turn = None, False
+        lease.proc, lease.in_turn, lease.waiting = None, False, 0
         lease.crashes += 1
         tail = (lease.dir / "stderr.log").read_text(errors="replace")[-400:] if (lease.dir / "stderr.log").exists() else ""
         e = rt().classify_exit(proc.returncode, tail)
         lease.emit(e.type, **e.data)
         if lease.crashes >= 2:
-            threading.Thread(target=detach, args=(lease, "crash"), daemon=True).start()
+            spawn_detach(lease, "crash")
         else:
             lease.set_state("idle_stopped")  # the next message resumes once with --resume automatically
 
@@ -571,16 +579,28 @@ def handover_prompt(earlier: list[dict] | None = None, **names) -> str:
     return text
 
 
+_REGISTRAR = None
+
+
+def registrar():
+    """bin/registrar.py as a module, loaded once (at start, by main): a handover after a merge uses the code the runner
+    started with, never a new registrar beside old modules (service-code.md D4)."""
+    global _REGISTRAR
+    if _REGISTRAR is None:
+        spec = importlib.util.spec_from_file_location("registrar_lease", HUB / "bin" / "registrar.py")
+        reg = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(reg)
+        _REGISTRAR = reg
+    return _REGISTRAR
+
+
 def earlier_tasks(project: str) -> list[dict]:
     """The project's to-dos still waiting on the owner (Acts items raised, not settled, not withdrawn), as the handover
     sees them: [{ref: T1…, key, text, bound: raised by the registrar from a STATE.md line}]. Every handover used to
     raise each still-open task again under a new key (lease-<id>-<n>-task-<i>), leaving the assistant to tell which
     were the same; now it names the earlier item instead. [] when the register cannot be read (logged)."""
     try:
-        spec = importlib.util.spec_from_file_location("registrar_lease", HUB / "bin" / "registrar.py")
-        reg = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(reg)
-        led = reg.Ledger(project)
+        led = registrar().Ledger(project)
         return [{"ref": f"T{i}", "key": k, "text": led.terms(k)[0] or "", "bound": led.bound(k)}
                 for i, k in enumerate(led.open(), 1)]
     except (Exception, SystemExit) as e:
@@ -688,8 +708,10 @@ def deliver(lease: Lease, h: dict, n: int, earlier: list[dict] | None = None) ->
         h["notes_written"] = True
     hubbus("publish", "session.report", "--source", proj, "--to", proj, "--id", handover_id(sid, n, "handover"),
            "--payload", json.dumps(h, ensure_ascii=False))
-    subprocess.Popen([sys.executable, str(HUB / "bin" / "hubbus"), "bridge"], stdout=subprocess.DEVNULL,
-                     stderr=subprocess.DEVNULL, start_new_session=True)  # send right away, don't wait 15 minutes
+    bridge = subprocess.Popen([sys.executable, str(HUB / "bin" / "hubbus"), "bridge"], stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL, start_new_session=True)  # send right away, don't wait 15 minutes
+    with _lock:   # waited for before exiting for new code: systemd ends what is left in the unit's group when it restarts
+        CHILDREN[:] = [c for c in CHILDREN if c.poll() is None] + ([bridge] if bridge is not None else [])
 
 
 def detach(lease: Lease, reason: str) -> None:
@@ -758,36 +780,99 @@ def idle_loop() -> None:
                     l.idle_warned_at = iso()
                     l.emit("idle_warning", idle_s=int(idle))
                 if l.warned_at and (now() - datetime.datetime.fromisoformat(l.warned_at)).total_seconds() >= WARN_GRACE_S:
-                    threading.Thread(target=detach, args=(l, "idle"), daemon=True).start()
+                    spawn_detach(l, "idle")
             except Exception as e:
                 log(_("idle_loop {id}: {e!r}", id=l.id, e=e))
         try:
             prune_files()
         except Exception as e:
             log(_("prune_files: {e!r}", e=e))
-        restart_if_code_changed()
 
 
-BUSY = ("attaching", "running", "resuming", "detaching")
-CODE_AT_START = 0.0
-# each restart makes launchd wait 10 s before starting it (throttle); don't keep restarting while files keep changing
-CODE_SETTLE_S = 60
+# ---------- following the platform's code (docs/design/service-code.md D3) ----------
+
+# platform modules this file imports inside functions: imported at start (code_watch.preload), so a runner draining on
+# old code never mixes in a module from the new (lease 9af483fb's handover failed that way on 10-25). main also loads the
+# runtime adapter (rt()) and registrar.py (registrar()), which are loaded by path or by name
+PRELOAD = ("lease_files", "policy", "project_git", "prompts", "registry", "runtime_claude", "runtime_store")
+CODE_POLL_S = 2
+WATCH = None   # code_watch.Watch, set by main
+ACTIVE = 0     # POST requests being handled and handovers running (in_flight, spawn_detach)
+CHILDREN: list[subprocess.Popen] = []   # detached helpers still sending (hubbus bridge)
 
 
-def restart_if_code_changed() -> None:
-    """The code in bin/ changed and no lease is running or being handed over: exit, so that launchd (KeepAlive)
-    restarts with the new code. Otherwise old modules would mix with the new ones on disk (lease 9af483fb's handover
-    failed that way on 10-25). Idle leases resume with --resume as usual after the restart."""
-    stamp = hubconf.code_stamp()
-    # mid-change (saving repeatedly): wait, and restart once when it settles
-    if stamp <= CODE_AT_START or time.time() - stamp < CODE_SETTLE_S:
-        return
+@contextlib.contextmanager
+def in_flight():
+    global ACTIVE
     with _lock:
-        busy = [l.id[:8] for l in LEASES.values() if l.state in BUSY or l.waiting or l.in_turn]
-        if busy:
-            return
-        log(_("bin/ changed and no lease is running: exiting so launchd restarts with the new code"))
+        ACTIVE += 1
+    try:
+        yield
+    finally:
+        with _lock:
+            ACTIVE -= 1
+
+
+def spawn_detach(lease: "Lease", reason: str) -> None:
+    """detach in a thread of its own, counted from before the thread starts (whoever started it may return at once)."""
+    global ACTIVE
+    with _lock:
+        ACTIVE += 1
+
+    def run():
+        global ACTIVE
+        try:
+            detach(lease, reason)
+        finally:
+            with _lock:
+                ACTIVE -= 1
+    threading.Thread(target=run, daemon=True).start()
+
+
+def mid_work(l: "Lease") -> bool:
+    """A lease whose process is in a turn or waiting for the owner's answer: by what is alive now, so a flag a dead
+    process left behind never holds the runner."""
+    return l.proc is not None and l.proc.poll() is None and (l.in_turn or bool(l.waiting))
+
+
+def held_by() -> str | None:
+    """What keeps a runner on old code from exiting now; None when nothing does. Called under _lock."""
+    if ACTIVE:
+        return _("{n} {n:request or handover|requests or handovers} in flight", n=ACTIVE)
+    if (busy := [l.id[:8] for l in LEASES.values() if mid_work(l)]):
+        return _("lease {ids} in a turn or waiting for the owner's answer", ids=_(", ").join(busy))
+    if any(c.poll() is None for c in CHILDREN):
+        return _("a handover is still being sent")
+    return None
+
+
+def follow_code() -> bool:
+    """The checkout has moved on and nothing is in flight: every lease process between turns is stopped as an idle stop
+    does it (the next message resumes it with --resume), the leases are saved, and the runner exits so that the service
+    manager starts it on the new code. False when it stays (what holds it goes into its record)."""
+    if WATCH is None or not WATCH.stale():
+        return False
+    with _lock:
+        if (why := held_by()):
+            WATCH.draining(why)
+            return False
+        for l in LEASES.values():
+            if l.proc is not None:
+                stop_proc(l, "idle_stopped")
+        save()
+        log(_("the platform's code has moved on and nothing is in flight: exiting so the service manager starts the new "
+              "code"))
         os._exit(0)
+    return True
+
+
+def code_loop() -> None:
+    while True:
+        time.sleep(CODE_POLL_S)
+        try:
+            follow_code()
+        except Exception as e:   # never the end of this thread: it is what brings the new code
+            log(_("follow_code: {e!r}", e=e))
 
 
 # ---------- HTTP ----------
@@ -1029,6 +1114,12 @@ class H(http.server.BaseHTTPRequestHandler):
             return
 
     def do_POST(self):
+        # counted while it runs (service-code.md D3): the runner never exits for new code between a message being taken
+        # and it reaching the session, nor halfway through a rename or an upgrade
+        with in_flight():
+            self.post()
+
+    def post(self):
         if not self.authed():
             return
         b = self.body()
@@ -1148,7 +1239,7 @@ class H(http.server.BaseHTTPRequestHandler):
                 return self.err(409, "busy", l.state)
             if l.state == "terminal" and terminal_open(l):
                 return self.err(409, "busy", "terminal_open")
-            threading.Thread(target=detach, args=(l, b.get("reason") or "user"), daemon=True).start()
+            spawn_detach(l, b.get("reason") or "user")
             return self.reply(202, {"v": 1})
         self.err(404, "not_found", action)
 
@@ -1299,12 +1390,19 @@ class H(http.server.BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    global CODE_AT_START
-    CODE_AT_START = hubconf.code_stamp()
+    global WATCH
+    WATCH = code_watch.Watch("lease-runner", on_error=lambda e: log(_("follow_code: {e!r}", e=e)))
+    code_watch.preload(PRELOAD)
+    rt()
+    try:
+        registrar()
+    except (Exception, SystemExit) as e:   # earlier_tasks says so again at each handover
+        log(_("registrar.py could not be loaded: {e!r}", e=e))
     DIR.mkdir(parents=True, exist_ok=True)
     token()
     load()
     threading.Thread(target=idle_loop, daemon=True).start()
+    threading.Thread(target=code_loop, daemon=True).start()
     srv = http.server.ThreadingHTTPServer((HOST, PORT), H)
     srv.daemon_threads = True
     log(_("lease-runner started, {host}:{port}, {n} lease {n:record|records}", host=HOST, port=PORT, n=len(LEASES)))

@@ -24,5 +24,7 @@
  "{label}: has work in flight; its changes wait until it has none": "{label}:還有工作在跑,等它沒有工作時才改",
  "{label}: still has work in flight after waiting {hours:g} hours; changed now": "{label}:等了 {hours:g} 小時還有工作在跑,現在就改",
  "usage: render-services.py [--dry-run] [--only <label>]": "用法:render-services.py [--dry-run] [--only <label>]",
- "render-services: {root} is a linked worktree of the hub; it changes services only from the main checkout ({main}); --dry-run works here": "render-services:{root} 是 hub 的 linked worktree;服務只從主 checkout({main})改;這裡可以用 --dry-run"
+ "render-services: {root} is a linked worktree of the hub; it changes services only from the main checkout ({main}); --dry-run works here": "render-services:{root} 是 hub 的 linked worktree;服務只從主 checkout({main})改;這裡可以用 --dry-run",
+ "{label} ({project}): still runs the code of {old} {hours:g} hours after the checkout moved to {new}; it exits by itself once nothing is in flight ({why})": "{label}({project}):checkout 換到 {new} 已經 {hours:g} 小時,它還在跑 {old} 的程式;它手上沒事時會自己結束({why})",
+ "it says nothing holds it: its check may have stopped": "它說沒有東西卡住它:可能是它的檢查停了"
 }

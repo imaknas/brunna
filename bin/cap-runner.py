@@ -47,8 +47,9 @@ queue).
 Each job logs one line in .state/cap-runner/log.jsonl; jobs/ and profiles finished more than 7 days ago are cleaned up.
 Jobs still marked running when the service restarts: their process group is killed, and they're marked lost (outcome
 unknown).
-When the code in bin/ has changed (hubconf.code_stamp()) and no job is running or queued: it exits by itself, so
-launchd restarts it with the new code.
+When the checkout's commit has moved on (code_watch; docs/design/service-code.md D3) and no job is running or queued:
+it exits by itself, so launchd or systemd starts it on the new code. The platform modules it imports lazily are imported
+at start (PRELOAD), so while it drains it is one version.
 
 Usage: cap-runner.py            long-running (launchd)
        cap-runner.py --once     scan once, run the queued jobs, then exit (tests/debugging)
@@ -68,6 +69,7 @@ import sys
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import code_watch  # noqa: E402
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import names  # noqa: E402
@@ -82,6 +84,9 @@ AGENT_GRACE_S = 60   # past the declared timeout, the runner's deadline (llm.py 
 ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 MAX_REQ = 512 * 1024      # a model call's prompt can be long; a cap request is still argv only
 STALE_S = 600
+# platform modules this file imports inside functions: imported at start (code_watch.preload; docs/design/service-code.md
+# D4)
+PRELOAD = ("pdf_renderer", "policy", "project_git", "registry", "seatbelt")
 KEEP_S = 7 * 86400
 DIRFLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 TERMINAL = ("done", "rejected", "lost")
@@ -826,7 +831,8 @@ def main() -> int:
             r.poll()
         return 0
     log(event="service_start", pid=os.getpid())
-    code_at_start = hubconf.code_stamp()
+    watch = code_watch.Watch("cap-runner", on_error=lambda e: log(event="code_check_error", detail=repr(e)[:300]))
+    code_watch.preload(PRELOAD)
     while True:
         try:
             r.tick()
@@ -834,10 +840,10 @@ def main() -> int:
         # would become lost)
         except Exception as e:
             log(event="tick_error", detail=repr(e)[:300])
-        stamp = hubconf.code_stamp()
-        # restart only once the change has been stable for 60 seconds
-        if not r.running and not r.queue and stamp > code_at_start and time.time() - stamp > 60:
-            # mixing old and new modules breaks things (a job got stuck on 10-25): let launchd restart when idle
+        # the checkout moved on (docs/design/service-code.md D3): exit once nothing runs or waits, and the service
+        # manager starts the new code. It keeps taking requests meanwhile: one left waiting 10 minutes is refused as too
+        # old, and an agent call may run an hour
+        if not r.running and not r.queue and watch.stale():
             log(event="code_changed_restart")
             return 0
         time.sleep(1)

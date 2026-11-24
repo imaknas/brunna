@@ -263,10 +263,13 @@
 - **Seatbelt's `(deny signal (target others))` does not block** sending signals to other processes; write
   `(deny signal)(allow signal (target same-sandbox))` instead, and likewise for `process-info*`.
 - **A long-running service runs the code loaded when it started**: changing a module it imports mixes old and new
-  modules and breaks it midway (work gets stuck, handovers fail). lease-runner and cap-runner record
-  `hubconf.code_stamp()` (the latest modification time in bin/) at startup; when it changes and has been stable for 60
-  seconds (a burst of edits restarts only once), they exit on their own at a moment when no lease/job is running, and
-  the service manager (KeepAlive) restarts them with the new code: no manual restart is needed after changing code, but
-  while a lease is running it waits until it is idle. New long-running services do the same.
+  modules and breaks it midway (work gets stuck, handovers fail), and an old process that writes shared state overwrites
+  what the new code wrote (11-24: lease-runner's old validation rewrote the registry index without three modules). The
+  rules (docs/design/service-code.md): the code's identity is the checkout's commit (`hubconf.code_rev()`); the registry
+  index is written only by a process still on that commit; lease-runner and cap-runner (`bin/code_watch.py`) exit by
+  themselves once `brunna land` has marked the commit landed and nothing is in flight, and the service manager starts the
+  new code; they import their platform modules at start; render-services alerts when one stays on old code past two hours
+  beyond the longest agent call. A new long-running platform service goes into render-services' `FOLLOWS_CODE` (a test
+  fails until it does) and uses `code_watch`.
 - **Look carefully at the index before committing**: in a shared working tree, a bulk `git add` commits what another
   session staged along with yours; use `git commit -- <paths>`.

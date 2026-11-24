@@ -125,6 +125,16 @@ def state(label: str) -> str | None:
     return "running" if r.stdout.strip() == "active" else "not running"
 
 
+def main_pid(label: str) -> int | None:
+    """The pid systemd runs a service as (MainPID), None when it runs none."""
+    r = systemctl("show", "-p", "MainPID", "--value", f"{label}.service")
+    try:
+        pid = int(r.stdout.strip())
+    except ValueError:
+        return None
+    return pid or None
+
+
 def linger() -> bool | None:
     """Whether user units keep running after logout (loginctl enable-linger); can't tell = None."""
     r = subprocess.run(["loginctl", "show-user", os.environ.get("USER") or str(os.getuid()), "-p", "Linger"],
