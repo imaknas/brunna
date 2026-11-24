@@ -1060,10 +1060,21 @@ def tools_dir() -> pathlib.Path:
     return home / "tools" if home else STATE / "tools"
 
 
+def code_rev() -> str | None:
+    """The commit the hub checkout's HEAD names, read from git's files (gitdirs.head; no git runs, cheap enough to read
+    every few seconds): the identity of the platform's code (docs/design/service-code.md D1). git moves the ref after it
+    has written the tree, both for merge-branch's fast-forward and upgrade's checkout, so a new value means every file
+    is in place. None when ROOT isn't itself a checkout (an exported test tree) or HEAD can't be read."""
+    import gitdirs
+    found = gitdirs.dirs(ROOT)
+    if not found or found.top != ROOT.resolve():
+        return None
+    return gitdirs.head(found)
+
+
 def code_stamp() -> float:
-    """When the code under bin/ was last changed. A long-running service records it at start; once it changes, the
-    service exits at a quiet moment and lets launchd restart it -- otherwise the old modules it loaded get mixed with
-    the new ones on disk (on 2026-10-25 lease-runner and cap-runner each broke once because of this)."""
+    """When the code under bin/ was last changed: the fallback of code_watch where ROOT isn't a git checkout (code_rev
+    is None). Only the files directly in bin/; a burst of saves moves it several times, hence code_watch's settle."""
     stamps = [f.stat().st_mtime for f in (ROOT / "bin").iterdir() if f.is_file()]
     return max(stamps) if stamps else 0.0
 

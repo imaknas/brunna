@@ -222,5 +222,6 @@
  "Removed: {keys}": "已移除:{keys}",
  "aliases (*name) aren't accepted in a manifest.update": "manifest.update 不接受 alias(*名稱)",
  "the platform couldn't apply it ({error}); write to brunna": "平台沒辦法套用({error});請寫信給 brunna",
- "job {name}: found_exit: true is only for a scheduled command job of the platform or a module (a check that sends what it finds itself; on a project's job it would hide its failures)": "job {name}:found_exit: true 只給平台或模組的排程指令 job(自己會送出發現的問題的檢查;放在專案的 job 上會把它的失敗藏起來)"
+ "job {name}: found_exit: true is only for a scheduled command job of the platform or a module (a check that sends what it finds itself; on a project's job it would hide its failures)": "job {name}:found_exit: true 只給平台或模組的排程指令 job(自己會送出發現的問題的檢查;放在專案的 job 上會把它的失敗藏起來)",
+ "this process runs the code of {old}, the checkout is at {new}: the live index is left to the new code": "這個程序跑的是 {old} 的程式,checkout 已經在 {new}:live 索引留給新程式寫"
 }

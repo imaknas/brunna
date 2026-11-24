@@ -207,6 +207,10 @@ TOP = {"v", "name", "type", "purpose", "paths", "memory", "privacy", "runtime", 
        "publishes", "provides", "consumes", "services", "jobs", "enforce", "network", "allow_write", "gate", "secrets",
        "models", "metered_models", "layout_intent", "agents", "agents_per_day"}
 TOP_V2 = TOP | {"tests", "code", "inputs", "commit_gate"}
+# the code this process validates with (docs/design/service-code.md D2): refresh() writes the live index only while the
+# checkout still has it, so a process started before a merge (a long-running service, a long job, a command caught
+# mid-merge) never overwrites what the new code wrote. None (not a git checkout): nothing to compare
+LOADED_REV = hubconf.code_rev()
 # what the index's documents are: 2 = project v2 (v1 files upgraded as they are read). Readers that need v2 fields
 # (merge-branch) refuse an index of an older format; registry.refresh never overwrites a newer one
 INDEX_FORMAT = 2
@@ -1281,11 +1285,33 @@ def record_refusal(why: str, reg: pathlib.Path) -> str:
            f"cwd {entry['cwd']}, config {entry['config']}; log {REFUSED_LOG}"
 
 
+_said_superseded = False
+
+
+def superseded() -> bool:
+    """The checkout has moved on from the code this process loaded (LOADED_REV): said once on stderr."""
+    global _said_superseded
+    if LOADED_REV is None:
+        return False
+    try:
+        now = hubconf.code_rev()
+    except OSError:
+        now = None
+    if now is None or now == LOADED_REV:
+        return False
+    if not _said_superseded:
+        _said_superseded = True
+        print("registry: " + _("this process runs the code of {old}, the checkout is at {new}: the live index is left to "
+                               "the new code", old=LOADED_REV[:8], new=now[:8]), file=sys.stderr)
+    return True
+
+
 def refresh(only: list[str] | None = None, rebuild: bool = False) -> dict:
     """Validate the whole registry, refresh the cache and index.json, return the index. From a linked worktree of the
-    hub that found the live state through the main checkout (hubconf.worktree_lookup) it validates and returns the
-    index but writes nothing: the live index is built only by the main checkout's code."""
-    live = not hubconf.worktree_lookup()
+    hub that found the live state through the main checkout (hubconf.worktree_lookup), or in a process whose code the
+    checkout has moved on from (superseded, docs/design/service-code.md D2), it validates and returns the index but
+    writes nothing: the live index is built only by the main checkout's current code."""
+    live = not hubconf.worktree_lookup() and not superseded()
     if live:
         if CACHE == hubconf.REGISTRY_INDEX.parent:   # the live cache: the one in .state moved over once (11-08)
             hubconf.moved_from_state(CACHE)

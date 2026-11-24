@@ -23,6 +23,10 @@ project's to set, not the platform's to follow.
     Which of {key: folder} holds cwd: the nearest as cwd names it, then the nearest as it resolves. By the file, not the spelling
     (BOX/sub, another Unicode form, //, open/../box all name box), and a link on the way is no folder of the target's: a
     box/sub swapped for a link to another root is still under box.
+  head(found) → str | None
+    The commit HEAD names: a detached HEAD's id, or the branch it names as a loose ref (in common) or in packed-refs; None
+    for an unborn branch, a reftable repo or anything unreadable. What `rev-parse HEAD` says, for a repo the platform owns
+    (hubconf.code_rev): a project's files are the project's to write.
   main_checkout(found) → Path | None
     The main checkout, as far as the pointers agree: top itself, or a confirmed linked worktree's. A .git file naming another
     repo's .git, or a worktree that repo doesn't know, says nothing about whose folder this is. Same limit as confirmed.
@@ -96,6 +100,33 @@ def confirmed(found: Dirs) -> bool:
         return False
     back = read_pointer(found.git_dir / "gitdir")
     return bool(back) and (found.git_dir / back).resolve() == (found.top / ".git").resolve()
+
+
+SHA = frozenset("0123456789abcdef")
+
+
+def _sha(text: str | None) -> str | None:
+    return text if text and len(text) in (40, 64) and set(text) <= SHA else None
+
+
+def head(found: Dirs) -> str | None:
+    text = read_pointer(found.git_dir / "HEAD")
+    if not text or not text.startswith("ref:"):
+        return _sha(text)
+    ref = text.removeprefix("ref:").strip()
+    if not ref.startswith("refs/") or ".." in ref.split("/"):
+        return None
+    if (loose := _sha(read_pointer(found.common / ref))):
+        return loose
+    try:
+        with open(found.common / "packed-refs", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                sha, _sp, name = line.rstrip("\n").partition(" ")
+                if name == ref:
+                    return _sha(sha)
+    except OSError:
+        pass
+    return None
 
 
 def main_checkout(found: Dirs) -> pathlib.Path | None:
