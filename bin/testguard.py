@@ -146,6 +146,7 @@ DARWIN = sys.platform == "darwin"
 DISK_TOOLS = {"hdiutil", "newfs_hfs"}   # what works on an image while it is made or attached, and can hang there
 INFO_S, DETACH_S, PS_S = 15, 20, 10   # each bounded: a tier's TERM leaves 10 s before KILL, and the next run sweeps the rest
 DEV = re.compile(r"/dev/r?disk(\d+)(?:s\d+)*")
+KILL_S = 2   # how long a killed call's output is waited for
 RUN_PREFIX = "run-tests-"   # private_temp's folder for a run
 NOMOUNT_VOLUME = "brunna-nomount-"   # + the test process's pid: the volume tests/test_no_mounts.py makes
 NOMOUNT = re.compile(rf"{re.escape(NOMOUNT_VOLUME)}(\d{{1,9}})")   # a pid, bounded: os.kill takes no larger
@@ -155,10 +156,12 @@ def hdiutil() -> str:
     return shutil.which("hdiutil") or "/usr/bin/hdiutil"
 
 
-def call(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
-    """cmd with a time limit, its whole process group killed when over it (OSError then)."""
+def bounded(cmd: list[str], timeout: float, **kw) -> subprocess.CompletedProcess:
+    """cmd in a process group of its own, with a time limit: over it the whole group is killed and TimeoutExpired raised.
+    Back within the limit and KILL_S whatever it started: a child in a session of its own (hdiutil's diskimages-helper)
+    outlives the group's kill, and waiting for the end of the output it holds open would have no limit at all."""
     p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         start_new_session=True)
+                         start_new_session=True, **kw)
     try:
         out, err = p.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -166,9 +169,21 @@ def call(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
             os.killpg(p.pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
             pass
-        p.communicate()
-        raise OSError(0, f"{os.path.basename(cmd[0])} {cmd[1]} took over {timeout} s") from None
+        try:
+            p.communicate(timeout=KILL_S)
+        except subprocess.TimeoutExpired:
+            for f in (p.stdout, p.stderr):
+                f.close()
+        raise
     return subprocess.CompletedProcess(cmd, p.returncode, out, err)
+
+
+def call(cmd: list[str], timeout: float) -> subprocess.CompletedProcess:
+    """bounded, over the limit an OSError."""
+    try:
+        return bounded(cmd, timeout)
+    except subprocess.TimeoutExpired:
+        raise OSError(0, f"{os.path.basename(cmd[0])} {cmd[1]} took over {timeout} s") from None
 
 
 def real(p) -> pathlib.Path:

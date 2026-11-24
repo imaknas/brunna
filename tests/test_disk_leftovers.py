@@ -230,5 +230,32 @@ class Run(Stub):
         self.assertEqual(self.left(), ["/Users/someone/Disk.dmg"])
 
 
+class Bounded(unittest.TestCase):
+    HOLD = ("import pathlib, subprocess, sys, time\n"
+            "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'], start_new_session=True)\n"
+            "pathlib.Path(sys.argv[1]).write_text(str(p.pid))\n"
+            "time.sleep(120)\n")
+
+    def test_a_child_that_holds_the_output_open_does_not_hold_the_limit(self):
+        """hdiutil's helper runs in a session of its own and outlives the group's kill: the limit has to end the wait too."""
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        pid = tmp / "pid"
+
+        def kill():
+            if pid.exists() and pid.read_text():
+                os.kill(int(pid.read_text()), signal.SIGKILL)
+        self.addCleanup(kill)
+        t0 = time.monotonic()
+        with self.assertRaises(subprocess.TimeoutExpired):
+            testguard.bounded([sys.executable, "-c", self.HOLD, str(pid)], 10, text=True)
+        self.assertLess(time.monotonic() - t0, 60, "the child holds it for 120 s")
+        self.assertTrue(pid.exists(), "the control: the child was started, and holds the output")
+
+    def test_what_ends_in_time_is_as_it_was(self):
+        r = testguard.bounded([sys.executable, "-c", "import sys; print('out'); sys.exit(3)"], 60, text=True)
+        self.assertEqual((r.returncode, r.stdout), (3, "out\n"))
+
+
 if __name__ == "__main__":
     unittest.main()

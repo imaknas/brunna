@@ -23,6 +23,7 @@ import isolation  # noqa: E402
 import landlock  # noqa: E402
 import registry  # noqa: E402
 import seatbelt  # noqa: E402
+import testguard  # noqa: E402
 
 
 def load(name, path):
@@ -315,32 +316,33 @@ sys.exit(m.main(["--project", "proj", "--cwd", args["ws"], "--port", str(args["p
 """
 
 
+CALL_S = 120   # how long making the image, and the whole probe, may take before it is killed (11-19, 11-21: a newfs_hfs hung)
+# the image's volume, by the name the guard's sweep stops a tool on once this process is gone
+VOLUME = f"{testguard.NOMOUNT_VOLUME}{os.getpid()}"
+
+
 class Conformance(unittest.TestCase):
     @staticmethod
     def mounted(tmp, img) -> list[str]:
         """Seen from outside: mounts under the probe's folder, and (macOS) any attach of its image."""
         if sys.platform == "darwin":
-            table = subprocess.run(["/sbin/mount"], capture_output=True, text=True).stdout.splitlines()
+            table = testguard.bounded(["/sbin/mount"], 30, text=True).stdout.splitlines()
         else:
             table = pathlib.Path("/proc/self/mounts").read_text().splitlines()
         out = [x for x in table if str(tmp) in x]
         if img is not None:
-            info = subprocess.run(["/usr/bin/hdiutil", "info"], capture_output=True, text=True).stdout
+            info = testguard.bounded(["/usr/bin/hdiutil", "info"], 30, text=True).stdout
             out += [b for b in info.split("=" * 48) if str(img) in b]
         return out
 
     @classmethod
     def unmount(cls, tmp, img):
-        """Whatever a failing probe left mounted or attached."""
-        import re
+        """Whatever a failing probe left mounted or attached, and a disk tool a create over its limit left running."""
         for x in cls.mounted(tmp, None):
-            subprocess.run(["/sbin/umount" if sys.platform == "darwin" else "umount", "-f",
-                            x.split(" on ")[1].split(" (")[0] if " on " in x else x.split()[1]],
-                           capture_output=True)
+            testguard.bounded(["/sbin/umount" if sys.platform == "darwin" else "umount", "-f",
+                               x.split(" on ")[1].split(" (")[0] if " on " in x else x.split()[1]], 30)
         if img is not None:
-            for block in cls.mounted(tmp, img):
-                for dev in re.findall(r"^(/dev/disk\d+)\s", block, re.M):
-                    subprocess.run(["/usr/bin/hdiutil", "detach", "-quiet", "-force", dev], capture_output=True)
+            testguard.release([tmp], names=[VOLUME])
 
     def test_what_counts_as_a_temp_area_sandboxes_write(self):
         for t in [*seatbelt.TMP, *landlock.TMP]:
@@ -401,12 +403,13 @@ class Conformance(unittest.TestCase):
         if sys.platform == "darwin":   # made outside: bytes the service could have written itself
             (tmp / "img-src" / ".git").mkdir(parents=True)
             img = ws / "x.dmg"
-            subprocess.run(["/usr/bin/hdiutil", "create", "-quiet", "-srcfolder", str(tmp / "img-src"), "-fs", "HFS+",
-                            "-volname", f"brunnaconf{os.getpid()}", str(img)], check=True, capture_output=True)
+            self.addCleanup(self.unmount, tmp, img)   # before the create: one over its limit leaves its tools running
+            testguard.bounded(["/usr/bin/hdiutil", "create", "-quiet", "-srcfolder", str(tmp / "img-src"), "-fs", "HFS+",
+                               "-volname", VOLUME, str(img)], CALL_S).check_returncode()
             env["IMG"] = str(img)
-        self.addCleanup(self.unmount, tmp, img)
-        r = subprocess.run([sys.executable, "-c", RUNNER, __import__("json").dumps(args)], capture_output=True,
-                           text=True, env=env)
+        else:
+            self.addCleanup(self.unmount, tmp, img)
+        r = testguard.bounded([sys.executable, "-c", RUNNER, __import__("json").dumps(args)], CALL_S, text=True, env=env)
         got = set(r.stdout.split())
         if not self.mounted(tmp, img):
             got.add("mount-blocked")
