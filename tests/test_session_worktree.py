@@ -453,7 +453,7 @@ class RenderedOnMake(Base):
 
 
 class Doctor(Base):
-    def rows(self, settings=None):
+    def rows(self, settings=None, more=()):
         import importlib.machinery
         import importlib.util
         import runtime_ports
@@ -466,6 +466,7 @@ class Doctor(Base):
             p.parent.mkdir(parents=True)
             p.write_text(json.dumps(settings))
         docs = {"proj": {"name": "proj", "paths": {"workspace": str(self.ws)}, "enforce": {"sandbox": True}},
+                **{n: {"name": n, "paths": {"workspace": str(self.tmp / n)}, "enforce": {"sandbox": True}} for n in more},
                 "open": {"name": "open", "paths": {"workspace": str(self.tmp / "o")}}}
         out = []
         with mock.patch.object(hubconf, "projects", lambda: docs), \
@@ -473,13 +474,17 @@ class Doctor(Base):
             ah.doctor_checkout_race(lambda level, what, fix="": out.append((level, what)), None, ["claude"])
         return out
 
-    def test_one_warning_per_sandboxed_project_with_its_worktree_makers(self):
+    def test_one_row_for_the_sandboxed_projects_with_their_worktree_makers(self):
         [(_level, what)] = self.rows()
         self.assertTrue(what.endswith("-"), "no worktree hand-over without the hooks")
         [(level, what)] = self.rows(settings={"hooks": runtime_claude.worktree_maker_hooks()})
-        self.assertEqual(level, "warn")
+        self.assertEqual(level, "info", "no action ends it: not a reminder")
         self.assertIn("proj", what)
         self.assertTrue(what.endswith("claude"), what)
+
+    def test_several_projects_are_one_row(self):
+        [(_level, what)] = self.rows(more=("other", "third"))
+        self.assertIn("(other, proj, third)", what)
 
 
 class HubEvent(Base):

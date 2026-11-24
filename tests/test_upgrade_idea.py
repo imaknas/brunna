@@ -87,7 +87,7 @@ class Upgrade(unittest.TestCase):
         (self.hub / "projects").mkdir()
         (self.hub / "capabilities").mkdir()
         shutil.copy(ROOT / "capabilities" / "gpu.sb", self.hub / "capabilities" / "gpu.sb")
-        conf = json.loads((ROOT / "hub.example.json").read_text())
+        conf = json.loads((ROOT / "brunna.example.json").read_text())
         conf["github"] = {**conf.get("github", {}), "owner": "o", "remote": str(self.remotes) + "/{owner}/{name}.git"}
         conf["registry_dir"] = "projects"
         # the sandbox's jobs (its git: project_git.py) go through bin/sandboxed-run; where this machine can't sandbox,

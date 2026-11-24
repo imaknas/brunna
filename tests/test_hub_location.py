@@ -187,7 +187,7 @@ class Elsewhere(unittest.TestCase):
             self.assertEqual(hubconf.path(".state/x"), self.hub / ".state" / "x")
             self.assertEqual(hubconf.path(".secrets"), hubconf.secrets_dir())
             self.assertEqual(hubconf.path(".secrets/backup-password"), hubconf.secrets_dir() / "backup-password")
-        example = json.loads((ROOT / "hub.example.json").read_text())
+        example = json.loads((ROOT / "brunna.example.json").read_text())
         self.assertEqual(example["backup"]["include"], [".state", ".secrets"])
 
 

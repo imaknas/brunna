@@ -19,7 +19,7 @@ no option bogus (choices: runtime, anthropic, openai, ollama, none)
 $ agenthub llm setup --llm none --yes
 [exit 0]
 --- stdout
-brunna's decisions stay off for now: whatever needs one fails plainly and says why. Run brunna llm setup later
+brunna's decisions stay off for now: until you run brunna llm setup there is no nightly digest, and STATE.md and todo.md are not updated
 --- stderr
 
 $ agenthub llm setup --llm runtime --yes    # runtime none

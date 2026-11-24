@@ -221,7 +221,7 @@ class Golden(unittest.TestCase):
         if not hub.exists():
             hub.mkdir()
             (hub / ".git").mkdir()
-            for name in ("bin", "launchd", "hub.example.json", "projects", "modules", "contracts", "githooks", "capabilities",
+            for name in ("bin", "launchd", "brunna.example.json", "projects", "modules", "contracts", "githooks", "capabilities",
                          "templates"):
                 (hub / name).symlink_to(ROOT / name)
         return hub
@@ -388,7 +388,7 @@ class Golden(unittest.TestCase):
                 self.agenthub("init", "--scheduler-only", label="systemd", sc={"sm": "systemd", "systemd": {}, "linger": True}),
                 self.agenthub("init", "--scheduler-only", label="no service manager", sc={"sm": None})]
         # the template's JSON is not a message: keep the line that announces it, not the template itself
-        text = re.sub(r"(?m)^\{\n(.*\n)*?\}\n", "<hub.json from hub.example.json>\n", "\n".join(out))
+        text = re.sub(r"(?m)^\{\n(.*\n)*?\}\n", "<hub.json from brunna.example.json>\n", "\n".join(out))
         self.check("agenthub-init", text)
 
     def test_agenthub_move_instance(self):

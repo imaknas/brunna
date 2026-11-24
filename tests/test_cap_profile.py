@@ -79,10 +79,10 @@ class CapProfile(unittest.TestCase):
         (inst["creds"] / "token").write_text("x")
         cfg = {"workspace_root": str(inst["workspace"]), "services_root": str(inst["services"]),
                "bus_dir": str(inst["bus"]), "git_origin": str(inst["git-origin"]), "memory_copies": str(inst["copies"]),
-               # the user-level credential folders as every instance has them (hub.example.json), plus a file of the
+               # the user-level credential folders as every instance has them (brunna.example.json), plus a file of the
                # test's own: without the folders the profile would let `ls ~/.ssh` through and only a HOME with a real
                # ~/.ssh would notice (a fresh HOME has none, so that check doesn't count there)
-               "credentials": {"dirs": json.loads((ROOT / "hub.example.json").read_text())["credentials"]["dirs"],
+               "credentials": {"dirs": json.loads((ROOT / "brunna.example.json").read_text())["credentials"]["dirs"],
                                "files": [str(inst["creds"] / "token")]}}
         for p in (mock.patch.object(hubconf, "_cfg", cfg), mock.patch.object(hubconf, "STATE", inst["state"]),
                   mock.patch.object(hubconf, "BUS_DIR", inst["bus"]),

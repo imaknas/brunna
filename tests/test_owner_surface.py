@@ -42,7 +42,8 @@ class Help(unittest.TestCase):
     def test_help_is_the_owners_and_all_is_everything(self):
         short, full = self.run_("--help"), self.run_("help", "all")
         commands = set(re.findall(r"^  brunna ([a-z-]+)", short, re.M))
-        self.assertLessEqual(len(commands), 8, commands)
+        # with the two a newcomer looks for (connect, llm setup: the 11-25 walkthrough)
+        self.assertLessEqual(len(commands), 9, commands)
         self.assertIn("help all", short)
         self.assertGreater(len(full.splitlines()), 3 * len(short.splitlines()))
         for c in ("merge-branch", "config", "send"):

@@ -456,13 +456,31 @@ class Projects(WithHalf):
         rows = []
         with hub_json(installed=["claude", "fake", "half"]), mock.patch.dict(os.environ, {"AGENT_HUB_LANG_UI": "en"}):
             ah.doctor_runtimes(lambda level, what, fix="": rows.append((level, what)), "claude",
-                               runtime_ports.installed(), runtime_ports.optional_features())
+                               runtime_ports.installed())
         text = "\n".join(f"{level} {what}" for level, what in rows)
+        self.assertEqual({level for level, _what in rows}, {"ok", "info"},
+                         "what a runtime lacks is information: no reminder asks for something nobody can do")
+        self.assertEqual(sum("half: off for its own sessions only" in what for _level, what in rows), 1,
+                         "one row per runtime, not one per feature")
         self.assertIn("coding agents: claude, fake, half", text)
-        self.assertIn("claude available; fake available; half off (has no", text)
+        self.assertIn("available (claude, fake)", text)
         self.assertIn("claude: the platform's rules go into CLAUDE.local.md", text)
         self.assertIn("half: no rules file", text)
         self.assertIn("half: its hooks are not installed in sandboxed projects", text)
+
+    def test_doctor_says_what_the_default_lacks_and_another_has(self):
+        """The platform starts only the default: what only another installed runtime has for its runs is off (never a
+        ✓), and a reminder, since pointing runtime.default at it is something to do."""
+        ah = load_file("agenthub_installed_default", BIN / "agenthub")
+        rows = []
+        with hub_json(installed=["half", "claude"]), mock.patch.dict(os.environ, {"AGENT_HUB_LANG_UI": "en"}):
+            ah.doctor_runtimes(lambda level, what, fix="": rows.append((level, what)), "half", ["half", "claude"])
+            tasks = runtime_ports.features()[2][0]   # in the language the rows were made in
+        self.assertEqual([level for level, what in rows if what.startswith(tasks)], [], "no ✓ for what is off")
+        [warn] = [what for level, what in rows if level == "warn"]
+        self.assertIn("the platform starts half", warn)
+        self.assertIn(tasks, warn)
+        self.assertIn("claude has them", warn)
 
     def test_one_managed_block_per_runtime_with_a_rules_file(self):
         env = {**os.environ, "AGENT_HUB_ROOT": str(ROOT), "AGENT_HUB_CONFIG": str(self.tmp)}

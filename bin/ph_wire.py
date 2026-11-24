@@ -99,7 +99,7 @@ def send_version() -> str:
     when it is not one brunna sends, or not one the principal side is confirmed to read."""
     v = hubconf.get("principal_handoff.send_version") or DEFAULT_SEND
     if v not in SENDS:
-        raise SystemExit(f"hub.json principal_handoff.send_version is {v!r}; brunna sends one of {', '.join(SENDS)}")
+        raise SystemExit(f"{hubconf.config_path().name} principal_handoff.send_version is {v!r}; brunna sends one of {', '.join(SENDS)}")
     if v not in (reads := principal_side_reads()):
         raise SystemExit(unconfirmed(v, reads))
     return v

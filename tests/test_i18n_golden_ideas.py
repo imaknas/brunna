@@ -187,7 +187,7 @@ class Golden(unittest.TestCase):
         hub, home, remotes = t / "hub", t / "home", t / "remotes"
         (hub / "bin").mkdir(parents=True)
         (hub / "projects").mkdir()
-        conf = json.loads((ROOT / "hub.example.json").read_text())
+        conf = json.loads((ROOT / "brunna.example.json").read_text())
         conf["github"] = {**conf.get("github", {}), "remote": str(remotes) + "/{owner}/{name}.git"}
         if owner:
             conf["github"]["owner"] = "o"

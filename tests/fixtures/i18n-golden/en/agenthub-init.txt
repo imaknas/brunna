@@ -2,8 +2,7 @@ $ agenthub init --dry-run --yes --no-launchd    # old layout
 [exit 0]
 --- stdout
 ✓ <TMP>/config/hub.json already exists (the old layout); leaving it alone
-(dry-run) create folder <TMP>/state/logs
-(dry-run) create folder <TMP>/home/git-origin
+(dry-run) create folders: <TMP>/state/logs, <TMP>/home/git-origin
 --no-launchd: not installing the scheduler, not applying services
 --- stderr
 
@@ -11,8 +10,7 @@ $ agenthub init --dry-run --yes    # instance, launchd
 [exit 0]
 --- stdout
 ✓ <TMP>/config/hub.json already exists; leaving it alone (to change it, edit it, then run brunna config apply)
-(dry-run) create folder <TMP>/state/logs
-(dry-run) create folder <TMP>/home/git-origin
+(dry-run) create folders: <TMP>/state/logs, <TMP>/home/git-origin
 (dry-run) local.brunna-scheduler: install
 (dry-run) local.brunna-scheduler-watchdog: install
 
@@ -23,8 +21,7 @@ $ agenthub init --dry-run --yes    # instance, systemd
 [exit 0]
 --- stdout
 ✓ <TMP>/config/hub.json already exists; leaving it alone (to change it, edit it, then run brunna config apply)
-(dry-run) create folder <TMP>/state/logs
-(dry-run) create folder <TMP>/home/git-origin
+(dry-run) create folders: <TMP>/state/logs, <TMP>/home/git-origin
 (dry-run) local.brunna-scheduler: install (systemd)
 (dry-run) local.brunna-scheduler-watchdog: install (systemd)
   ⚠️ user units stop after logout: `loginctl enable-linger $USER` (needs sudo)
@@ -36,8 +33,7 @@ $ agenthub init --dry-run --yes    # no service manager
 [exit 0]
 --- stdout
 ✓ <TMP>/config/hub.json already exists (the old layout); leaving it alone
-(dry-run) create folder <TMP>/state/logs
-(dry-run) create folder <TMP>/home/git-origin
+(dry-run) create folders: <TMP>/state/logs, <TMP>/home/git-origin
 ⚠️ HOME (<TMP>/home) is not this account's home directory: the platform leaves the account's background services alone (installing one from here would replace the account's real one); to run the nightly flow, schedule `<TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py` yourself every 15 minutes (for example the crontab line `*/15 * * * * <TMP>/fakehub/bin/py <TMP>/fakehub/bin/scheduler.py`)
 
 Next: brunna doctor shows what is missing; brunna connect <folder> connects existing projects, brunna onboard ~/workspace/<project> starts a new one
@@ -47,18 +43,15 @@ $ agenthub init --home <TMP>/inst --owner Sam --timezone UTC --workspace <TMP>/w
 [exit 0]
 --- stdout
 (dry-run) would create the instance directory <TMP>/inst/{config,data,secrets}, write config/brunna.json, write <TMP>/fakehub/.hub-home:
-<hub.json from hub.example.json>
+<hub.json from brunna.example.json>
 --- stderr
 
 $ agenthub init --home <TMP>/inst --owner Sam --timezone UTC --workspace <TMP>/ws2 --modules backup,reflect --yes --llm none --no-launchd    # new instance
 [exit 0]
 --- stdout
 ✓ brunna's folder: <TMP>/inst (you: Sam; on: reflect, backup)
-create folder <TMP>/state/logs
-create folder <TMP>/ws2
-create folder <TMP>/home/git-origin
-create folder <TMP>/home/.memory-copies
-brunna's decisions stay off for now: whatever needs one fails plainly and says why. Run brunna llm setup later
+create folders: <TMP>/state/logs, <TMP>/ws2, <TMP>/home/git-origin, <TMP>/home/.memory-copies
+brunna's decisions stay off for now: until you run brunna llm setup there is no nightly digest, and STATE.md and todo.md are not updated
 ⚠️ on without a model: reflect. These modules only do judgment-point work, so their jobs fail until brunna llm setup (or turn one off: brunna modules disable <name>)
 ✓ config committed: <TMP>/inst/config is a git repo, and its first commit is the config as it is now
 --no-launchd: not installing the scheduler, not applying services
@@ -68,7 +61,7 @@ $ agenthub init --home <TMP>/inst-nogit --owner Sam --timezone UTC --workspace <
 [exit 1]
 --- stdout
 ✓ brunna's folder: <TMP>/inst-nogit (you: Sam; on: reflect, backup)
-brunna's decisions stay off for now: whatever needs one fails plainly and says why. Run brunna llm setup later
+brunna's decisions stay off for now: until you run brunna llm setup there is no nightly digest, and STATE.md and todo.md are not updated
 ⚠️ on without a model: reflect. These modules only do judgment-point work, so their jobs fail until brunna llm setup (or turn one off: brunna modules disable <name>)
 ⚠️ git is not installed: <TMP>/inst-nogit/config keeps no version history, so settings changes are not recorded and connecting projects can't record them. Install git, then run brunna init again (it records the settings as they are)
 --no-launchd: not installing the scheduler, not applying services
@@ -78,7 +71,7 @@ $ agenthub init --home <TMP>/inst-anon --owner Sam --timezone UTC --workspace <T
 [exit 0]
 --- stdout
 ✓ brunna's folder: <TMP>/inst-anon (you: Sam; on: reflect, backup)
-brunna's decisions stay off for now: whatever needs one fails plainly and says why. Run brunna llm setup later
+brunna's decisions stay off for now: until you run brunna llm setup there is no nightly digest, and STATE.md and todo.md are not updated
 ⚠️ on without a model: reflect. These modules only do judgment-point work, so their jobs fail until brunna llm setup (or turn one off: brunna modules disable <name>)
 ⚠️ git has no identity on this machine (user.name, user.email not set), so the config repo <TMP>/inst-anon/config commits as "Sam <owner@brunna.invalid>", set in that repo only. To commit as yourself: git config --global user.name "Your Name"; git config --global user.email you@example.com; then git -C <TMP>/inst-anon/config config --remove-section user
 ✓ config committed: <TMP>/inst-anon/config is a git repo, and its first commit is the config as it is now
@@ -88,9 +81,9 @@ brunna's decisions stay off for now: whatever needs one fails plainly and says w
 $ agenthub init --home <TMP>/inst-defaults --owner Sam --timezone UTC --workspace <TMP>/ws2 --yes --llm none --no-launchd    # default modules, no model
 [exit 0]
 --- stdout
-left off: consolidate, reflect. They only work with an AI model making brunna's decisions, and none is set up yet; after brunna llm setup, turn them on with brunna modules enable <name>
 ✓ brunna's folder: <TMP>/inst-defaults (you: Sam; on: owner)
-brunna's decisions stay off for now: whatever needs one fails plainly and says why. Run brunna llm setup later
+brunna's decisions stay off for now: until you run brunna llm setup there is no nightly digest, and STATE.md and todo.md are not updated
+left off: consolidate, reflect. They only work with an AI model making brunna's decisions, and none is set up yet; after brunna llm setup, turn them on with brunna modules enable <name>
 ✓ config committed: <TMP>/inst-defaults/config is a git repo, and its first commit is the config as it is now
 --no-launchd: not installing the scheduler, not applying services
 --- stderr

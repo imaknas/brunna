@@ -567,17 +567,18 @@ class Config(unittest.TestCase):
 
 
 class Doctor(unittest.TestCase):
-    def test_each_sandboxed_project_says_whose_sessions_are_confined(self):
+    def test_sandboxed_projects_say_whose_sessions_are_confined(self):
         ah = ti.load_file("agenthub_codex", BIN / "agenthub")
         rows = []
-        with mock.patch.object(hubconf, "projects", lambda: {"open": {}, "caged": {"enforce": {"sandbox": True}}}):
+        docs = {"open": {}, "caged": {"enforce": {"sandbox": True}}, "boxed": {"enforce": {"sandbox": True}}}
+        with mock.patch.object(hubconf, "projects", lambda: docs):
             ah.doctor_confined(lambda *a: rows.append(a), ["claude", "codex"])
-        self.assertEqual(len(rows), 1)
+        self.assertEqual(len(rows), 1, "once for all of them: it is the same in each")
         level, text, _fix = rows[0]
-        self.assertEqual(level, "warn")
-        self.assertEqual(text, i18n.translate("agenthub", "{project} (sandboxed): sessions confined: {yes}; not confined, so "
-                                              "the platform's hooks give them nothing there: {no}",
-                                              {"project": "caged", "yes": "claude", "no": self.codex_said()}))
+        self.assertEqual(level, "info", "claude serves them: nothing to act on")
+        self.assertEqual(text, i18n.translate("agenthub", "sandboxed projects ({projects}): sessions confined: {yes}; not "
+                                              "confined, so the platform's hooks give them nothing there: {no}",
+                                              {"projects": "boxed, caged", "yes": "claude", "no": self.codex_said()}))
 
     @staticmethod
     def codex_said():
@@ -595,8 +596,9 @@ class Doctor(unittest.TestCase):
         with mock.patch.object(hubconf, "projects", lambda: {"caged": {"enforce": {"sandbox": True}}}):
             ah.doctor_confined(lambda *a: rows.append(a), ["codex"])
             self.assertEqual([r[1] for r in rows], [i18n.translate(
-                "agenthub", "{project} (sandboxed): sessions confined: {yes}; not confined, so the platform's hooks give "
-                "them nothing there: {no}", {"project": "caged", "yes": "-", "no": self.codex_said()})])
+                "agenthub", "sandboxed projects ({projects}): sessions confined: {yes}; not confined, so the platform's "
+                "hooks give them nothing there: {no}", {"projects": "caged", "yes": "-", "no": self.codex_said()})])
+            self.assertEqual(rows[0][0], "warn", "no agent serves them")
             rows.clear()
             ah.doctor_confined(lambda *a: rows.append(a), ["claude"])
         self.assertEqual(rows, [], "every one confined: the control rows say the rest")

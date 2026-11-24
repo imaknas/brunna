@@ -57,7 +57,7 @@ class Terminal:
         return a or default
 
     def menu(self, qid: str, question: str, options: list[tuple[str, str]], default: str) -> str:
-        """A numbered list; Enter takes the default, anything else asks again."""
+        """A numbered list; Enter takes the default, a number or a value picks one, anything else says so and asks again."""
         if not self.can_ask:
             return default
         values = [v for v, _label in options]
@@ -70,6 +70,10 @@ class Terminal:
                 return default
             if a.isdigit() and 1 <= int(a) <= len(values):
                 return values[int(a) - 1]
+            if a.lower() in values:
+                return a.lower()
+            print(_("{answer}: not one of the choices. Type a number from 1 to {n}, or one of: {values}", answer=a,
+                    n=len(values), values=", ".join(values)))
 
     def consent(self, qid: str, question: str) -> bool:
         """A yes asked on the terminal (Enter = yes); no terminal = no, and --yes = no as well: init never installs or

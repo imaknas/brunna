@@ -5,6 +5,8 @@ brunna: many projects run by AI agents, on a computer you own.
 
 Most of the time you only talk to your agents; they run the rest of brunna for you. What you run yourself:
   brunna init              set brunna up on this machine (or let your agent do it: README, "Set up through your agent")
+  brunna llm setup         choose the AI model behind the nightly tidy-up (no model: no digest, no to-do list)
+  brunna connect <folder>  connect a project, or a folder of them
   brunna glance            what needs you, and whether the platform is healthy
   brunna owner list        the decisions and to-dos waiting for you (with an assistant, they reach you there)
   brunna push <project>    publish a project's work yourself (its sessions ask the platform to push)
@@ -12,26 +14,25 @@ Most of the time you only talk to your agents; they run the rest of brunna for y
   brunna doctor            when something seems broken
   brunna upgrade           move to the newest release
 
-Everything else (projects, config, scheduling, the commands project sessions use): brunna help all
+One command's options: brunna <command> --help. Everything else (config, scheduling, the commands project sessions
+use): brunna help all
 --- stderr
 
 $ <HUB>/bin/agenthub help all
 [exit 0]
 --- stdout
-brunna's single entry point (docs/design/new-user.md 3.4). A thin dispatch layer; it does not rewrite the existing scripts.
-
-The name is `brunna` (2026-10-29: `hub` clashed with GitHub's old hub CLI; `bin/hub` stays and forwards here). `brunna install-cli`
-puts a small forwarding script in ~/.local/bin, so any coding agent's session can type `brunna …` directly and the rules
-files need no local paths.
+brunna's commands. `brunna --help` shows the few you run yourself; `brunna <command> --help` shows one of them.
 
 Getting started:
   brunna init [--home <instance dir>] [--owner <name>] [--timezone <tz>] [--workspace <folder>] [--modules a,b] [--yes]
            [--llm runtime|anthropic|openai|ollama|none] [--llm-model <name>] [--llm-base-url <url>] [--no-launchd] [--dry-run]
+           [--verbose]
                         with no hub.json, creates the instance directory (default ~/.brunna: config/ is a git repo, data/,
-                        secrets/), writes config/hub.json from hub.example.json (asks a few questions; --yes takes the defaults),
+                        secrets/), writes config/hub.json from brunna.example.json (asks a few questions; --yes takes the defaults),
                         and last writes <hub>/.hub-home pointing there; creates the folders it needs; asks which model the
                         platform's decisions go to (= brunna llm setup); installs the scheduler and watchdog (the launchd/
-                        templates; left alone when unchanged); applies the config. With a hub.json already there, leaves it alone
+                        templates; left alone when unchanged); applies the config (--verbose prints each change, else
+                        they go to a log). With a hub.json already there, leaves it alone
   brunna doctor            everything that is broken, at a glance: the platform's Python, config, logins, scheduler, watchdog,
                         background services, commit gate, and whether a newer release is out
   brunna upgrade [--to vX.Y.Z | --main] [--check] [--yes]
@@ -51,7 +52,7 @@ Getting started:
                         questions as JSON; then the answers applied, ending with one JSON line. Consents and keys are
                         asked of you directly (a window on your screen, a page in your browser), never taken from the file
 config:
-  brunna config check | plan | apply [--only <applier>,...]
+  brunna config check | plan | apply [--only <applier>,...] [--brief <log file>]
                         validate the config / what would change / apply (check → apply → plan again must be empty → record)
   brunna config migrate [--check]
                         bring a setting an earlier release took and this one refuses in line, and say so (upgrade runs it)
@@ -70,9 +71,12 @@ config:
                         move the old layout (everything in the hub root) to an instance directory: copies only, validates the
                         new layout, writes .hub-home last (delete it to go back)
 projects:
-  brunna connect [<folder>] [--yes] [--remote] [--dry-run]
+  brunna connect [<folder>] [--yes] [--remote] [--dry-run] [--verbose]
                         connect existing folders as projects (bin/connect.py): one repo, a monorepo, or a folder of repos
-  brunna onboard …         = bin/onboard-project.sh (start a new project / connect a folder)
+  brunna onboard [--public] [--no-remote] [--sandbox] <folder>
+                        start a new project, or connect one folder (bin/onboard-project.sh). A GitHub repo is made for it
+                        when hub.json has github.owner (and gh is logged in); without it, or with --no-remote, the
+                        project stays on this machine
   brunna recover <name>    = bin/recover-project.sh (new machine / the folder is gone)
   brunna rename <old> <new>  = bin/rename-project.sh (dry-run first, then add --apply)
   brunna status [project]  = bin/overview.sh
@@ -184,7 +188,8 @@ Usage:
                                   in the user's desktop session: under SSH the keychain can't be read and claude is logged out.
                                   With no service manager (a container) it runs right here, in the foreground.
                                   An event job runs with no events and its cursor stays: a manual run is a test. While a
-                                  tick is running a job in the foreground it waits 30 seconds, then gives up
+                                  tick is running a job in the foreground it waits 30 seconds, then gives up. A job that is
+                                  off here (no model) is not started: it says why, exits 1 and leaves its scheduled run
   schedulectl events <name>       an event job's cursor and the events waiting for it (and the ones the loop chain holds
                                   back): why it didn't run, what its next run gets
   schedulectl skip <name>         move an event job's cursor to the bus head: the events waiting are dropped for good (a

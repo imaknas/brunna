@@ -23,7 +23,7 @@ class IndexRoster(unittest.TestCase):
     def render(self, projects: dict[str, str]) -> list[str]:
         with tempfile.TemporaryDirectory() as d:
             hub = pathlib.Path(d)
-            shutil.copy(ROOT / "hub.example.json", hub / "hub.json")
+            shutil.copy(ROOT / "brunna.example.json", hub / "hub.json")
             (hub / "bin").symlink_to(ROOT / "bin")
             (hub / "projects").mkdir()
             for name, text in projects.items():
@@ -65,7 +65,7 @@ class FromALinkedWorktree(unittest.TestCase):
         (main / ".hub-home").write_text(f"{inst}\n")
         (inst / "config" / "projects").mkdir(parents=True)
         (inst / "data").mkdir()
-        shutil.copy(ROOT / "hub.example.json", inst / "config" / "hub.json")
+        shutil.copy(ROOT / "brunna.example.json", inst / "config" / "hub.json")
         (inst / "config" / "projects" / "alpha.yaml").write_text(project("alpha"))
         r = subprocess.run([str(wt / "bin" / "gen-index-roster.sh")], env=env, capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)

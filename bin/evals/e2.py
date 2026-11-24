@@ -106,7 +106,7 @@ def old_librarian():
 def root() -> pathlib.Path:
     d = hubconf.evals_dir()
     if d is None:
-        sys.exit("e2: no eval dir (set hub.json evals_dir)")
+        sys.exit("e2: no eval dir (set evals_dir in brunna.json)")
     return d
 
 

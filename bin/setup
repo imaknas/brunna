@@ -42,10 +42,10 @@ if [ "$os" != Darwin ]; then
   fi
 fi
 need git     required "version control, memory sync"                "$([ "$os" = Darwin ] && echo "xcode-select --install" || inst git)"
-need jq      optional "reads hub.json in shell scripts where the platform's Python can't run (the remote machine)" "$(inst jq)"
+need jq      optional "reads brunna.json in shell scripts where the platform's Python can't run (only a remote machine needs it)" "$(inst jq)"
 need uv      required "builds the platform's Python (bin/setup-python)" "https://docs.astral.sh/uv/"
-[ "$os" = Darwin ] && need plutil required "shell scripts read hub.json" "built into macOS"   # other systems use jq
-need claude  optional "coding agent (Claude Code; without it set hub.json runtime.default to none and the agent features are off)" "https://claude.com/claude-code, then log in to claude once"
+[ "$os" = Darwin ] && need plutil required "shell scripts read brunna.json" "built into macOS"   # other systems use jq
+need claude  optional "coding agent (Claude Code; without one the agent features are off; brunna init asks which)" "https://claude.com/claude-code, then log in to claude once"
 need gh      optional "creates the GitHub repo when onboarding"     "$(inst gh), then gh auth login"
 need restic  optional "cloud backup (backup module)"                "$(inst restic)"
 

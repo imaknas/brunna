@@ -56,7 +56,7 @@ def check(root: pathlib.Path) -> list[str]:
     if not hub.exists() and (root / "bin" / "agenthub").exists():
         # the platform repo's index: since 10-29 the platform repo holds no user config -- check the example; registry
         # validation still checks the platform's registry entry and modules
-        hub = root / "hub.example.json"
+        hub = root / "brunna.example.json"
     try:
         cfg = json.loads(hub.read_text())
     except (OSError, ValueError) as e:

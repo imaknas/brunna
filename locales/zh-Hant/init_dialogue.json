@@ -11,5 +11,6 @@
  "Save": "儲存",
  "Saved. You can close this page and go back to your chat.": "已儲存。可以關掉這個頁面,回到你的對話。",
  "no": "否",
- "yes": "是"
+ "yes": "是",
+ "{answer}: not one of the choices. Type a number from 1 to {n}, or one of: {values}": "{answer}:沒有這個選項。請打 1 到 {n} 的數字,或其中一個:{values}"
 }

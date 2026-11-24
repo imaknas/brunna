@@ -20,7 +20,7 @@ source "$(dirname "$0")/hubpaths.sh"
 SRC="$HOME/.claude-personal/projects/"
 DEST_HOST="$(hub_server)"   # the machine that runs the hub (hub.json hosts.server)
 [ -n "$DEST_HOST" ] || {
-  echo "transcript-backup: hub.json has no hosts.server (with one machine doing everything this script isn't needed)" >&2
+  echo "transcript-backup: the settings (brunna.json) have no hosts.server (with one machine doing everything this script isn't needed)" >&2
   exit 0
 }
 DEST_PATH="transcript-backups/claude-personal-projects/"

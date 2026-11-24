@@ -1,5 +1,5 @@
 {
-  "$comment": "The platform settings hub.json (read by bin/hubconf.py; template hub.example.json). bin/config-check validates it with minischema and also rejects unknown top-level keys (except explanation keys starting with _), so a misspelled key is never silently ignored. Adding a field keeps the version.",
+  "$comment": "The platform settings brunna.json (read by bin/hubconf.py; template brunna.example.json). bin/config-check validates it with minischema and also rejects unknown top-level keys (except explanation keys starting with _), so a misspelled key is never silently ignored. Adding a field keeps the version.",
   "type": "object",
   "required": [
     "v",

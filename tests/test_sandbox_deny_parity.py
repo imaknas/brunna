@@ -280,7 +280,7 @@ class UserControl(Tree):
         for p in (c / "settings.json", c / "settings.local.json", c / "CLAUDE.md", c / "hooks" / "x", c / "plugins" / "x",
                   c / "skills" / "s" / "SKILL.md", c / "commands" / "x.md", self.home / ".claude.json"):
             self.assertTrue(rule_hits(deny, "Edit", str(p), self.home), p)
-        # the home is in the settings' credentials (as in hub.example.json): its sessions still use it
+        # the home is in the settings' credentials (as in brunna.example.json): its sessions still use it
         for p in (c / "projects" / "x" / "memory" / "a.md", c / "plans" / "p.md"):
             self.assertFalse(rule_hits(deny, "Edit", str(p), self.home), p)
             self.assertFalse(rule_hits(deny, "Read", str(p), self.home), p)

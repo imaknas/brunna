@@ -1,6 +1,6 @@
 {
   "v": 1,
-  "_comment": "Template for new users: copy it to hub.json and edit (the platform's bin/hubconf.py reads hub.json). Paths may start with ~; relative paths are relative to the hub root. Sections you don't need (assistant, alerts, backup, github…) can be deleted whole: the features that read them are simply off. Full explanation in README.md and docs/design/new-user.md.",
+  "_comment": "Template for new users: brunna init writes brunna.json from it (the platform's bin/hubconf.py reads that). Paths may start with ~; relative paths are relative to the hub root. Sections you don't need (assistant, alerts, backup, github…) can be deleted whole: the features that read them are simply off. Full explanation in README.md and docs/design/new-user.md.",
   "registry_dir": "projects",
   "services_root": "~/services",
   "workspace_root": "~/workspace",

@@ -1,4 +1,4 @@
-"""Acceptance for a brand-new user (docs/design/new-user.md 3.6): an empty instance with only hub.example.json + a
+"""Acceptance for a brand-new user (docs/design/new-user.md 3.6): an empty instance with only brunna.example.json + a
 fake HOME; `hub init --yes --no-launchd` can write hub.json and create the folders, the config is valid, `hub config
 plan` and `hub doctor` run (doctor reports problems like "the scheduler is not loaded" but must not crash), and the
 generated settings contain no personal names. Never touches launchd or calls a model.
@@ -44,7 +44,7 @@ class NewUser(unittest.TestCase):
             shutil.copytree(ROOT / d, self.hub / d, ignore=shutil.ignore_patterns("__pycache__"))
         (self.hub / "projects").mkdir()
         shutil.copy(names.resolve(ROOT / "projects", "project", "{}.yaml"), self.hub / "projects")
-        shutil.copy(ROOT / "hub.example.json", self.hub)
+        shutil.copy(ROOT / "brunna.example.json", self.hub)
         # NVM_DIR too: the agent step looks for agents under nvm's node, and the fake HOME has none
         env = {k: v for k, v in os.environ.items() if not k.startswith(("GIT_", "BRUNNA_", "AGENT_HUB", "NVM_"))}
         self.env = {**env, "HOME": str(self.home), "AGENT_HUB_ROOT": str(self.hub),
@@ -131,7 +131,7 @@ class NewUser(unittest.TestCase):
     def test_move_instance_copies_validates_then_points(self):
         """Moving the old layout (hub.json in the hub root) into the instance directory: copy only (the source stays),
         the config repo gets a first commit, and the pointer file is written last."""
-        (self.hub / "hub.json").write_text((self.hub / "hub.example.json").read_text())
+        (self.hub / "hub.json").write_text((self.hub / "brunna.example.json").read_text())
         (self.hub / "todo.md").write_text("# todo\n")
         (self.hub / ".secrets").mkdir()
         (self.hub / ".secrets" / "x").write_text("s")

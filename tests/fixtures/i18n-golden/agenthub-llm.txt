@@ -19,7 +19,7 @@ $ agenthub llm setup --llm bogus --yes
 $ agenthub llm setup --llm none --yes
 [exit 0]
 --- stdout
-brunna 的判斷先關著:需要判斷的地方會直接失敗並說明原因。之後跑 brunna llm setup
+brunna 的判斷先關著:在你跑 brunna llm setup 之前,每晚沒有摘要,STATE.md 和 todo.md 也不會更新
 --- stderr
 
 $ agenthub llm setup --llm runtime --yes    # runtime none

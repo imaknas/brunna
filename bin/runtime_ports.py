@@ -505,12 +505,16 @@ def feature_table(name: str | None = None) -> list[tuple[str, bool, str]]:
     """(feature, usable or not, what's missing): what's missing uses PORT_LABELS' names (missing_label). A runtime that runs
     only in the platform's throwaway worktree (THROWAWAY_ONLY) has no agent runs for any feature here: each of them runs
     somewhere else (its pin on a throwaway point is doctor's own row)."""
+    return [(f, not miss, or_list(miss)) for f, miss in feature_gaps(name)]
+
+
+def feature_gaps(name: str | None = None) -> list[tuple[str, list[str]]]:
+    """feature_table's rows with what each lacks as a list (nothing lacking: usable), so a reader can say one reason once."""
     have, labels = capabilities(name), {}
     if throwaway_only(name):
         have = have - {"agent"}
         labels["agent"] = _("agent runs outside the platform's throwaway worktree")
-    return [(f, not (miss := [labels.get(p) or missing_label(name, p) for p in need if p not in have]), or_list(miss))
-            for f, need in features()]
+    return [(f, [labels.get(p) or missing_label(name, p) for p in need if p not in have]) for f, need in features()]
 
 
 PORTS = {

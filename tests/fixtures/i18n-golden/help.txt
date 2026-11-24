@@ -5,6 +5,8 @@ brunna:在你自己的電腦上，由 AI agent 經營的很多個專案。
 
 大部分時候你只要跟你的 agent 說話，其餘的 brunna 由它們替你操作。你自己會用到的:
   brunna init              在這台機器上裝好 brunna(或交給你的 agent:README「Set up through your agent」)
+  brunna llm setup         選每晚整理用的 AI 模型(沒有模型就沒有摘要、沒有待辦清單)
+  brunna connect <資料夾>  把一個專案、或一整個資料夾的專案接上來
   brunna glance            有什麼要你處理、平台是否正常
   brunna owner list        等你決定的事和你的待辦(有助理時會送到助理那裡)
   brunna push <專案>       自己發布專案的成果(它的 session 是請平台推)
@@ -12,24 +14,22 @@ brunna:在你自己的電腦上，由 AI agent 經營的很多個專案。
   brunna doctor            覺得哪裡壞了的時候
   brunna upgrade           升到最新版
 
-其他全部(專案、config、排程、專案 session 用的指令):brunna help all
+看一個指令的選項:brunna <指令> --help。其他全部(config、排程、專案 session 用的指令):brunna help all
 --- stderr
 
 $ <HUB>/bin/agenthub help all
 [exit 0]
 --- stdout
-brunna 的單一入口(docs/design/new-user.md 3.4)。薄薄一層分派,不重寫既有腳本。
-
-名稱是 `brunna`(2026-10-29:`hub` 跟 GitHub 舊的 hub CLI 撞名;`bin/hub` 留著轉過來)。`brunna install-cli` 在
-~/.local/bin 放一個轉過來的小腳本,任何 coding agent 的 session 都能直接打 `brunna …`,規則檔裡不用寫本機路徑。
+brunna 的指令。`brunna --help` 列出你自己會用到的幾個;`brunna <指令> --help` 看其中一個。
 
 開始用:
   brunna init [--home <實例目錄>] [--owner <名字>] [--timezone <時區>] [--workspace <資料夾>] [--modules a,b] [--yes]
            [--llm runtime|anthropic|openai|ollama|none] [--llm-model <名稱>] [--llm-base-url <網址>] [--no-launchd] [--dry-run]
-                        沒有 hub.json 就建實例目錄(預設 ~/.brunna:config/ 是 git repo、data/、secrets/),照 hub.example.json
+           [--verbose]
+                        沒有 hub.json 就建實例目錄(預設 ~/.brunna:config/ 是 git repo、data/、secrets/),照 brunna.example.json
                         寫 config/hub.json(問幾個問題,--yes 用預設值),最後寫 <hub>/.hub-home 指過去;建需要的資料夾;
                         問平台的判斷要交給哪家模型(= brunna llm setup);裝排程器跟看門狗(launchd/ 的樣板;內容一樣就不動);
-                        套用 config。已經有 hub.json 就不動它
+                        套用 config(--verbose 會列出每一項改動,不然寫進 log)。已經有 hub.json 就不動它
   brunna doctor            一次看完哪裡壞了:平台的 Python、config、登入、排程器、看門狗、背景服務、commit 閘門,
                         還有有沒有新的 release
   brunna upgrade [--to vX.Y.Z | --main] [--check] [--yes]
@@ -47,7 +47,7 @@ brunna 的單一入口(docs/design/new-user.md 3.4)。薄薄一層分派,不重�
                         印成 JSON;再套用答案,最後一行是一個 JSON。同意與金鑰一律直接問你(螢幕上的視窗、瀏覽器裡的頁面),
                         不從檔案拿
 config:
-  brunna config check | plan | apply [--only <套用者>,...]
+  brunna config check | plan | apply [--only <套用者>,...] [--brief <log 檔>]
                         驗證 config / 會改什麼 / 套用(check → 套用 → 再 plan 要是空的 → 記錄)
   brunna config migrate [--check]
                         把舊版收下、這一版會拒絕的設定改到合格,並說出來(upgrade 會跑)
@@ -62,9 +62,11 @@ config:
   brunna move-instance --to <實例目錄> [--apply]
                         舊的擺法(全部在 hub 根目錄)搬到實例目錄:只複製、驗證新擺法、最後才寫 .hub-home(刪掉就退回)
 專案:
-  brunna connect [<資料夾>] [--yes] [--remote] [--dry-run]
+  brunna connect [<資料夾>] [--yes] [--remote] [--dry-run] [--verbose]
                         把既有的資料夾接成專案(bin/connect.py):一個 repo、monorepo,或一個裝著好幾個 repo 的資料夾
-  brunna onboard …         = bin/onboard-project.sh(開新專案 / 把資料夾接上來)
+  brunna onboard [--public] [--no-remote] [--sandbox] <資料夾>
+                        開新專案,或把一個資料夾接上來(bin/onboard-project.sh)。hub.json 有 github.owner(而且 gh 已登入)
+                        就替它建 GitHub repo;沒有、或加了 --no-remote,專案就只留在這台機器上
   brunna recover <名稱>    = bin/recover-project.sh(新機器 / 資料夾不見了)
   brunna rename <舊> <新>  = bin/rename-project.sh(先 dry-run,再加 --apply)
   brunna status [專案]     = bin/overview.sh
@@ -165,7 +167,7 @@ $ <HUB>/bin/schedulectl --help
   schedulectl logs [name] [n]     印最近 n 行 log(預設 scheduler.log;給 name 則印該 job 當天的 log)
   schedulectl run <name>          現在就跑一次某個 job(像 Desktop 的「Run now」),並記成今天已跑
                                    (LLM job 同一天不會再被排程跑一次)。透過 launchd 在使用者的桌面 session 跑——
-                                   SSH 底下讀不到 keychain,claude 會是未登入。沒有服務管理器(容器)時就在這裡、前景直接跑。事件 job 跑的時候沒有事件、游標不動:手動跑是測試。tick 正在前景跑 job 時,等 30 秒就放棄
+                                   SSH 底下讀不到 keychain,claude 會是未登入。沒有服務管理器(容器)時就在這裡、前景直接跑。事件 job 跑的時候沒有事件、游標不動:手動跑是測試。tick 正在前景跑 job 時,等 30 秒就放棄。在這裡是關著的 job(沒有模型)不會啟動:說明原因、exit 1,排定的那次照跑
   schedulectl events <name>       事件 job 的游標、在等它的事件(跟被迴圈鏈擋下的):為什麼沒跑、下一次會拿到什麼
   schedulectl skip <name>         把事件 job 的游標移到 bus 最新處:在等的事件就此丟掉(一直失敗的那批)
   schedulectl stop                完全停用排程器(launchctl bootout,不動 schedule.yaml)
