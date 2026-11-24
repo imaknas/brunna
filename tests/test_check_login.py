@@ -59,6 +59,7 @@ class Check(unittest.TestCase):
         store_fixture.stand_in(self)   # the platform's checked copy, which the requests are made with
         self.m.connector_jobs = lambda: ["proj/job"]   # one job uses the subscription login (its gate: the other test file)
         self.alerts = []
+        self.addCleanup(setattr, self.m.alert, "once", self.m.alert.once)   # the shared module: later tests send for real
         self.m.alert.once = lambda key, problems, ok, ids=None: self.alerts.append((key, list(problems), ok))
         self.answers = {None: None, "token": None}   # LLM_AUTH → ask's result (None = success)
         self.asked = []

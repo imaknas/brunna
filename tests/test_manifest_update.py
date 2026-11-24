@@ -25,7 +25,7 @@ import names  # noqa: E402
 
 HUB = names.current("project")
 ENTRY = {"v": 2, "name": "open", "paths": {"workspace": "~/workspace/open"}, "memory": True,
-         "mailbox": {"escalate": True}, "tests": [{"tier": "unit", "run": "make test", "when": ["merge"]}]}
+         "mailbox": {"escalate": True}, "tests": [{"tier": "unit", "run": "sh test.sh", "when": ["merge"]}]}
 
 
 class Instance(unittest.TestCase):
@@ -117,11 +117,11 @@ class PartOfTheEntry(Instance):
     """A letter without v is the part that changes: merged into the entry, the rest kept."""
 
     def test_a_part_changes_only_what_it_names(self):
-        tests = [{"tier": "unit", "run": "uv run pytest -q", "when": ["merge"]}]
+        tests = [{"tier": "unit", "run": "sh test-all.sh", "when": ["merge"]}]
         reply = self.update(yaml.safe_dump({"tests": tests, "code": ["src/**"]}))
         self.assertIn("applied", reply)
         self.assertEqual(self.entry(), {**ENTRY, "tests": tests, "code": ["src/**"]})
-        self.assertIn("uv run pytest -q", reply, "the reply says what the changed fields now are")
+        self.assertIn("sh test-all.sh", reply, "the reply says what the changed fields now are")
         self.assertIn("src/**", reply)
 
     def test_null_removes_a_field(self):

@@ -168,9 +168,21 @@ class WhoMayRequest(unittest.TestCase):
     @unittest.skipUnless(seatbelt.can_sandbox() is None, "needs Seatbelt (macOS); Landlock's services list only what "
                          "they allow, and session_write is never in a service's list (policy, checked above)")
     def test_a_service_cant_write_it_under_the_real_profile(self):
-        folder = self.tmp / "push" / "proj"
-        folder.mkdir(parents=True)
-        prof = seatbelt.service_profile(self.pol, [self.ws])
+        # the push folder outside the temp area, as an install's is: the profile lets everything write the temp area, and
+        # a clone that isn't an install (CI) keeps its temp folders there. HOME (the run's own, in the tree) or the tree
+        import isolation
+        base = next((d for d in (pathlib.Path.home(), ROOT / ".state") if d.is_dir() and not isolation.in_system_tmp(d)),
+                    None)
+        if base is None:
+            self.skipTest("HOME and the tree are both in the temp area, which the profile lets everything write")
+        root = pathlib.Path(tempfile.mkdtemp(prefix="zz-push-", dir=base)).resolve()
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        folder = root / "proj"
+        folder.mkdir()
+        with mock.patch.object(hubconf, "push_dir", lambda: root):
+            pol = policy.policy("proj", self.docs["proj"], {"projects": self.docs})
+        self.assertEqual([str(p) for p in pol["session_write"]], [str(folder)])
+        prof = seatbelt.service_profile(pol, [self.ws])
 
         def attempt(target):
             return subprocess.run([seatbelt.SANDBOX_EXEC, "-p", prof, "/bin/sh", "-c", f'echo x > "{target}"'],
