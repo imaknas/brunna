@@ -392,8 +392,9 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   platform's Python).
   **Projects' long-running services are not here**: they are in the project registry's `services:`, and
   `bin/render-services.py` (platform job, every 15 minutes) generates the launchd plist / systemd unit and reloads only
-  on change; when a command cannot be found it leaves the working one alone, and it alerts when a service is not
-  running.
+  on change; when a command cannot be found it leaves the working one alone (a sandboxed project's unit is always its
+  skeleton, never an older one: `docs/design/capabilities.md` "11-25"), a unit file it didn't write is never touched, and it
+  alerts when a service is not running.
   **node (and claude) are managed only by nvm**: services and schedules use the nvm default version
   (`hubconf.nvm_bin()`, `$PLATFORM_PATH` in env); don't install node with Homebrew (the reason is in known-issues.md
   "Settings, installs, credentials").

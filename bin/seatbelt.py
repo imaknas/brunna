@@ -101,10 +101,25 @@ def confined_now(marked: bool = False) -> bool:
         return False
 
 
-def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str]):
+# A service's own environment and log, inside: the log opened (a path the service may not write fails here), then the
+# variables that name something under its folder made absolute, then the command. Everything is an argument, nothing of
+# an entry is in the script's text, and no variable of the script's own (one of that name may be the entry's)
+IN_SANDBOX = ('[ -z "$1" ] || exec >>"$1" 2>&1 || exit 73; shift; '
+              'while [ "$1" != -- ]; do [ ! -e "$2" ] || export "$1=$3"; shift 3; done; shift; exec "$@"')
+
+
+def entry_argv(entry, argv: list[str]) -> list[str]:
+    """argv with a service's entry applied by what starts it inside the sandbox. A shell, not env alone: env reads a
+    command holding = as another variable."""
+    return ["/usr/bin/env", *(f"{k}={v}" for k, v in entry.env.items()), "/bin/sh", "-c", IN_SANDBOX, "sh",
+            entry.log or "", *(x for item in entry.if_exists for x in item), "--", *argv]
+
+
+def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str], entry=None):
     """isolation.py's adapter entry: replace this process with argv under service_profile."""
     import os
-    os.execv(SANDBOX_EXEC, [SANDBOX_EXEC, "-p", service_profile(pol, dirs, port), *argv])
+    os.execv(SANDBOX_EXEC, [SANDBOX_EXEC, "-p", service_profile(pol, dirs, port),
+                             *(entry_argv(entry, argv) if entry else argv)])
 
 
 def q(p) -> str:

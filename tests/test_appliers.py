@@ -57,7 +57,8 @@ class ServicesFixture:
                 loaded.add(label)
             elif args[0] == "bootout":
                 loaded.discard(label)
-            return subprocess.CompletedProcess(args, 0 if args[0] != "print" or label in loaded else 1, "", "")
+            return subprocess.CompletedProcess(args, 0 if args[0] != "print" or label in loaded else 113,
+                                               "state = running\n" if args[0] == "print" else "", "")
         m.launchctl = fake
         (tmp / "ws").mkdir()
         return {"v": 1, "errors": {}, "projects": {"demo": {

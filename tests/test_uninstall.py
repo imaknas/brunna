@@ -396,6 +396,25 @@ class Uninstall(unittest.TestCase):
         self.assertFalse([x for x in lines if x.startswith("✓")], r.stdout)
         self.assertTrue([x for x in lines if x.startswith("⚠️")], r.stdout)
 
+    def test_what_uninstall_leaves_of_the_services_is_named(self):
+        """A unit under a label of ours that isn't ours is named and left, and a service that stayed is said."""
+        self.init()
+        mine = self.hub / "bin" / "render-services.py"
+        mine.write_text(mine.read_text().replace("def main() -> int:\n", """def left_behind():
+    return ["/units/local.app.web.plist"]
+
+
+def uninstall(apply):
+    return [] if apply else ["local.app.web"]
+
+
+def main() -> int:
+""", 1))
+        r = self.hub_cmd("uninstall", "--apply", "--yes")
+        self.assertIn("/units/local.app.web.plist", r.stdout)
+        self.assertTrue([x for x in r.stdout.splitlines() if x.startswith("⚠️") and "local.app.web" in x], r.stdout)
+        self.assertEqual(r.returncode, 1, r.stdout)
+
     def test_one_project_with_broken_settings_is_no_reason_to_leave_the_others(self):
         app = self.connected()
         broken = self.home / "ws" / "aaa"

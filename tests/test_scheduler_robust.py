@@ -524,6 +524,7 @@ class OneBrokenThing(unittest.TestCase):
             "modules": {}, "errors": {}}
         self.s.main(DAY, index=index)
         self.assertEqual(self.ran(), ["echo fine"])
+        self.assertEqual(self.s.told(), ["scheduler-broken:a"])
         # the registry may say it itself (its refused list); when it raises, this is told
         def raises(index, taken):
             if "a" in index["projects"]:

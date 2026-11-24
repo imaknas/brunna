@@ -29,7 +29,11 @@ schema v1 (contracts/project.v1.md has the full description):
   mailbox: {escalate: true}   # and wake: false: a letter never wakes or is routed to this project's sessions (owner-only, PLATFORM_OWNED_NESTED)
   publishes: [{kind, path, contract, v}]
   provides:  [{contract, v, schema}]           schema relative to workspace
-  services:  [{name, run, label?, keepalive?, throttle_s?, env?, cwd?, expose?}]
+  services:  [{name, run, label?, keepalive?, interval_s?, throttle_s?, env?, cwd?, log?, expose?}]
+                                  (bin/render-services.py). A name and a label are letters, digits, . _ -, unique in the
+                                  registry whatever their case, and never one of the platform's own. A sandboxed project
+                                  chooses no label (always local.<project>.<name>), and its unit carries none of its
+                                  environment or log: those apply inside its sandbox only (bin/sandboxed-run)
   enforce: {sandbox: false, capabilities: [], work: false, git: platform?, git_ci: false, git_push?}
                                   phase two: sandbox true = render-project-settings.py writes the sandbox +
                                   permission rules; capabilities = platform capabilities ({settings} capabilities,
@@ -122,6 +126,8 @@ schema v1 (contracts/project.v1.md has the full description):
       max_attempts_per_day defaults to 12; an agent event job always runs as the scheduler's background job, in
       place, so the scheduler sees its outcome. legacy_name is refused
     after: [job] (same project) or [project/job]
+    before: [job]: this job first, then that one. A sandboxed project's names only its own jobs (one that names another
+      project's is ignored, and said; a manifest.update adding one is refused)
     allow: [rules] (agent jobs only): the job's permission rules, its whole boundary: it runs unattended (dontAsk)
       under judgment point agent-job-confined (agent-job-event when triggered), which loads only the platform's
       settings for the project, never the project's saved permissions, the user's or its hooks. Without allow: an
@@ -181,7 +187,9 @@ from __future__ import annotations
 
 import copy
 import datetime
+import functools
 import json
+import math
 import os
 import pathlib
 import re
@@ -212,7 +220,7 @@ TOP_V2 = TOP | {"tests", "code", "inputs", "commit_gate"}
 INDEX_FORMAT = 2
 MOMENTS = ("commit", "merge", "nightly", "deploy")
 TIER_KEYS = {"tier", "run", "when", "paths", "jobs"}
-ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 # a secret's path goes into confined runs' deny rules (policy.secret_paths): no glob, bracket, brace or control character
 SECRET_PATH = re.compile(r"[^\x00-\x1f\x7f()\[\]{}*?]+")
 SECRET = {"name", "path", "env_key", "expires", "max_age_days", "warn_days", "backup", "why", "rotate", "kind", "server",
@@ -232,9 +240,15 @@ MAILBOX_WORK = ("record", "message.delivered", "message.routed", "message.passed
 NOTICES = ("info", "progress", "done")   # the only letter types an event job may react to (event-jobs.md 3.5)
 SERVICE = {"name", "run", "label", "keepalive", "interval_s", "throttle_s", "env", "cwd", "log", "expose"}
 DAYS = {"mon", "tue", "wed", "thu", "fri", "sat", "sun"}
-EVERY = re.compile(r"^(\d+)(m|h)$")
+EVERY = re.compile(r"([0-9]{1,6})(m|h)\Z")
+BETWEEN = re.compile(r" *([01]?[0-9]|2[0-3]):[0-5]?[0-9] *- *([01]?[0-9]|2[0-3]):[0-5]?[0-9] *")
+YEAR_S = 366 * 24 * 3600
+# a service's name is part of its unit's file name and label, a label all of it
+SERVICE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,100}")
+SANDBOXED_SERVICE_NAME = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_-]{0,100}")
+LABEL = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._-]{0,200}")
 TIERS = ("fast", "standard", "strong")
-MODEL_POINT = re.compile(r"^[a-z0-9][a-z0-9-]{0,47}$")
+MODEL_POINT = re.compile(r"[a-z0-9][a-z0-9-]{0,47}\Z")
 
 
 def dirs(doc: dict) -> dict[str, pathlib.Path | None]:
@@ -247,14 +261,71 @@ def dirs(doc: dict) -> dict[str, pathlib.Path | None]:
     return {"runtime": rt, "workspace": ws, "hub": hubconf.ROOT}
 
 
+def runs_sandboxed(doc: dict, stem: str | None = None) -> bool:
+    return doc.get("type") not in ("module", "platform") and isolation.sandboxed({**doc, "name": stem or doc.get("name")})
+
+
+def service_label(project: str, doc: dict, svc: dict) -> str:
+    """The launchd/systemd label of a service: its own, or local.<project>.<name>; always that for one that runs
+    sandboxed, whatever its entry says."""
+    own = None if runs_sandboxed(doc, project) else svc.get("label")
+    return own or f"local.{project}.{svc['name']}"
+
+
+def label_ok(label) -> bool:
+    return isinstance(label, str) and bool(LABEL.fullmatch(label)) and ".." not in label
+
+
+def _fold(label: str) -> str:
+    """Labels as a file system that ignores case compares them."""
+    return label.casefold()
+
+
+@functools.cache
+def core_labels() -> frozenset[str]:
+    """The platform's own labels, in either spelling (folded): its scheduler and watchdog and what else is in launchd/,
+    its own entry's services and every module's, on or off."""
+    found = {names.unit_label(s, sp) for s in names.CORE_UNITS for sp in names.all("unit")}
+    found |= {f.stem for f in (hubconf.ROOT / "launchd").glob("*.plist")}
+    for f in [hubconf.platform_registry(), *sorted(MODULES_DIR.glob("*.yaml"))]:
+        try:
+            doc = yaml.safe_load(f.read_text()) or {}
+            for svc in doc.get("services") or []:
+                found |= {svc.get("label") or f"local.{n}.{svc['name']}"
+                          for n in (names.all("project") if f.parent != MODULES_DIR else [f.stem])}
+        except (OSError, yaml.YAMLError, AttributeError, KeyError, TypeError):
+            continue
+    return frozenset(_fold(s) for label in found for s in names.unit_spellings(label))
+
+
+def labels(project: str, doc: dict | None) -> dict[str, str]:
+    """{folded label: service name} of an entry, as far as its services can be read."""
+    out = {}
+    for svc in (doc or {}).get("services") or []:
+        if isinstance(svc, dict) and isinstance(svc.get("name"), (str, int)):
+            svc = isolation.normal_service(svc)
+            out.setdefault(_fold(str(service_label(project, doc, svc))), svc["name"])
+    return out
+
+
+def label_clashes(project: str, doc: dict, held: dict[str, dict], known: dict | None = None) -> list[str]:
+    """The labels doc takes that another entry has: held = {project: its labels()}. Not one the project had already
+    (known, its labels() before): of two that were accepted, neither is the newcomer (render-services decides)."""
+    return [_("service {name}: its label is already {other}'s; pick another name", name=n, other=o)
+            for label, n in labels(project, doc).items() if label not in (known or {})
+            for o, theirs in sorted(held.items()) if o != project and label in theirs]
+
+
 def default_cwd(doc: dict) -> str:
     if doc.get("type") == "module":
         return "hub"
     return "runtime" if doc.get("runtime") is not None else "workspace"
 
 
-def resolves(cmd: str, cwd: pathlib.Path | None, search: str | None = None) -> str | None:
-    """Can the first word be found? If not, return an error message."""
+def resolves(cmd: str, cwd: pathlib.Path | None, search: str | None = None, outside: bool = True) -> str | None:
+    """Can the first word be found? If not, return an error message. outside False (a sandboxed project's command): only
+    what can be told without looking at a path the project names, or one it may have put a link at: whether it parses,
+    and a bare command on the platform's own PATH. What doesn't resolve fails inside its sandbox, where it runs."""
     try:
         words = shlex.split(cmd)
     except ValueError as e:
@@ -267,11 +338,13 @@ def resolves(cmd: str, cwd: pathlib.Path | None, search: str | None = None) -> s
     if first.startswith("/"):
         if first.startswith(str(pathlib.Path.home())):
             return _("no absolute paths under the home directory ({first}); make it relative to cwd", first=first)
-        return None if pathlib.Path(first).exists() else _("{path} does not exist", path=first)
+        return None if not outside or pathlib.Path(first).exists() else _("{path} does not exist", path=first)
     if "/" in first:
         if cwd is None:
             return _("{first}: there is no cwd to look in", first=first)
-        return None if (cwd / first).exists() else _("{path} does not exist", path=cwd / first)
+        return None if not outside or (cwd / first).exists() else _("{path} does not exist", path=cwd / first)
+    if search and not outside:
+        return None
     found = shutil.which(first, path=search or f"{hubconf.LAUNCHD_PATH}:{os.environ.get('PATH', '')}")
     return None if found or first in ("cd", "test", "[", "true") else _("{first} is not on PATH", first=first)
 
@@ -703,11 +776,12 @@ def merge_patch(cur, patch):
     return out
 
 
-def manifest_update(doc, sender: str, cur: dict | None) -> tuple[dict | None, list[str]]:
+def manifest_update(doc, sender: str, cur: dict | None, index: dict | None = None) -> tuple[dict | None, list[str]]:
     """What one manifest.update letter makes of the sender's entry: (the new entry, the problems). A letter with v is
     the whole entry and replaces it; one without is the part that changes, merged into the current entry
     (merge_patch(), onto its v2 form), so a project needn't read its entry to change one field. Either way the result
-    is checked whole: it must validate, keep the sender's name and change no security field (platform_owned_changes)."""
+    is checked whole: it must validate, keep the sender's name, change no security field (platform_owned_changes) and add
+    nothing only an entry from before may have (letter_errors, with the index the other entries are in)."""
     if not isinstance(doc, dict):
         return None, [_("not a YAML mapping")]
     if "v" in doc:
@@ -722,7 +796,86 @@ def manifest_update(doc, sender: str, cur: dict | None) -> tuple[dict | None, li
                       sender=sender, name=new.get("name")))
     else:
         errs += platform_owned_changes(new, cur or {})
+        if not errs:
+            errs += letter_errors(new, cur, sender, index)
     return new, errs
+
+
+def normalise(doc):
+    """A registry document with its services in their one form (isolation.normal_service), as the index holds it."""
+    if not isinstance(doc, dict) or not isinstance(doc.get("services"), list):
+        return doc
+    return {**doc, "services": [isolation.normal_service(s) if isinstance(s, dict) else s for s in doc["services"]]}
+
+
+# what each item of these lists must be: field -> whether it is needed (its readers: contracts-check, the agents that read
+# what others publish)
+LISTS = {"provides": {"contract": True, "schema": True}, "consumes": {"contract": True, "copy": True, "from": False},
+         "publishes": {"kind": False, "path": False, "contract": False}}
+
+
+def list_problems(doc: dict) -> list[str]:
+    """provides, consumes, publishes and mailbox: each in the shape its readers read."""
+    errs = [_("mailbox must be a mapping")] if not isinstance(doc.get("mailbox", {}), dict) else []
+    for key, fields in LISTS.items():
+        for i, item in enumerate(doc[key] if isinstance(doc.get(key), list) else []):
+            bad = ["*"] if not isinstance(item, dict) else \
+                [f for f, needed in fields.items() if (needed or f in item) and not (isinstance(item.get(f), str) and item[f]
+                                                                                    and "\0" not in item[f])] + \
+                [f for f in ("v",) if isinstance(item.get(f), (dict, list))]
+            if bad:
+                errs.append(_("{key}[{i}]: {fields} must be text", key=key, i=i, fields=", ".join(bad)))
+    return errs
+
+
+def readable(doc: dict) -> dict:
+    """An entry accepted under older rules, without the parts its readers couldn't read."""
+    out = {k: v for k, v in doc.items() if k != "mailbox" or isinstance(v, dict)}
+    for key in LISTS:
+        if key in out:
+            items = out[key] if isinstance(out[key], list) else []
+            out[key] = [x for x in items if not list_problems({key: [x]})]
+    return normalise(out)
+
+
+MAX_DEPTH = 40
+
+
+def data_problems(doc, where: str = "", depth: int = 0) -> list[str]:
+    """What of a document the index or a registry file can't hold as it is: a key that isn't text, a value that is no
+    plain data, a number or a depth no reader takes, text with no UTF-8 form. (One entry that can't be written would
+    otherwise stop the index for all.)"""
+    if depth > MAX_DEPTH:
+        return [_("{where}: nested too deep", where=where)]
+    if isinstance(doc, dict):
+        out = []
+        for k, v in doc.items():
+            if not isinstance(k, str) or data_problems(k):
+                out.append(_("{where}: a key must be text, not {key!r}", where=where or "entry", key=k))
+            else:
+                out += data_problems(v, f"{where}.{k}" if where else k, depth + 1)
+        return out
+    if isinstance(doc, list):
+        return [p for v in doc for p in data_problems(v, where, depth + 1)]
+    if isinstance(doc, str):
+        ok = not any(0xD800 <= ord(c) < 0xE000 for c in doc)
+    elif isinstance(doc, float):
+        ok = math.isfinite(doc)
+    else:
+        ok = doc is None or isinstance(doc, (bool, datetime.date)) or isinstance(doc, int) and abs(doc) < 2 ** 63
+    return [] if ok else [_("{where}: a value the registry can't hold ({kind})", where=where, kind=type(doc).__name__)]
+
+
+def written(doc) -> str:
+    """A document as the index and its cache hold it. Raises where it can't be written."""
+    text = json.dumps(doc, ensure_ascii=False, indent=1, default=str)
+    text.encode()
+    return text
+
+
+def said(text: str, most: int = 20000) -> str:
+    """Words an entry may have chosen, as one message carries them: no character that can't be written or passed on."""
+    return "".join(c if c in "\n\t" or not isolation.has_control(c) else "\N{REPLACEMENT CHARACTER}" for c in str(text)[:most])
 
 
 def validate(doc, stem: str) -> list[str]:
@@ -730,6 +883,8 @@ def validate(doc, stem: str) -> list[str]:
     long as any deployment may hold v1 files)."""
     if not isinstance(doc, dict):
         return [_("not a YAML mapping")]
+    if (errs := data_problems(doc)):
+        return errs
     if doc.get("v") not in (1, 2):
         return [_("v must be 1 or 2 (it is {v!r})", v=doc.get("v"))]
     return validate_v2(tiers.upgrade(doc), stem)
@@ -739,6 +894,7 @@ def validate_v2(doc, stem: str) -> list[str]:
     """Project v2 (the header's "schema v2")."""
     if not isinstance(doc, dict):
         return [_("not a YAML mapping")]
+    doc = normalise(doc)
     errs = [] if doc.get("v") == 2 else [_("v must be 2 (it is {v!r})", v=doc.get("v"))]
     rt = doc.get("runtime")
     if isinstance(rt, dict) and set(rt) - {"deploy"}:
@@ -773,7 +929,7 @@ def validate_tests(doc: dict, d: dict) -> list[str]:
         elif kind == "env" and not ENV_NAME.match(value):
             errs.append(_("inputs: {item!r}: an environment variable name is upper case letters, digits and _",
                           item=item))
-        elif kind == "cmd" and (e := resolves(value, d["workspace"])):
+        elif kind == "cmd" and (e := resolves(value, d["workspace"], outside=not runs_sandboxed(doc))):
             errs.append(_("inputs: {item!r}: {error}", item=item, error=e))
     tiers = doc.get("tests", [])
     if not isinstance(tiers, list):
@@ -794,7 +950,7 @@ def validate_tests(doc: dict, d: dict) -> list[str]:
         run = t.get("run")
         if not isinstance(run, str) or not run.strip():
             errs.append(_("tests.{tier}: run is required", tier=where))
-        elif (e := resolves(run.replace("{jobs}", "1"), d["workspace"])):
+        elif (e := resolves(run.replace("{jobs}", "1"), d["workspace"], outside=not runs_sandboxed(doc))):
             errs.append(_("tests.{tier}: run: {error}", tier=where, error=e))
         when = t.get("when")
         if not isinstance(when, list) or not when or any(w not in MOMENTS for w in when) or len(set(when)) != len(when):
@@ -863,14 +1019,15 @@ def _validate_body(doc: dict, stem: str, top: set[str], runtime_keys: tuple[str,
             errs.append(_("runtime must be a mapping"))
         elif d["runtime"] and not d["runtime"].is_dir():
             errs.append(_("the runtime directory {path} does not exist", path=d["runtime"]))
-    for key in ("publishes", "provides", "services", "jobs"):
+    for key in ("publishes", "provides", "consumes", "services", "jobs"):
         if not isinstance(doc.get(key, []), list):
             errs.append(_("{key} must be a list", key=key))
+    errs += list_problems(doc)
     errs += validate_runs(doc, stem, d)
     for key in runtime_keys:
         if isinstance(rt, dict) and rt.get(key):
             base = d["workspace"] if key == "test" else d["workspace"]
-            if (e := resolves(rt[key], base)):
+            if (e := resolves(rt[key], base, outside=not runs_sandboxed(doc))):
                 errs.append(_("runtime.{key}: {error}", key=key, error=e))
     return errs
 
@@ -948,28 +1105,94 @@ def validate_trigger(job: dict, doc: dict, stem: str) -> list[str]:
     return errs
 
 
+def service_fields(svc: dict, stem: str, doc: dict) -> list[str]:
+    """One (normal) service's values: each as render-services writes it into a unit, or sandboxed-run into its sandbox."""
+    errs = []
+    if (why := isolation.service_problem(svc, allow="")):
+        errs.append(why)
+    if "label" in svc and not label_ok(svc["label"]):
+        errs.append(_("label can only be letters, digits, . _ and -, starting with a letter, digit or _"))
+    elif "label" in svc and not platform_doc(doc, stem) and _fold(svc["label"]) in core_labels():   # a sandboxed one's too, though it isn't used
+        errs.append(_("the label {label} is the platform's own, or isn't a name", label=svc["label"]))
+    elif not label_ok(label := service_label(stem, doc, svc)) or not platform_doc(doc, stem) and _fold(label) in core_labels():
+        errs.append(_("the label {label} is the platform's own, or isn't a name", label=label))
+    if not isinstance(svc.get("keepalive", False), bool):
+        errs.append(_("keepalive must be true or false"))
+    for key in ("interval_s", "throttle_s"):
+        v = svc.get(key, 1)
+        if not isinstance(v, int) or not 1 <= v <= YEAR_S:
+            errs.append(_("{key} must be a number of seconds, at most {most}", key=key, most=YEAR_S))
+    exp = svc.get("expose", {})
+    if not isinstance(exp, dict):
+        errs.append(_("expose must be a mapping (tailnet_https, local_port)"))
+    else:
+        errs += [_("expose: unknown field {key}", key=k) for k in exp if k not in ("tailnet_https", "local_port")]
+        for key in ("local_port", "tailnet_https"):
+            v = exp.get(key, 1)
+            if not isinstance(v, int) or not 1 <= v <= 65535:
+                errs.append(_("expose.{key} must be a port number", key=key))
+    return errs
+
+
+def in_a_cycle(jobs: list[dict], stem: str) -> list[str] | None:
+    """A cycle of after:/before: among a project's own jobs (their names, in order), or None."""
+    graph: dict[str, set[str]] = {j["name"]: set() for j in jobs if isinstance(j.get("name"), str)}
+
+    def own(x: str) -> str | None:
+        return x.removeprefix(f"{stem}/") if x.removeprefix(f"{stem}/") in graph else None
+    for j in jobs:
+        for key in ("after", "before"):
+            for x in j.get(key) if isinstance(j.get(key), list) and j.get("name") in graph else []:
+                if isinstance(x, str) and (o := own(x)):
+                    graph[j["name"] if key == "after" else o].add(o if key == "after" else j["name"])
+    found = find_cycles(graph)
+    return found[0] if found else None
+
+
 def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
     """services and jobs (shared by the project registry and modules)."""
     errs: list[str] = []
     names = set()
-    for svc in doc.get("services") or []:
+    sandboxed = runs_sandboxed(doc, stem)
+    listed = {k: doc.get(k) if isinstance(doc.get(k), list) else [] for k in ("services", "jobs")}   # else said already
+    services, jobs = ([x for x in listed[k] if isinstance(x, dict)] for k in ("services", "jobs"))
+    if len(services) != len(listed["services"]):
+        errs.append(_("each service must be a mapping"))
+    if len(jobs) != len(listed["jobs"]):
+        errs.append(_("each job must be a mapping"))
+    taken: dict[str, str] = {}
+    for svc in map(isolation.normal_service, services):
         n = svc.get("name")
         errs += [_("service {name}: unknown field {key}", name=n, key=k) for k in svc if k not in SERVICE]
         if not n or not svc.get("run"):
             errs.append(_("service {name}: name and run are required", name=n))
             continue
-        port = (svc.get("expose") or {}).get("local_port") if isinstance(svc.get("expose"), dict) else None
+        if not isinstance(n, str) or not SERVICE_NAME.fullmatch(n) or ".." in n:
+            errs.append(_("service {name!r}: name can only be letters, digits, . _ and -, starting with a letter, digit or _",
+                          name=n))
+            continue
+        errs += [_("service {name}: {error}", name=n, error=e) for e in service_fields(svc, stem, doc)]
+        if label_ok(label := service_label(stem, doc, svc)):
+            if _fold(label) in taken:
+                errs.append(_("service {name}: its label is already service {other}'s", name=n, other=taken[_fold(label)]))
+            taken.setdefault(_fold(label), n)
+        port = svc["expose"].get("local_port") if isinstance(svc.get("expose"), dict) else None
         if port in RESERVED_LOCAL_PORTS:
             errs.append(_("service {name}: local_port {port} is the platform's (the sign-in callback of brunna "
                           "credentials grant)", name=n, port=port))
-        cwd = d.get(svc.get("cwd") or default_cwd(doc))
-        if (e := resolves(svc["run"], cwd, hubconf.expand_env((svc.get("env") or {}).get("PATH") or hubconf.LAUNCHD_PATH))):
+        cwd_key = svc.get("cwd") or default_cwd(doc)
+        if cwd_key not in ("runtime", "workspace", "hub") or d.get(cwd_key) is None:
+            errs.append(_("service {name}: cwd can only be runtime / workspace / hub, and one this project has", name=n))
+            continue
+        env = svc.get("env") if isinstance(svc.get("env"), dict) else {}
+        own = env.get("PATH") if isinstance(env.get("PATH"), str) else None
+        search = hubconf.expand_env(own or hubconf.LAUNCHD_PATH) if own or not sandboxed else None
+        if isinstance(svc["run"], str) and (e := resolves(svc["run"], d[cwd_key], search, outside=not sandboxed)):
             errs.append(_("service {name}: {error}", name=n, error=e))
-    jobs = doc.get("jobs") or []
     for job in jobs:
         n = job.get("name")
         errs += [_("job {name}: unknown field {key}", name=n, key=k) for k in job if k not in JOB]
-        if not n or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", str(n)):
+        if not isinstance(n, str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]*", n):
             errs.append(_("job {name!r}: name must be lowercase letters, digits and -", name=n))
             continue
         if n in names:
@@ -987,14 +1210,13 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
             errs.append(_("job {name}: timeout must look like 45m / 2h", name=n))
         if "catch_up" in job and (job["catch_up"] != "period" or "at" not in job):
             errs.append(_("job {name}: catch_up can only be period, on a job with at", name=n))
-        if set(job.get("days") or []) - DAYS:
-            errs.append(_("job {name}: days can only be {days}", name=n, days=sorted(DAYS)))
+        errs += [_("job {name}: {error}", name=n, error=e) for e in job_when(job)]
         cwd_key = job.get("cwd") or default_cwd(doc)
         if cwd_key == "state" and job.get("kind") == "agent":
             # an agent job runs in its own state directory (without loading the project's settings/MCP; e.g. the
             # project's own MCP with the same name would shadow a claude.ai connector)
             pass
-        elif cwd_key not in ("runtime", "workspace", "hub"):
+        elif cwd_key not in ("runtime", "workspace", "hub") or d.get(cwd_key) is None and not doc.get("type") == "module":
             errs.append(_("job {name}: cwd can only be runtime / workspace / hub (an agent job may also use state)", name=n))
             continue
         if job.get("allow") is not None and (not isinstance(job["allow"], list)
@@ -1041,9 +1263,11 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
                 errs.append(_("job {name}: prompt {prompt} does not exist", name=n, prompt=prompt))
         elif job.get("kind", "command") != "command":
             errs.append(_("job {name}: kind can only be command / agent", name=n))
-        elif not job.get("run"):
+        elif not isinstance(job.get("run"), str) or not job["run"]:
             errs.append(_("job {name}: run is required", name=n))
-        elif (e := resolves(job["run"], d.get(cwd_key))):
+        elif isolation.has_control(job["run"], allow="\t\n"):
+            errs.append(_("job {name}: run holds a control character", name=n))
+        elif (e := resolves(job["run"], d.get(cwd_key), outside=not sandboxed)):
             errs.append(_("job {name}: {error}", name=n, error=e))
     for job in jobs:
         for key in ("after", "before"):
@@ -1055,6 +1279,73 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
                 if "/" not in dep and dep not in names:
                     errs.append(_("job {name}: {dep} in {key} is not in this project (another project or module is written "
                                    "<name>/<job>)", name=job.get("name"), key=key, dep=dep))
+    if (cycle := in_a_cycle(jobs, stem)):
+        errs.append(_("after:/before: form a cycle, these jobs would wait for each other forever: {cycle}",
+                      cycle=" → ".join(cycle)))
+    return errs
+
+
+def job_when(job: dict) -> list[str]:
+    """When a job runs, beyond at/every/trigger: each value in the form the scheduler reads."""
+    errs = []
+    if "days" in job and (not isinstance(job["days"], list) or not job["days"]
+                          or not all(isinstance(x, str) and x in DAYS for x in job["days"])):
+        errs.append(_("days can only be {days}", days=sorted(DAYS)))
+    for key, most in (("days_of_month", 31), ("months", 12)):
+        v = job.get(key, [1])
+        if not isinstance(v, list) or not v or not all(isinstance(x, int) and not isinstance(x, bool) and 1 <= x <= most
+                                                       for x in v):
+            errs.append(_("{key} must be a list of numbers from 1 to {most}", key=key, most=most))
+    if "until" in job:
+        try:
+            datetime.date.fromisoformat(str(job["until"]))
+        except ValueError:
+            errs.append(_("until must be a date (YYYY-MM-DD)"))
+    if "between" in job and not (isinstance(job["between"], str) and BETWEEN.fullmatch(job["between"])):
+        errs.append(_("between must look like 08:00-22:00"))
+    n = job.get("max_attempts_per_day", 1)
+    if not isinstance(n, (int, float)) or isinstance(n, bool) or not 0 <= n < 1e6:
+        errs.append(_("max_attempts_per_day must be a number"))
+    return errs
+
+
+def foreign_deps(doc: dict, stem: str, key: str) -> set[tuple[str, str]]:
+    """(job, dependency) where a job's after:/before: names another project's job."""
+    return {(str(j.get("name")), x) for j in doc.get("jobs") or [] if isinstance(j, dict)
+            for x in (j.get(key) if isinstance(j.get(key), list) else [])
+            if isinstance(x, str) and "/" in x and x.split("/", 1)[0] != stem}
+
+
+def ignored_before(index: dict) -> dict[str, str]:
+    """{project/job: why} for a sandboxed project's jobs whose before: names another project's job: that part isn't used
+    (it never decides when another's jobs run), the entry stays valid."""
+    return {f"{name}/{job}": _("job {job}: before: {dep} is another project's job; it is ignored", job=f"{name}/{job}",
+                               dep=dep)
+            for name, doc in sorted(index["projects"].items()) if runs_sandboxed(doc, name)
+            for job, dep in sorted(foreign_deps(doc, name, "before"))}
+
+
+def letter_errors(new: dict, cur: dict | None, sender: str, index: dict | None) -> list[str]:
+    """What a manifest.update may not add, though an entry that has it already keeps it: in a sandboxed project a job that
+    is put before another project's or waits for one of an ordinary project's, and a service name with a dot; in any
+    (with the index) a label another entry has."""
+    errs, cur = [], cur or {}
+    for key in ("after", "before") if runs_sandboxed(new, sender) else ():
+        for job, dep in sorted(foreign_deps(new, sender, key) - foreign_deps(cur, sender, key)):
+            owner = dep.split("/", 1)[0]
+            if key == "after" and (owner not in ((index or {}).get("projects") or {})
+                                   or platform_doc(index["projects"][owner], owner)):
+                continue   # the platform's, a module's, or nobody's (which never waits)
+            errs.append(_("job {name}: {key} may name only this project's own jobs (and after: the platform's): {dep}",
+                          name=job, key=key, dep=dep))
+    if runs_sandboxed(new, sender):
+        had = {str(s.get("name")) for s in cur.get("services") or [] if isinstance(s, dict)}
+        errs += [_("service {name}: a sandboxed project's new service is named with letters, digits, _ and -", name=s["name"])
+                 for s in new.get("services") or [] if isinstance(s, dict) and str(s.get("name")) not in had
+                 and not SANDBOXED_SERVICE_NAME.fullmatch(str(s.get("name")))]
+    if index:
+        held = {n: labels(n, d) for n, d in [*index["projects"].items(), *(index.get("modules") or {}).items()]}
+        errs += label_clashes(sender, new, held, labels(sender, cur))
     return errs
 
 
@@ -1192,6 +1483,7 @@ def load_modules() -> tuple[dict, dict]:
             errs = validate_module(doc, name)
         except yaml.YAMLError as e:
             doc, errs = None, [_("cannot read the YAML: {error}", error=e)]
+        doc = normalise(doc)
         if errs:
             errors[f"module:{name}"] = errs
         else:
@@ -1203,21 +1495,28 @@ def job_cycles(index: dict) -> list[str]:
     """Whether after:/before: chain into a cycle (if so the scheduler would wait forever)."""
     jobs, _skipped, _renames = scheduler_jobs(index, set())
     graph = {j["name"]: set(j.get("after") or []) for j in jobs}
-    out, state = [], {}
+    return [" → ".join(c) for c in find_cycles(graph)]
 
-    def visit(n, path):
-        state[n] = 1
-        for dep in graph.get(n, ()):
-            if dep not in graph:
-                continue
-            if state.get(dep) == 1:
-                out.append(" → ".join(path[path.index(dep):] + [dep]) if dep in path else f"{n} → {dep}")
-            elif not state.get(dep):
-                visit(dep, path + [dep])
-        state[n] = 2
-    for n in sorted(graph):
-        if not state.get(n):
-            visit(n, [n])
+
+def find_cycles(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Cycles of a graph (each node's edges), each as its nodes with the first repeated at the end. Not recursive: a chain
+    of any length is read."""
+    out, state = [], {}
+    for start in sorted(graph):
+        if state.get(start):
+            continue
+        state[start], path, todo = 1, [start], [iter(sorted(graph[start]))]
+        while todo:
+            dep = next(todo[-1], None)
+            if dep is None:
+                todo.pop()
+                state[path.pop()] = 2
+            elif dep in graph and state.get(dep) == 1:
+                out.append([*path[path.index(dep):], dep])
+            elif dep in graph and not state.get(dep):
+                state[dep] = 1
+                path.append(dep)
+                todo.append(iter(sorted(graph[dep])))
     return out
 
 
@@ -1341,32 +1640,55 @@ def refresh(only: list[str] | None = None, rebuild: bool = False) -> dict:
     if plat.exists():
         files = sorted([f for f in files if f.stem != plat.stem] + [plat])
     projects, errors = {}, {}
+    read: dict[str, dict] = {}      # the valid ones, as read
+    last: dict[str, dict] = {}      # each one's last valid version
     for f in files:
         stem = f.stem
-        try:
+        try:   # one entry, whatever is wrong with it, never stops the others
             text = f.read_text()
             doc = yaml.safe_load(text)
             errs = validate(doc, stem) + roster_mismatch(doc, text)
-            doc = tiers.upgrade(doc)   # what the index holds is v2, whatever the file says
+            doc = normalise(tiers.upgrade(doc))   # what the index holds is v2, whatever the file says
+            if not errs:
+                written(doc)
         except yaml.YAMLError as e:
             doc, errs = None, [_("cannot read the YAML: {error}", error=e)]
-        cache = CACHE / f"{stem}.json"
-        if not errs:
-            if live and not superseded():
-                cache.write_text(json.dumps(doc, ensure_ascii=False, indent=1, default=str))
-            projects[stem] = doc
-        else:
+        except Exception as e:   # noqa: BLE001
+            doc, errs = None, [_("the entry can't be checked: {error}", error=f"{type(e).__name__}: {e}"[:200])]
+        try:
+            last[stem] = readable(tiers.upgrade(json.loads((CACHE / f"{stem}.json").read_text())))
+            written(last[stem])
+        except Exception:   # noqa: BLE001 (none, or one that can't be held: its entry is then only what its file says)
+            last.pop(stem, None)
+        if errs:
             errors[stem] = errs
-            if cache.exists():  # keep using the last valid version (upgraded too: it may predate v2)
-                projects[stem] = tiers.upgrade(json.loads(cache.read_text()))
+        else:
+            read[stem] = doc
+    modules, mod_errors = load_modules()
+    # a label two entries take: the one that takes it anew is the newcomer, and isn't accepted
+    held = {n: labels(n, d) for n, d in modules.items()}
+    for stem, doc in last.items():
+        mine = labels(stem, doc)
+        held[stem] = {k: v for k, v in mine.items() if k in labels(stem, read.get(stem, doc))}
+    for stem in [s for s in read if not platform_doc(read[s], s)]:
+        if (clash := label_clashes(stem, read[stem], held, labels(stem, last.get(stem)))):
+            errors[stem] = clash
+            del read[stem]
+    for stem in [f.stem for f in files]:
+        if stem in read:
+            projects[stem] = read[stem]
+            if live and not superseded():
+                (CACHE / f"{stem}.json").write_text(written(read[stem]))
+        elif stem in last:   # keep using the last valid version (upgraded too: it may predate v2)
+            projects[stem] = last[stem]
     # projects whose registry file was deleted: drop the cache too (deleting the entry = removing the project)
     for c in CACHE.glob("*.json") if live and not superseded() else []:
         if c.name != "index.json" and c.stem not in {f.stem for f in files}:
             c.unlink()
-    modules, mod_errors = load_modules()
     errors.update(mod_errors)
     index = {"v": 1, "format": INDEX_FORMAT, "generated": datetime.datetime.now().isoformat(timespec="seconds"), "registry_dir": str(reg.resolve()),
              "projects": projects, "modules": modules, "errors": errors}
+    index["refused"] = {}   # filled below; scheduler_jobs adds what it can't read
     if (cycles := job_cycles(index)):
         errors["(jobs)"] = [_("after:/before: form a cycle, these jobs would wait for each other forever: {cycle}", cycle=c)
                             for c in cycles]
@@ -1377,7 +1699,8 @@ def refresh(only: list[str] | None = None, rebuild: bool = False) -> dict:
     # not an error: the entry stays valid and the config can still be committed and applied (an owner who turns a project's
     # sandbox on is never held back by its jobs, nor can a project hold back the config); the job alone doesn't run, and
     # `registry.py check` and the status page say why (docs/design/project-agent-calls.md A2)
-    index["refused"] = {
+    index["refused"] |= ignored_before(index)
+    index["refused"] |= {
         j: _("agent job {job} belongs to a sandboxed project and declares no allow list, so it doesn't run until it "
              "declares the tools it needs (an agent job without one loads the project's saved permissions)", job=j)
         for j in unconfined_sandboxed(index)}
@@ -1418,7 +1741,7 @@ def nightly_test_jobs(index: dict, taken: set[str]) -> list[dict]:
         cmd = (shlex.join(isolation.wrap(name, cwd, argv)) if isolation.sandboxed(doc)
                else f"cd {shlex.quote(str(cwd))} && {shlex.join(argv)}")
         out.append({"name": full, "command": cmd, "project": name, "time": NIGHTLY_AT, "background": True,
-                    "timeout_minutes": 180})
+                    "timeout_minutes": 180, "max_attempts_per_day": 1})
     return out
 
 
@@ -1430,86 +1753,97 @@ def scheduler_jobs(index: dict, legacy_names: set[str]) -> tuple[list[dict], lis
     loose = set(unconfined_sandboxed(index))
     before: dict[str, list[str]] = {}
     docs = sorted(index["projects"].items()) + sorted((index.get("modules") or {}).items())
+
+    def add(name: str, doc: dict, d: dict, job: dict) -> None:
+        full = f"{name}/{job['name']}"
+        if job.get("legacy_name") in legacy_names:
+            skipped.append(full)
+            return
+        if job.get("legacy_name"):
+            renames[full] = job["legacy_name"]
+        cwd = d.get(job.get("cwd") or default_cwd(doc))
+        if job.get("kind") == "agent" and job.get("cwd") == "state":
+            cwd = hubconf.STATE / "agent-jobs" / agent_state_name(name, job)
+        if job.get("kind") == "agent":
+            prompt = job_prompt(name, job)
+            if prompt is None or agent_state_name(name, job) in clash or full in loose:   # refused (refresh says why)
+                return
+            agent_name = agent_state_name(name, job)
+            # every agent job names its project, so the run can check what the project is held to (llm.py)
+            cmd = (f"AGENT_JOB_PROJECT={shlex.quote(name)} "
+                   f"{shlex.quote(str(hubconf.ROOT / 'bin' / 'run-agent-job.sh'))} {shlex.quote(agent_name)} "
+                   f"{shlex.quote(str(cwd))} {shlex.quote(str(prompt))}")
+            # unattended permissions: only these rules and the platform's settings for the project (run-agent-job.sh
+            # runs it under judgment point agent-job-confined; docs/design/event-jobs.md 3.2)
+            if job.get("allow"):
+                cmd = f"AGENT_JOB_ALLOW={shlex.quote(json.dumps(job['allow'], ensure_ascii=False))} {cmd}"
+            # the platform's mail tools, only for a job that asks (llm-points mail_from_env)
+            if job.get("mail") is True:
+                cmd = f"AGENT_JOB_MAIL=1 {cmd}"
+            # the platform credentials it gets (llm-points credentials_from_env; llm.py reads them from the
+            # registry by this job's name, never from the environment)
+            if job.get("credentials"):
+                cmd = f"AGENT_JOB_CREDENTIALS={shlex.quote(job['name'])} {cmd}"
+            # the model strength it chose (llm-points tier_from_env), behind llm.py's billing gate
+            if job.get("tier"):
+                cmd = f"AGENT_JOB_TIER={shlex.quote(job['tier'])} {cmd}"
+            # needs claude.ai connectors: use the subscription login, not the default headless token
+            if job.get("connectors"):
+                cmd = f"LLM_AUTH=subscription {cmd}"
+        elif isolation.sandboxed(doc):
+            # a sandboxed project's command job runs under its profile (bin/sandboxed-run; refuses where it can't)
+            cmd = shlex.join(isolation.wrap(name, cwd, ["/bin/sh", "-c", job["run"]]))
+        else:
+            cmd = f"cd {shlex.quote(str(cwd))} && {job['run']}"
+        j = {"name": full, "command": cmd, "project": name}
+        if job.get("kind") == "agent":
+            j["agent_name"] = agent_name
+        if "at" in job:
+            j["time"] = str(job["at"])
+        elif "every" in job:
+            j["every_minutes"] = every_minutes(str(job["every"]))
+        for src, dst in (("days", "days_of_week"), ("days_of_month", "days_of_month"), ("months", "months"),
+                         ("until", "end_date"), ("between", "between"), ("background", "background"),
+                         ("max_attempts_per_day", "max_attempts_per_day"), ("catch_up", "catch_up"),
+                         ("found_exit", "found_exit")):
+            if src in job and (src != "found_exit" or platform_doc(doc, name)):
+                j[dst] = job[src]
+        if "trigger" in job:
+            on = job["trigger"]
+            deb = str(on.get("debounce", "0m"))
+            # self = this project under its name and the names it had before a rename (old events keep those)
+            own = [name, *[o for o in hubconf.former_names(name) if o not in index["projects"]]]
+            projects = [x for p in on.get("projects", ["self"]) for x in (own if p in ("self", name) else [p])]
+            j["trigger"] = {"events": list(on["events"]), "sources": list(on.get("sources") or []),
+                       "projects": list(dict.fromkeys(projects)),
+                       "where": dict(on.get("where") or {}),
+                       "debounce_minutes": 0 if deb == "0m" else every_minutes(deb)}
+            j.setdefault("max_attempts_per_day", event_jobs.DEFAULT_CAP)
+            j["platform"] = platform_doc(doc, name)
+            if job.get("kind") == "agent":
+                # the scheduler owns the detachment so it sees the run's real outcome (event-jobs.md section 2);
+                # judgment point agent-job-event: only allow: and the platform's settings apply (section 3.2)
+                j["command"] = f"RUN_AGENT_JOB_FOREGROUND=1 AGENT_JOB_POINT=agent-job-event {j['command']}"
+                j["background"] = True
+        if "timeout" in job:
+            j["timeout_minutes"] = every_minutes(str(job["timeout"]))
+        if job.get("after"):
+            j["after"] = [a if "/" in a else f"{name}/{a}" for a in job["after"]]
+        for t in job.get("before") or []:
+            if "/" in t and t.split("/", 1)[0] != name and runs_sandboxed(doc, name):
+                continue   # another project's job: ignored, and said (ignored_before)
+            before.setdefault(t if "/" in t else f"{name}/{t}", []).append(full)
+        out.append(j)
+
     for name, doc in docs:
-        d = dirs(doc)
         for job in doc.get("jobs") or []:
-            full = f"{name}/{job['name']}"
-            if job.get("legacy_name") in legacy_names:
-                skipped.append(full)
-                continue
-            if job.get("legacy_name"):
-                renames[full] = job["legacy_name"]
-            cwd = d.get(job.get("cwd") or default_cwd(doc))
-            if job.get("kind") == "agent" and job.get("cwd") == "state":
-                cwd = hubconf.STATE / "agent-jobs" / agent_state_name(name, job)
-            if job.get("kind") == "agent":
-                prompt = job_prompt(name, job)
-                if prompt is None or agent_state_name(name, job) in clash or full in loose:   # refused (refresh says why)
-                    continue
-                agent_name = agent_state_name(name, job)
-                # every agent job names its project, so the run can check what the project is held to (llm.py)
-                cmd = (f"AGENT_JOB_PROJECT={shlex.quote(name)} "
-                       f"{shlex.quote(str(hubconf.ROOT / 'bin' / 'run-agent-job.sh'))} {shlex.quote(agent_name)} "
-                       f"{shlex.quote(str(cwd))} {shlex.quote(str(prompt))}")
-                # unattended permissions: only these rules and the platform's settings for the project (run-agent-job.sh
-                # runs it under judgment point agent-job-confined; docs/design/event-jobs.md 3.2)
-                if job.get("allow"):
-                    cmd = f"AGENT_JOB_ALLOW={shlex.quote(json.dumps(job['allow'], ensure_ascii=False))} {cmd}"
-                # the platform's mail tools, only for a job that asks (llm-points mail_from_env)
-                if job.get("mail") is True:
-                    cmd = f"AGENT_JOB_MAIL=1 {cmd}"
-                # the platform credentials it gets (llm-points credentials_from_env; llm.py reads them from the
-                # registry by this job's name, never from the environment)
-                if job.get("credentials"):
-                    cmd = f"AGENT_JOB_CREDENTIALS={shlex.quote(job['name'])} {cmd}"
-                # the model strength it chose (llm-points tier_from_env), behind llm.py's billing gate
-                if job.get("tier"):
-                    cmd = f"AGENT_JOB_TIER={shlex.quote(job['tier'])} {cmd}"
-                # needs claude.ai connectors: use the subscription login, not the default headless token
-                if job.get("connectors"):
-                    cmd = f"LLM_AUTH=subscription {cmd}"
-            elif isolation.sandboxed(doc):
-                # a sandboxed project's command job runs under its profile (bin/sandboxed-run; refuses where it can't)
-                cmd = shlex.join(isolation.wrap(name, cwd, ["/bin/sh", "-c", job["run"]]))
-            else:
-                cmd = f"cd {shlex.quote(str(cwd))} && {job['run']}"
-            j = {"name": full, "command": cmd, "project": name}
-            if job.get("kind") == "agent":
-                j["agent_name"] = agent_name
-            if "at" in job:
-                j["time"] = str(job["at"])
-            elif "every" in job:
-                j["every_minutes"] = every_minutes(str(job["every"]))
-            for src, dst in (("days", "days_of_week"), ("days_of_month", "days_of_month"), ("months", "months"),
-                             ("until", "end_date"), ("between", "between"), ("background", "background"),
-                             ("max_attempts_per_day", "max_attempts_per_day"), ("catch_up", "catch_up"),
-                             ("found_exit", "found_exit")):
-                if src in job and (src != "found_exit" or platform_doc(doc, name)):
-                    j[dst] = job[src]
-            if "trigger" in job:
-                on = job["trigger"]
-                deb = str(on.get("debounce", "0m"))
-                # self = this project under its name and the names it had before a rename (old events keep those)
-                own = [name, *[o for o in hubconf.former_names(name) if o not in index["projects"]]]
-                projects = [x for p in on.get("projects", ["self"]) for x in (own if p in ("self", name) else [p])]
-                j["trigger"] = {"events": list(on["events"]), "sources": list(on.get("sources") or []),
-                           "projects": list(dict.fromkeys(projects)),
-                           "where": dict(on.get("where") or {}),
-                           "debounce_minutes": 0 if deb == "0m" else every_minutes(deb)}
-                j.setdefault("max_attempts_per_day", event_jobs.DEFAULT_CAP)
-                j["platform"] = platform_doc(doc, name)
-                if job.get("kind") == "agent":
-                    # the scheduler owns the detachment so it sees the run's real outcome (event-jobs.md section 2);
-                    # judgment point agent-job-event: only allow: and the platform's settings apply (section 3.2)
-                    j["command"] = f"RUN_AGENT_JOB_FOREGROUND=1 AGENT_JOB_POINT=agent-job-event {j['command']}"
-                    j["background"] = True
-            if "timeout" in job:
-                j["timeout_minutes"] = every_minutes(str(job["timeout"]))
-            if job.get("after"):
-                j["after"] = [a if "/" in a else f"{name}/{a}" for a in job["after"]]
-            for t in job.get("before") or []:
-                before.setdefault(t if "/" in t else f"{name}/{t}", []).append(full)
-            out.append(j)
+            try:   # one job that can't be read never stops the others
+                add(name, doc, dirs(doc), job)
+            except Exception as e:   # noqa: BLE001
+                full = f"{name}/{job.get('name') if isinstance(job, dict) else '?'}"
+                index.setdefault("refused", {})[full] = _("job {job} doesn't run, its entry can't be read: {error}", job=full,
+                                                          error=f"{type(e).__name__}: {e}"[:200])
+                index.setdefault("unreadable", {})[full] = type(e).__name__   # the scheduler tells, in no words of the entry's
     out += nightly_test_jobs(index, {j["name"] for j in out})
     # before: [X] = X's after gets one more entry, me (a module inserts itself into the core flow without the core
     # knowing about it). If X doesn't exist (that module is off), ignore it
@@ -1597,10 +1931,14 @@ def cmd_apply_updates() -> int:
     hubbus = [sys.executable, str(hubconf.ROOT / "bin" / "hubbus")]
 
     def reply(to, mid, text, note):
-        subprocess.run([*hubbus, "send", "--from", hub, "--to", to, "--reply-to", mid, "--type", "info", "--text", text],
+        subprocess.run([*hubbus, "send", "--from", hub, "--to", to, "--reply-to", mid, "--type", "info", "--text", said(text)],
                        capture_output=True)
-        subprocess.run([*hubbus, "done", mid, "--note", note], capture_output=True, cwd=hubconf.ROOT)
+        subprocess.run([*hubbus, "done", mid, "--note", said(note, 400)], capture_output=True, cwd=hubconf.ROOT)
 
+    try:
+        index = json.loads((CACHE / "index.json").read_text())
+    except (OSError, ValueError):
+        index = {"projects": {}}
     for mid, sender, pl in rows:
         p = json.loads(pl or "{}")
         if p.get("type") != "manifest.update":
@@ -1610,7 +1948,7 @@ def cmd_apply_updates() -> int:
         try:   # one letter is returned, whatever is wrong with it; it never stops the others
             cur = (yaml.safe_load(f.read_text()) or {}) if f.exists() else None
             sent = yaml.load(p.get("text") or "", Loader=LetterLoader)
-            new, errs = manifest_update(sent, sender, cur)
+            new, errs = manifest_update(sent, sender, cur, index)
         except yaml.YAMLError as e:
             new, errs = None, [_("cannot read the YAML: {error}", error=e)]
         except Exception as e:   # noqa: BLE001 (an entry the owner left unreadable, a structure too deep)
@@ -1626,6 +1964,7 @@ def cmd_apply_updates() -> int:
             reply(sender, mid, _("manifest.update changed nothing; the registry entry already says this"), _("no change"))
             print(_("{sender}: manifest.update {mid} changed nothing", sender=sender, mid=mid))
             continue
+        index["projects"][sender] = normalise(tiers.upgrade(new))   # the next letter of this run sees its labels
         f.write_text("# " + _("Project registry (see bin/registry.py). Last updated by manifest.update {mid}", mid=mid) + "\n"
                      + yaml.safe_dump(new, allow_unicode=True, sort_keys=False, width=200))
         r = subprocess.run([str(hubconf.ROOT / "bin" / "commit-hub-files.sh"), f"registry: {sender} manifest.update {mid}",

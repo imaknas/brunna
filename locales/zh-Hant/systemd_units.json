@@ -1,3 +1,8 @@
 {
- "brunna {label} (every {secs} s)": "brunna {label}(每 {secs} 秒)"
+ "brunna {label} (every {secs} s)": "brunna {label}(每 {secs} 秒)",
+ "a control character can't be in a unit: {text!r}": "unit 裡不能有控制字元:{text!r}",
+ "{unit} is still running: {error}": "{unit} 還在跑:{error}",
+ "systemctl {args} failed: {error}": "systemctl {args} 失敗:{error}",
+ "systemd doesn't say whether {unit} runs: {error}": "systemd 沒說 {unit} 有沒有在跑:{error}",
+ "systemd doesn't say what {unit} is": "systemd 沒說 {unit} 是什麼"
 }

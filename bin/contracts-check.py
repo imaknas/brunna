@@ -41,40 +41,50 @@ def ws(index: dict, name: str) -> pathlib.Path | None:
     return registry.dirs(doc)["workspace"] if doc else None
 
 
+def copy_errors(index: dict, name: str, cons: dict) -> list[str]:
+    errs = []
+    producer = cons.get("from") or hubconf.hub_project()
+    if producer in names.all("project"):
+        # the platform under either of its names: its entry is the one of type platform, whatever its stem
+        producer = hubconf.hub_project()
+        pdoc = next((d for d in index["projects"].values() if d.get("type") == "platform"),
+                    index["projects"].get(producer))
+    else:
+        pdoc = index["projects"].get(producer)
+    provs = [p for p in (pdoc or {}).get("provides") or [] if isinstance(p, dict) and p.get("contract") == cons["contract"]]
+    # while two versions coexist the same contract has two provides: look for the same version first, else take
+    # the first one (the version mismatch is reported below)
+    prov = next((p for p in provs if p.get("v") == cons.get("v")), provs[0] if provs else None)
+    if prov is None:
+        errs.append(_("{name} reads {contract}, but {producer}'s registry entry does not provide it", name=name,
+                      contract=cons['contract'], producer=producer))
+        return errs
+    if prov.get("v") != cons.get("v"):
+        errs.append(_("{name} reads {contract} v{v}, {producer} is now at v{current} "
+                      "(the producer keeps both versions until the consumer has switched)", name=name,
+                      contract=cons['contract'], v=cons.get('v'), producer=producer, current=prov.get('v')))
+    orig, copy = registry.dirs(pdoc)["workspace"] / prov["schema"], ws(index, name) / cons["copy"]
+    if not orig.exists() or not copy.exists():
+        errs.append(_("{contract}: the {which} is missing ({path})", contract=cons['contract'],
+                      which=_("original") if not orig.exists() else _("copy"),
+                      path=orig if not orig.exists() else copy))
+    elif not contracts.same(orig, copy):
+        errs.append(_("{name}'s copy of {contract} differs from {producer}'s original: {copy} vs {orig}",
+                      name=name, contract=cons['contract'], producer=producer, copy=copy, orig=orig))
+    return errs
+
+
 def cross_copies(index: dict) -> list[str]:
     errs = []
     # projects + enabled modules (contracts read by a module that's off aren't compared: e.g. no assistant, no need for
     # the assistant's format)
     for name, doc in [*index["projects"].items(), *(index.get("modules") or {}).items()]:
-        for cons in doc.get("consumes") or []:
-            producer = cons.get("from") or hubconf.hub_project()
-            if producer in names.all("project"):
-                # the platform under either of its names: its entry is the one of type platform, whatever its stem
-                producer = hubconf.hub_project()
-                pdoc = next((d for d in index["projects"].values() if d.get("type") == "platform"),
-                            index["projects"].get(producer))
-            else:
-                pdoc = index["projects"].get(producer)
-            provs = [p for p in (pdoc or {}).get("provides") or [] if p["contract"] == cons["contract"]]
-            # while two versions coexist the same contract has two provides: look for the same version first, else take
-            # the first one (the version mismatch is reported below)
-            prov = next((p for p in provs if p.get("v") == cons.get("v")), provs[0] if provs else None)
-            if prov is None:
-                errs.append(_("{name} reads {contract}, but {producer}'s registry entry does not provide it", name=name,
-                              contract=cons['contract'], producer=producer))
-                continue
-            if prov.get("v") != cons.get("v"):
-                errs.append(_("{name} reads {contract} v{v}, {producer} is now at v{current} "
-                              "(the producer keeps both versions until the consumer has switched)", name=name,
-                              contract=cons['contract'], v=cons.get('v'), producer=producer, current=prov.get('v')))
-            orig, copy = registry.dirs(pdoc)["workspace"] / prov["schema"], ws(index, name) / cons["copy"]
-            if not orig.exists() or not copy.exists():
-                errs.append(_("{contract}: the {which} is missing ({path})", contract=cons['contract'],
-                              which=_("original") if not orig.exists() else _("copy"),
-                              path=orig if not orig.exists() else copy))
-            elif not contracts.same(orig, copy):
-                errs.append(_("{name}'s copy of {contract} differs from {producer}'s original: {copy} vs {orig}",
-                              name=name, contract=cons['contract'], producer=producer, copy=copy, orig=orig))
+        for cons in doc["consumes"] if isinstance(doc.get("consumes"), list) else []:
+            try:   # what one entry declares never stops the others (an entry accepted before its shape was checked)
+                errs += copy_errors(index, name, cons)
+            except Exception as e:   # noqa: BLE001
+                errs.append(_("{name}: a contract it reads can't be checked: {error}", name=name,
+                              error=f"{type(e).__name__}: {e}"[:200]))
     return errs
 
 
@@ -91,9 +101,13 @@ def live(index: dict) -> list[str]:
     # rewrites them)
     schemas = {v: json.loads((C / f"project.v{v}.schema.json").read_text()) for v in (1, 2)}
     for f in sorted([*hubconf.registry_dir().glob("*.yaml"), hubconf.platform_registry()]):
-        doc = yaml.safe_load(f.read_text())
-        schema = schemas.get(doc.get("v") if isinstance(doc, dict) else None, schemas[2])
-        errs += [f"projects/{f.name}:{e}" for e in minischema.errors(schema, doc)]
+        try:
+            doc = yaml.safe_load(f.read_text())
+            v = doc.get("v") if isinstance(doc, dict) else None
+            schema = schemas.get(v if isinstance(v, int) else None, schemas[2])
+            errs += [f"projects/{f.name}:{e}" for e in minischema.errors(schema, doc)]
+        except Exception as e:   # noqa: BLE001 (one file never stops the others)
+            errs.append(f"projects/{f.name}:{type(e).__name__}: {str(e)[:200]}")
     bus = hubconf.bus_db()
     if bus.exists():
         c = sqlite3.connect(bus, timeout=30)

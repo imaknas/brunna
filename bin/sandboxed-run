@@ -8,6 +8,14 @@ repo's git dir: policy.py env).
 Design: docs/design/capabilities.md.
 
   sandboxed-run --project <name> --cwd <dir> [--port <n>] -- <argv…>
+  sandboxed-run --project <name> --service <name> --cwd <dir> [--port <n>] --digest <sha256> -- <words…>
+
+--service: a service the project declares. Its environment and log are read here, from the registry, and applied inside
+the sandbox only (isolation.Entry): no process outside it has the project's variables, and no path of its entry is
+looked at or opened outside. The platform's own variables win over the entry's: the tool caches, the git wrapper first
+on PATH and its socket, every name with the platform's prefix. PATH is the entry's, or the platform's default (the
+service manager's own for a command given by path), then the platform's CLI folder. --digest is what the unit stands
+for (isolation.service_digest): an entry that has changed since is refused until render-services has written its unit.
 
 The rules are computed fresh on every run (registry changes take effect on the next start). Fails closed: where the
 platform can't sandbox (no adapter for this OS, the adapter can't work here, the project unknown) it prints why and
@@ -18,6 +26,7 @@ from __future__ import annotations
 import argparse
 import os
 import pathlib
+import shlex
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -32,9 +41,35 @@ def refuse(why: str) -> int:
     return EX_CONFIG
 
 
+def service_entry(svc: dict, cwd: str, platform_env: dict, git_dirs: list[str]):
+    """The service's own environment and log as isolation.Entry: the entry's variables without the platform's, PATH as
+    the header says. A relative value that names something under cwd becomes its absolute path: told inside."""
+    import isolation
+    import names
+    folder = pathlib.Path(cwd)
+    own = {k: v for k, v in names.env_strip(isolation.usable_env(svc)).items() if k not in platform_env}
+    cli = str(hubconf.cli_folder())
+
+    def path(value: str) -> str:
+        return os.pathsep.join([*git_dirs, *filter(None, [value]), cli])
+    if "PATH" in own:
+        search = hubconf.expand_env(own["PATH"])
+    elif "/" in shlex.split(svc["run"])[0]:
+        search = os.environ.get("PATH", "")
+    else:
+        search = hubconf.LAUNCHD_PATH
+    env = {k: hubconf.expand_env(v) for k, v in own.items()}
+    env["PATH"] = path(search)
+    there = tuple((k, str(folder / v), path(str(folder / v)) if k == "PATH" else str(folder / v))
+                  for k, v in own.items() if not v.startswith("/"))
+    return isolation.Entry(env, there, svc.get("log"))
+
+
 def main(argv: list[str]) -> int:
-    ap = argparse.ArgumentParser(prog="sandboxed-run")
+    ap = argparse.ArgumentParser(prog="sandboxed-run", allow_abbrev=False)
     ap.add_argument("--project", required=True)
+    ap.add_argument("--service")
+    ap.add_argument("--digest")
     ap.add_argument("--cwd", required=True)
     ap.add_argument("--port", type=int)
     ap.add_argument("cmd", nargs=argparse.REMAINDER)
@@ -54,16 +89,39 @@ def main(argv: list[str]) -> int:
     pol = policy.policy(a.project, doc, {"projects": projects})
     if (why := isolation.unmet(pol)):   # the git fence where this OS's sandbox can't make it (docs/design/git-broker.md)
         return refuse(why)
+    svc = None
+    if a.service is not None:
+        found = [isolation.normal_service(s) for s in doc.get("services") or [] if isinstance(s, dict)]
+        found = [s for s in found if s.get("name") == a.service]
+        if len(found) != 1:
+            return refuse(f"{a.project} has {len(found) or 'no'} service {a.service} in the registry")
+        svc = found[0]
+        if (why := isolation.service_problem(svc)):
+            return refuse(f"service {a.service}: {why}")
+        try:
+            words = shlex.split(svc["run"])
+        except ValueError as e:
+            return refuse(f"service {a.service}: run can't be parsed ({e})")
+        if a.digest != isolation.service_digest(svc) or cmd != words:
+            return refuse(f"service {a.service} has changed in the registry since this unit was written; "
+                          "render-services writes the new one")
     d = registry.dirs(doc)
     dirs = [p for p in (d["runtime"], d["workspace"]) if p]
-    os.chdir(a.cwd)
+    try:
+        os.chdir(a.cwd)
+    except OSError as e:
+        return refuse(f"{a.cwd}: {e.strerror}")
+    entry = None
+    if svc:
+        gb = pol.get("git_broker")
+        entry = service_entry(svc, a.cwd, pol.get("env") or {}, [gb["wrapper_dir"]] if gb else [])
     os.environ.update(pol.get("env") or {})   # its own tool caches (the shared ones aren't writable in the sandbox)
     if (gb := pol.get("git_broker")):   # git through the platform: its `git` first, reaching the service socket
         import names
         os.environ["PATH"] = os.pathsep.join([gb["wrapper_dir"], *filter(None, [os.environ.get("PATH")])])
         names.env_set(os.environ, "GIT_SOCKET", gb["service"])
     try:
-        isolation.exec_service(pol, dirs, a.port, cmd)
+        isolation.exec_service(pol, dirs, a.port, cmd, entry)
     except OSError as e:
         return refuse(f"the sandbox could not be applied ({e.strerror or e})")
     return refuse("the adapter returned without running the command")

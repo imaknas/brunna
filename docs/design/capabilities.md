@@ -779,3 +779,72 @@ are checked before `ditto` writes anything (a name or link leaving it, an entry 
 whatever the live catalog says; the page's own name after its links must be a page; a request found in the runtime
 folder doesn't print. Left as they are: the runner resolves project paths outside a sandbox (as cap-run's `cwd` check
 does; an automount through `/net` not measured), and Mach and IOKit under `(allow default)`.
+
+## 11-25: service units
+
+A sandboxed project (`isolation.sandboxed`: `enforce.sandbox`, not on `service_sandbox_exempt`) changes its own
+`services:` and `jobs:` without the owner's approval, so nothing in them reaches a process, a file or a unit outside its
+sandbox. Tests: `tests/test_service_units.py`.
+
+- **The unit is a skeleton.** The platform's Python isolated (`-I -B`), `sandboxed-run --project P --service S --cwd C
+  [--port N] --digest D -- <words>`, the platform's PATH (none for a command given by path, as the platform's own
+  services), the platform's log, the label `local.P.S`, and the typed timing fields. The words are the entry's as written:
+  nothing of the project's is looked up outside. D (`isolation.service_digest`) stands for the entry's `run`, `env` and
+  `log`: a change of any changes the unit, and `sandboxed-run` refuses (78) an entry that has moved on from it. Jobs, the
+  nightly tests and every other wrapped command get `-I -B` too.
+- **`env` and `log` apply inside.** `sandboxed-run` reads the entry from the registry index, checks it again (an entry
+  accepted under older rules may be the last valid one) and hands it to the adapter. macOS: `sandbox-exec` starts
+  `/usr/bin/env K=V… /bin/sh`, whose fixed script opens the log, makes the values that name something under the
+  service's folder absolute and execs the command, everything an argument. Linux: the adapter does the same once the
+  rules are in force. The platform's variables win: its caches, every `BRUNNA_*`/`AGENT_HUB_*` name, the git wrapper
+  first on PATH and its socket. PATH is the entry's, or the platform's default, or for a command given by path the
+  service manager's, then the CLI folder. What fails before the log is open is in the platform's log.
+- **Whose a unit file is** (`render-services.ours`). A unit is a plain file directly in the unit folder, opened without
+  following a link; a label that isn't a name is no unit's. `.state/service-units.json` has the sha256 of each file as
+  written (the old's and the new's while one is being replaced, changed under a lock). A file is the platform's when it is
+  as recorded, is what would be written now, or is the platform's own text (its serialization, key set and order) that runs
+  `sandboxed-run`, its options in the exact shape the platform writes. Once, after a version without the record, also one
+  that version lists in that same text, which runs in a registered project's folder and carries a mark of the platform's:
+  the CLI folder on its PATH, the platform's log folder, or the label `local.<project>.<…>`. The command an entry has now is never part of
+  it. A file nothing can read counts only when listed under a sandboxed project's own label. Every other file is never
+  unloaded, written or deleted, at a run, at a removal or at uninstall: the owner is told, and `render-services.py --adopt
+  <label>` (the owner's yes at a terminal, a copy kept) lets a wanted service replace it; a label no service has can't be
+  adopted. A label the service manager has from another file is left to it, and a unit that calls itself something else is
+  unloaded under that name only when the manager says it came from this file.
+- **What an older version wrote is read as it was written**, not by a parser that may refuse it: `read_plist` and
+  `systemd_units.written` take any character a value may hold. New entries hold no control character, line separator,
+  noncharacter or surrogate.
+- **Nothing keeps an older unit.** Every unit in the folder is judged; one that is the platform's and isn't wanted as it is
+  is replaced, or unloaded and removed, a sandboxed project's whatever its entry says now. A `label:` a sandboxed project
+  declares is accepted and not used; its old unit goes, and that is told once. Where the skeleton can't be rendered (no
+  adapter here) there is no unit.
+- **Told, and nothing more.** A label that is no name (a path an older version rendered, a file so named in the unit
+  folder) and a link in the unit folder or its `.wants`/`.requires`/`.upholds` into a sandboxed project's folder: never
+  handed to systemctl or launchctl, never stopped, disabled or deleted. The owner is told once until it is gone, with the
+  path and a command to look at it; every run's problems and `left_behind()` name it (at most 20, the rest counted).
+- **Every answer of the manager is checked** (`--` before every name). One that can't be reached, says nothing or says
+  something else is a failure: the unit's file, its record and `loading` stay, and it is said. They go when launchd says it
+  hasn't the label, or systemd says it doesn't run. The same at uninstall. A notice is kept until it was sent.
+- **What is taken out says nothing of its own by then.** A file that is removed is made inert and systemd reads it again
+  before `disable`, so an `Also=` an older version let in is not obeyed; one that is replaced is the new unit by then.
+- **systemd goes on running** what a replaced file said: a sandboxed project's service that wasn't a skeleton ends with all
+  it started, a service that became an interval unit is stopped and not started at login, and a dropped timer is disabled
+  before its file goes.
+- **Order.** Every changed file is written whole beside, recorded, then put in place; then what is no longer wanted is
+  removed; then what changed is loaded. An old label goes only when the service's new one is in place; a sandboxed
+  project's unit that isn't its skeleton goes regardless, and that is said. A run that ends anywhere in between is taken up
+  by the next (`loading` in the record).
+- **Validation** (`registry.py`). A service has one normal form whether YAML or JSON gave it (`isolation.normal_service`:
+  numbers and true/false in `env` are text, `"300"` is a number, a folded command is one line), which validation, the index
+  and the digest read; what fits none is refused, control characters too. Names and labels are `[A-Za-z0-9_][A-Za-z0-9._-]*`
+  with no `..`, unique in the registry whatever their case; the platform's own labels, in either spelling, are nobody
+  else's. Of two entries that take one label, the newcomer isn't accepted; of two already there the one whose unit is
+  recorded or installed keeps it, else the first name. A sandboxed project's `manifest.update` adds no dotted service
+  name and no `before:` (or `after:` of an ordinary project's job) outside the project; its entry's own cross-project
+  `before:` is ignored and told. An unsandboxed project's works as it always has. A sandboxed project's commands are not looked up at a path it names: what doesn't resolve
+  fails inside.
+- **One never stops another.** An entry is plain data with text keys that can be written and read back (refused otherwise, a
+  letter too), and each is read, rendered, serialized and applied behind its own guard; a job accepted before that the
+  scheduler couldn't read isn't given to it.
+- **Left for later.** `contracts-check` and `check-secrets` read the paths a project declares as the user (their results
+  go to the owner only).

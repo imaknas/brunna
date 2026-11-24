@@ -69,11 +69,13 @@ class Render(Fixture):
         with mock.patch.object(isolation, "can_sandbox", lambda: None):
             plist, problem = render_services.render("proj", self.doc, self.doc["services"][0])
         self.assertIsNone(problem)
-        args = after_cli_last(plist["ProgramArguments"])
-        self.assertTrue(args[1].endswith("sandboxed-run"), args)
+        args = plist["ProgramArguments"]
+        self.assertEqual(args[1:3], ["-I", "-B"])
+        self.assertTrue(args[3].endswith("sandboxed-run"), args)
         i = args.index("--")
-        self.assertEqual(args[2:i], ["--project", "proj", "--cwd", str(self.ws), "--port", "18123"])
-        self.assertEqual(args[i + 1:], [str(self.ws / "bin" / "serve.sh")])
+        self.assertEqual(args[4:i], ["--project", "proj", "--service", "viewer", "--cwd", str(self.ws), "--port", "18123",
+                                     "--digest", isolation.service_digest(self.doc["services"][0])])
+        self.assertEqual(args[i + 1:], ["bin/serve.sh"])   # as written: nothing of the project's is looked up outside
 
     def test_unsandboxed_and_exempt_services_are_unchanged(self):
         for doc in ({**self.doc, "enforce": {}}, self.doc):

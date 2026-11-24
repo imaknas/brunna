@@ -356,6 +356,7 @@ def main(argv: list[str]) -> int:
     core = core_units()
     rs = _load("render-services")
     services = rs.uninstall(apply=False)
+    foreign_units = rs.left_behind()   # before anything is removed: the record of what is ours goes with the last
     per_project = {n: project_parts(n, d, apply=False) for n, d in projects.items()}
     tools, agent_env = mcp_tools()
     user = [label for label, _cmd in tools]
@@ -372,6 +373,8 @@ def main(argv: list[str]) -> int:
                                                                               "--apply)")))
     for label in [label for label, _undo in core] + services:
         print("  " + _("service {label}", label=label))
+    for unit in foreign_units:
+        print("  " + _("left, not brunna's to remove: {unit}", unit=unit))
     for name, (parts, stay) in per_project.items():
         for line in parts:
             print("  " + _("{project}: {part}", project=name, part=line))
@@ -432,7 +435,10 @@ def main(argv: list[str]) -> int:
         removed = [label for label, undo in core if undo]
         if services and reachable:
             try:
-                removed += rs.uninstall(apply=True)
+                gone = rs.uninstall(apply=True)
+                removed += gone
+                for label in sorted(set(services) - set(gone)):
+                    stays(_("{label} could not be stopped or removed", label=label))
             except OSError as e:
                 stays(_("{what}: {why}", what=_("the background services"), why=e))
         for label in removed:

@@ -113,6 +113,22 @@ class WholeEntry(Instance):
         self.assertEqual(self.entry_file.read_text(), before)
 
 
+class NothingStopsTheOthers(Instance):
+    """A letter that can't be written, or whose reply can't be sent as it is, is returned like any other."""
+
+    def test_each_is_returned_and_the_next_one_applied(self):
+        before = self.entry_file.read_text()
+        for what, text in (("a date key", "services: [{name: w, run: sh, expose: {2020-01-01: 1}}]"), ("a surrogate", 'purpose: "\\uD800"'),
+                           ("a number", f"provides: [0x{'f' * 5000}]"), ("a date key elsewhere", "publishes: [{2020-01-01: 1}]"),
+                           ("a NUL in a key", '"a\\0b": 1'), ("a surrogate in a key", '"\\uD800": 1'),
+                           ("a long reply", "".join(f"k{i}: 1\n" for i in range(9000)))):
+            with self.subTest(what):
+                self.assertIn("not applied", self.update(text))
+                self.assertEqual(self.entry_file.read_text(), before)
+        self.assertIn("applied", self.update("commits: conventional\n"))
+        self.assertEqual(self.entry()["commits"], "conventional")
+
+
 class PartOfTheEntry(Instance):
     """A letter without v is the part that changes: merged into the entry, the rest kept."""
 

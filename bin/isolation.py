@@ -10,8 +10,10 @@ never unsandboxed). What each adapter enforces and can't: docs/design/capabiliti
 The backend interface (what a module needs to be an adapter here):
   can_sandbox() → None | why not              whether it can work on this machine
   guarantees() → set[str]                     which of GUARANTEES it enforces on this machine
-  exec_service(pol, dirs, port, argv)         replace this process with argv under the policy (raises OSError when it
-                                              can't; nothing was run)
+  exec_service(pol, dirs, port, argv, entry)  replace this process with argv under the policy (raises OSError when it
+                                              can't; nothing was run). entry (Entry, a service's own environment and
+                                              log; None = none) is applied inside: no process outside the sandbox has
+                                              it, and no path of it is looked at or opened outside
   confined_now(marked) → bool                 optional: whether this process runs inside this adapter's kind of
                                               sandbox (marked: started through sandboxed-run); missing or unsure = no
 An adapter that doesn't guarantee every one of REQUIRED, or names a guarantee not in GUARANTEES, is refused like one
@@ -19,7 +21,13 @@ that can't work here. tests/test_sandboxed_services.py runs the same probe throu
 checks each guarantee it declares (Conformance): a new backend is added by passing that, not by review alone.
 
   sandboxed(doc) → bool                       whether this project's services and command jobs go through it
-  wrap(project, cwd, argv, port) → argv       the command through bin/sandboxed-run
+  wrap(project, cwd, argv, port) → argv       the command through bin/sandboxed-run, the platform's Python isolated (-I)
+  wrap_service(project, cwd, svc, words) → argv
+                                              a declared service through it: its entry is read by sandboxed-run
+  wrapped_project(argv) → name | None         the project a command runs this hub's sandboxed-run for
+  normal_service(svc), service_digest(svc), service_problem(svc)
+                                              one service entry in its normal form, what of it the unit stands for, and
+                                              why it can't be used (render-services and sandboxed-run read it alike)
   as_project(project, cwd, argv) → argv       argv as the project: wrapped when it is sandboxed, as is otherwise (the
                                               platform's git in project repos goes only through this: project_git.py,
                                               with a timeout and an output cap)
@@ -31,14 +39,20 @@ checks each guarantee it declares (Conformance): a new backend is added by passi
   adapter() → (name, module) | None           this machine's adapter
   can_sandbox() → None | why not              the adapter's own reason, or a missing/unknown guarantee
   guarantees() → list[str]                    what this machine's adapter guarantees (empty when it can't sandbox)
-  exec_service(pol, dirs, port, argv)         through the adapter, after can_sandbox() and unmet(pol) (a policy asking
+  exec_service(pol, dirs, port, argv, entry)  through the adapter, after can_sandbox() and unmet(pol) (a policy asking
                                               for a guarantee the adapter lacks, NEEDS: refused, never run without it)
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import pathlib
+import re
+import shlex
 import sys
+import unicodedata
+from typing import NamedTuple
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
@@ -109,14 +123,142 @@ def guarantees() -> list[str]:
 def sandboxed(doc: dict) -> bool:
     """The project's own services and command jobs run isolated (bin/sandboxed-run). hub.json's
     service_sandbox_exempt holds projects back temporarily (owner's decision, until they're fixed)."""
-    return (doc.get("enforce") or {}).get("sandbox") is True \
-        and doc.get("name") not in hubconf.get("service_sandbox_exempt", [])
+    enf = doc.get("enforce")
+    return isinstance(enf, dict) and enf.get("sandbox") is True \
+        and doc.get("name") not in (hubconf.get("service_sandbox_exempt", []) or [])
+
+
+def _run(options: list[str], argv: list[str]) -> list[str]:
+    """The platform's Python, isolated (-I: no PYTHON* variable, user site or current folder; -B: no bytecode written),
+    running sandboxed-run. Whatever the caller's environment, only the platform's code runs before the sandbox."""
+    py, script = hubconf.launch(hubconf.ROOT / "bin" / "sandboxed-run")
+    return [py, "-I", "-B", script, *options, "--", *argv]
 
 
 def wrap(project: str, cwd, argv: list[str], port: int | None = None) -> list[str]:
     """argv → the same command through bin/sandboxed-run."""
-    return [*hubconf.launch(hubconf.ROOT / "bin" / "sandboxed-run"), "--project", project, "--cwd", str(cwd),
-            *(["--port", str(int(port))] if port else []), "--", *argv]
+    return _run(["--project", project, "--cwd", str(cwd), *(["--port", str(int(port))] if port else [])], argv)
+
+
+def wrap_service(project: str, cwd, svc: dict, words: list[str]) -> list[str]:
+    """A sandboxed project's declared service: words as the entry has them, and what sandboxed-run needs to read the
+    rest of the entry itself (its name, and the digest of what the unit stands for). Raises ValueError where the
+    entry can't be used."""
+    svc = normal_service(svc)
+    if (why := service_problem(svc)):
+        raise ValueError(why)
+    port = (svc.get("expose") or {}).get("local_port")
+    return _run(["--project", project, "--service", svc["name"], "--cwd", str(cwd),
+                 *(["--port", str(int(port))] if port else []), "--digest", service_digest(svc)], words)
+
+
+def wrapped_project(argv: list[str]) -> str | None:
+    """The project argv runs this hub's sandboxed-run for, when argv is one this platform writes: its options exactly as
+    wrap_service has them now, or as a service's unit had them before (no -I -B, no service). None for anything else,
+    whatever it runs."""
+    isolated = argv[1:3] == ["-I", "-B"]
+    rest = argv[3:] if isolated else argv[1:]
+    ours = {str(root / "bin" / "sandboxed-run") for root in (hubconf.ROOT, hubconf.MAIN)}
+    if not rest or rest[0] not in ours or not os.path.isabs(argv[0]) or not os.path.basename(argv[0]).startswith("python"):
+        return None
+    rest, got = rest[1:], {}
+    for flag in ("--project", "--service", "--cwd", "--port", "--digest"):
+        if rest[:1] == [flag] and len(rest) > 1:
+            got[flag], rest = rest[1], rest[2:]
+    shape = {"--project", "--cwd", *(("--service", "--digest") if isolated else ())}
+    return got["--project"] if rest[:1] == ["--"] and len(rest) > 1 and set(got) - {"--port"} == shape else None
+
+
+# ---------- a declared service's entry ----------
+
+ENV_KEY = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def has_control(text: str, allow: str = "") -> bool:
+    """A character no unit, command or message carries: a control character (C0, DEL, C1), a line or paragraph separator,
+    a noncharacter, a surrogate; what reads a unit (XML, systemd, this platform) doesn't agree on them."""
+    return any(c not in allow and (unicodedata.category(c) in ("Cc", "Zl", "Zp", "Cs")
+                                   or 0xFDD0 <= ord(c) <= 0xFDEF or ord(c) & 0xFFFE == 0xFFFE) for c in text)
+
+
+def _whole(v):
+    """v as the whole number int() makes of it; v itself when it makes none (validation then says so)."""
+    try:
+        return int(v) if isinstance(v, (int, float, str)) else v
+    except (ValueError, OverflowError):
+        return v
+
+
+def normal_service(svc: dict) -> dict:
+    """A service entry in one form, whether YAML or the JSON index gave it: an environment value that is a number, a
+    date, true/false or null is the text it has always been written as, a number written as text is the number, a field
+    left empty isn't there. What fits no form is left as it is, for validation to refuse."""
+    out = {k: v for k, v in svc.items()
+           if v or k not in ("label", "interval_s", "throttle_s", "env", "cwd", "log", "expose")}
+    run = out.get("run")
+    if isinstance(run, str) and any(c in run for c in "\n\t"):   # a folded or block YAML scalar: the words are the same
+        try:
+            words = shlex.split(run)
+            run = shlex.join(words) if not any(has_control(w) for w in words) else run
+        except ValueError:
+            pass
+        out["run"] = run
+    env = out.get("env")
+    if isinstance(env, dict):
+        out["env"] = {(k if isinstance(k, str) else str(k)): v if isinstance(v, (str, dict, list)) else str(v)
+                      for k, v in env.items()}
+    if isinstance(out.get("name"), int) and not isinstance(out["name"], bool):
+        out["name"] = str(out["name"])
+    for k in ("interval_s", "throttle_s"):
+        if k in out:
+            out[k] = _whole(out[k])
+    if isinstance(out.get("expose"), dict):
+        out["expose"] = {k: _whole(v) if k in ("local_port", "tailnet_https") else v
+                         for k, v in out["expose"].items() if v is not None and v != ""}
+    if "keepalive" in out and not isinstance(out["keepalive"], (dict, list)):
+        out["keepalive"] = bool(out["keepalive"])
+    return out
+
+
+def service_digest(svc: dict) -> str:
+    """What a sandboxed service's unit stands for without naming it: its command, environment and log. The unit carries
+    it, so a change of any of them changes the unit; sandboxed-run compares it with the entry it reads."""
+    svc = normal_service(svc)
+    text = json.dumps([svc.get("run"), svc.get("env") or {}, svc.get("log")], sort_keys=True, default=str)
+    return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
+
+
+def service_problem(svc: dict, allow: str = "\t\n") -> str | None:
+    """Why this (normal) entry's command, environment or log can't be used. Checked where they are used, not only by the
+    registry (which allows no tab or newline either): an entry accepted under older rules stays the last valid one."""
+    run, env, log = svc.get("run"), svc.get("env") or {}, svc.get("log")
+    if not isinstance(run, str) or not run.strip() or has_control(run, allow):
+        return "run is not a command without control characters"
+    if not isinstance(env, dict):
+        return "env is not a mapping"
+    for k, v in env.items():
+        if not ENV_KEY.fullmatch(k):
+            if allow:   # accepted before: left out (usable_env), not a reason to take the service down
+                continue
+            return f"env: {k!r} is not a variable name (letters, digits and _)"
+        if not isinstance(v, str) or has_control(v, allow):
+            return f"env: {k} is not text without control characters"
+    if log is not None and (not isinstance(log, str) or has_control(log, allow)):
+        return "log is not a path without control characters"
+    return None
+
+
+def usable_env(svc: dict) -> dict[str, str]:
+    """A (normal) service's environment without the names no shell variable can have."""
+    return {k: v for k, v in (svc.get("env") or {}).items() if ENV_KEY.fullmatch(k)}
+
+
+class Entry(NamedTuple):
+    """What of a service's entry is applied inside its sandbox. if_exists: (variable, path, value): value instead when
+    path names something, seen from inside."""
+    env: dict[str, str]
+    if_exists: tuple[tuple[str, str, str], ...] = ()
+    log: str | None = None
 
 
 def as_project(project: str | None, cwd, argv: list[str]) -> list[str]:
@@ -232,7 +374,7 @@ def unmet(pol: dict) -> str | None:
     return None
 
 
-def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str]):
+def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str], entry: Entry | None = None):
     if (why := can_sandbox() or unmet(pol)):
         raise OSError(0, why)
-    adapter()[1].exec_service(pol, dirs, port, argv)
+    adapter()[1].exec_service(pol, dirs, port, argv, entry)

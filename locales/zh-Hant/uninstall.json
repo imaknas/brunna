@@ -1,4 +1,5 @@
 {
+ "left, not brunna's to remove: {unit}": "留著，不是 brunna 的：{unit}",
  "Kept: your settings, notes and keys ({paths}) and each project's .agent-memory. --purge removes them too.": "會留著：你的設定、筆記和金鑰({paths}),以及每個專案的 .agent-memory。--purge 會連這些一起刪。",
  "Last step, yours: remove the hub folder with: rm -rf {hub}": "最後一步由你來：用這行刪掉 hub 資料夾:rm -rf {hub}",
  "Left in {tool}: remove it later with {command}": "{tool} 裡的還留著：之後用 {command} 移除",

@@ -299,10 +299,17 @@ class Golden(unittest.TestCase):
                 {"name": "once", "run": "/bin/echo o", "interval_s": 600},
                 {"name": "broken", "run": "no-such-cmd-golden --flag"},
                 {"name": "failboot", "run": "/bin/echo f"},
-                {"name": "ghost", "run": "/bin/echo g"}]}}}
+                {"name": "ghost", "run": "/bin/echo g"},
+                {"name": "theirs", "run": "/bin/echo t"}]}}}
         (m.AGENTS / "local.demo.once.plist").write_bytes(plistlib.dumps(
-            {"Label": "local.demo.once", "ProgramArguments": ["/bin/echo", "old"], "RunAtLoad": True}))
-        m.RENDERED.write_text(json.dumps(["local.demo.old", "local.demo.web"]))
+            {"Label": "local.demo.once", "ProgramArguments": ["/bin/echo", "old"], "RunAtLoad": True,
+             "WorkingDirectory": str(ws), "StandardOutPath": str(ws / "o"), "StandardErrorPath": str(ws / "o")}))
+        # one the platform recorded, one another program put there, and one only an older version's list names (taken once)
+        for label in ("local.demo.old", "local.demo.theirs"):
+            (m.AGENTS / f"{label}.plist").write_bytes(plistlib.dumps({"Label": label, "ProgramArguments": ["/bin/echo", "x"]}))
+        m.units_record().write_text(json.dumps({"local.demo.old": {"project": "demo", "files": {"local.demo.old.plist": [m.sha(
+            (m.AGENTS / "local.demo.old.plist").read_bytes())]}}}))
+        m.RENDERED.write_text(json.dumps(["local.demo.old", "local.demo.once"]))
         loaded, alerts = set(), []
 
         def launchctl(*args):
@@ -345,13 +352,15 @@ class Golden(unittest.TestCase):
             import systemd_units
             units = self.tmp / "units"
             units.mkdir()
-            (units / "local.demo.once.timer").write_text("[Timer]\nOnUnitActiveSec=60\n")
-            m.RENDERED.write_text("[]")
+            (units / "local.demo.once.timer").write_text(systemd_units.files({
+                "Label": "local.demo.once", "ProgramArguments": ["x"], "StartInterval": 60})["local.demo.once.timer"])
+            m.RENDERED.write_text('["local.demo.once"]')
+            m.units_record().unlink()
 
             def systemctl(*args):
                 if args[:1] == ("enable",) and "web" in args[-1]:
                     return CP(args, 1, "", "Failed to enable unit: Unit file local.demo.web.service is masked.\n")
-                return CP(args, 0, "inactive\n" if args[0] == "is-active" else "", "")
+                return CP(args, 0, {"is-active": "inactive\n", "show": "LoadState=not-found\nFragmentPath=\n"}.get(args[0], ""), "")
             sd_index = copy.deepcopy(index)
             sd_index["projects"]["demo"]["services"] = [s for s in sd_index["projects"]["demo"]["services"]
                                                         if s["name"] in ("web", "once")]

@@ -255,6 +255,8 @@ def all_jobs(log_errors: bool = False) -> tuple[list[dict], dict]:
             said.append(_("The project registry can't be read ({error!r}); this tick runs it as it was last read",
                           error=e))
         reg_jobs, skipped, renames = registry_jobs(index, taken, info["broken"])
+        for full, why in (index.get("unreadable") or {}).items():   # a job of theirs the registry couldn't read
+            info["broken"].setdefault(full, told(full.split("/", 1)[0], _("its entry can't be read ({error})", error=why)))
         try:   # what their runs would refuse (they still run, and fail saying so): listed for the status page
             by_rules = registry.rules_refused(index)
         except Exception as e:

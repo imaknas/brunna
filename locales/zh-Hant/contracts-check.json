@@ -12,5 +12,6 @@
  "{n} {n:problem|problems}: ": "{n} 項:",
  "; ": ";",
  "contracts: all consistent": "契約:全部一致",
- "{week}: no contract for reflect-week v{v}": "{week}:沒有 reflect-week v{v} 的契約"
+ "{week}: no contract for reflect-week v{v}": "{week}:沒有 reflect-week v{v} 的契約",
+ "{name}: a contract it reads can't be checked: {error}": "{name}:它讀的一份契約沒辦法檢查:{error}"
 }

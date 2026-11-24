@@ -41,7 +41,7 @@ so it doesn't declare git-dirs-fenced, and a project whose git goes through the 
 refused here (isolation.unmet), never run unfenced (docs/design/git-broker.md, "Linux").
 
   can_sandbox() → None | why not       guarantees() → set[str]       plan(pol, dirs, port) → {read, write, bind}
-  exec_service(pol, dirs, port, argv)
+  exec_service(pol, dirs, port, argv, entry)
 """
 from __future__ import annotations
 
@@ -290,9 +290,10 @@ def restrict(p: dict) -> None:
         os.close(fd)
 
 
-def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str]):
-    """Restrict this process and exec argv (looked up on PATH). Raises OSError when the sandbox can't be applied
-    (nothing was run); a command that can't start under it exits 127."""
+def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str], entry=None):
+    """Restrict this process and exec argv (looked up on PATH), with a service's entry (isolation.Entry) applied once
+    the rules are in force. Raises OSError when the sandbox can't be applied (nothing was run); a log that can't be
+    opened under it exits 73, a command that can't start 127."""
     # a rule needs the path to exist (an fd is opened): create a missing writable folder whose parent exists, not
     # whole trees that belong to another OS (~/Library/Caches/… on Linux)
     for w in pol["write"]:
@@ -303,10 +304,22 @@ def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str]):
             except OSError:
                 pass
     restrict(plan(pol, dirs, port))
+    env = dict(os.environ)
+    if entry:
+        env.update(entry.env)
+        env.update({k: value for k, path, value in entry.if_exists if os.path.exists(path)})
+        if entry.log:
+            try:
+                fd = os.open(entry.log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o666)
+            except OSError as e:
+                print(f"sandboxed-run: log {entry.log}: {e.strerror}", file=sys.stderr, flush=True)
+                os._exit(73)
+            os.dup2(fd, 1)
+            os.dup2(fd, 2)
     try:
-        os.execvp(argv[0], argv)
+        os.execvpe(argv[0], argv, env)
     except OSError as e:   # sandboxed fine, the command itself can't start: say that, like a shell would
-        print(f"sandboxed-run: {argv[0]}: {e.strerror}", file=sys.stderr)
+        print(f"sandboxed-run: {argv[0]}: {e.strerror}", file=sys.stderr, flush=True)
         os._exit(127)
 
 

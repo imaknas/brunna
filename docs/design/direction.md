@@ -199,6 +199,10 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      refusing every route (deny by default, none of the mount services allowed), but that is unmeasured, and no
      `conformance_claude` canary exists yet. Codex's sandbox is not checked. Also open: whether launchd can be asked
      to run a job outside the sandbox through its API rather than the blocked binary.
+   - **Service units** (`capabilities.md` 11-25): a sandboxed project's unit carries nothing of its entry but its command's
+     words, the entry's environment and log apply inside, and only units the platform wrote are changed. Built on both
+     OSes; lacks: `brunna uninstall` naming what it leaves (`render-services.left_behind()`), the scheduler's own per-job
+     guard, and the declared paths `contracts-check` and `check-secrets` read as the user.
    - **Open (11-14, `git-broker.md` r3 B-1, "as built" and "after its cold review"):** any process of a sandboxed
      project can race an unsandboxed checkout (the owner's, or an agent tool's worktree mode) into writing its files
      anywhere the owner can write. Built: Claude Code's worktrees there are made by the platform as the project (its

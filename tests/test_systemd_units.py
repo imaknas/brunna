@@ -20,6 +20,34 @@ import systemd_units  # noqa: E402
 
 
 class Files(unittest.TestCase):
+    def test_a_control_character_is_refused_in_every_line(self):
+        """one newline would begin another line of the unit"""
+        base = {"Label": "local.x.y", "ProgramArguments": ["/bin/echo"], "WorkingDirectory": "/w",
+                "EnvironmentVariables": {"A": "b"}, "StandardOutPath": "/o", "StandardErrorPath": "/e"}
+        self.assertTrue(systemd_units.files(base))
+        for key, bad in (("Label", "a\nb"), ("Label", "a\u2028b"), ("Label", "a\x85b"), ("ProgramArguments", ["/bin/echo", "a\nExecStartPre=/bin/x"]),
+                         ("WorkingDirectory", "/w\nx"), ("EnvironmentVariables", {"A": "b\nc"}),
+                         ("EnvironmentVariables", {"A\nB": "c"}), ("StandardOutPath", "/o\nx"),
+                         ("StandardErrorPath", "/e\x7f")):
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                systemd_units.files({**base, key: bad})
+
+    def test_the_commands_read_back_are_the_ones_written(self):
+        argv = ["/bin/sh", "-c", 'PATH="${PATH:+$PATH:}"/x; exec "$@"', "sh", "50%", "%%", "$$", "back\\slash", "a b", "", "é"]
+        unit = systemd_units.files({"Label": "l", "ProgramArguments": argv})["l.service"]
+        self.assertEqual(systemd_units.written(unit, "l"), (argv, None))
+        plist = {"Label": "l", "ProgramArguments": argv, "WorkingDirectory": "/w", "EnvironmentVariables": {"A": "b"}}
+        unit = systemd_units.files(plist)["l.service"]
+        self.assertEqual(systemd_units.written(unit, "l"), (argv, "/w"))
+        # as an older version wrote what a value held: a separator some readers split at, a newline
+        for bad in ("\u2028", "\x85", "\x0c", "\r", "\n"):
+            self.assertEqual(systemd_units.written(unit.replace("a b", f"a{bad}b"), "l"),
+                             ([a.replace("a b", f"a{bad}b") for a in argv], "/w"), repr(bad))
+            self.assertEqual(systemd_units.written(unit.replace('"A=b"', f'"A=b{bad}ExecStart=/x"'), "l"), (argv, "/w"))
+        for other in (unit.replace("agent-hub l", "agent-hub m"), unit.replace("[Service]", "[Service]\nX=1"), "", "[Unit]",
+                      unit.replace('ExecStart="', "ExecStart=-"), "\n" + unit):
+            self.assertIsNone(systemd_units.written(other, "l"))
+
     def test_keepalive_service(self):
         f = systemd_units.files({"Label": "local.demo.web", "ProgramArguments": ["/usr/bin/node", "server.js", "--x=a b"],
                                  "WorkingDirectory": "/w", "EnvironmentVariables": {"PATH": "/usr/bin", "MSG": '50% "ok" $HOME'},
@@ -69,6 +97,35 @@ class Files(unittest.TestCase):
             self.assertIn("/hub/bin/", f[f"{label}.service"])
 
 
+class Answers(unittest.TestCase):
+    """What systemd says is taken only when it is an answer."""
+
+    def says(self, **answers):
+        def systemctl(*args):
+            rc, out = answers.get(args[0].replace("-", "_"), (0, ""))
+            return subprocess.CompletedProcess(args, rc, out, "Failed to connect to bus" if rc else "")
+        return mock.patch.object(systemd_units, "systemctl", systemctl)
+
+    def test_which_file_a_unit_comes_from(self):
+        for rc, out, want in ((0, "LoadState=loaded\nFragmentPath=/x\n", "/x"), (0, "LoadState=not-found\nFragmentPath=\n", None)):
+            with self.says(show=(rc, out)):
+                self.assertEqual(systemd_units.fragment("l"), want)
+        for rc, out in ((0, ""), (0, "FragmentPath=\n"), (0, "LoadState=\nFragmentPath=\n"), (0, "LoadState=loaded\n"), (1, "LoadState=x\nFragmentPath=\n")):
+            with self.subTest(out=out, rc=rc), self.says(show=(rc, out)), self.assertRaises(RuntimeError):
+                systemd_units.fragment("l")
+
+    def test_stopped_means_it_did_it_and_says_so(self):
+        for kill in (False, True):
+            with self.says(is_active=(3, "inactive\n")):
+                systemd_units.stop("x.service", kill)
+        for answers in ({"disable": (1, ""), "is_active": (3, "inactive\n")}, {"is_active": (0, "active\n")}, {"is_active": (1, "")},
+                        {"is_active": (0, "?\n")}, {"kill": (1, ""), "is_active": (3, "inactive\n")}):
+            with self.subTest(**answers), self.says(**answers), self.assertRaises(RuntimeError):
+                systemd_units.stop("x.service", True)
+        with self.says(daemon_reload=(1, "")), self.assertRaises(RuntimeError):
+            systemd_units.daemon_reload()
+
+
 def load_render_services():
     spec = importlib.util.spec_from_file_location("rs_systemd", ROOT / "bin" / "render-services.py")
     m = importlib.util.module_from_spec(spec)
@@ -87,7 +144,8 @@ class RenderServicesOnSystemd(unittest.TestCase):
         cli.start()
         self.addCleanup(cli.stop)
         systemd_units.UNIT_DIR = self.tmp / "units"
-        systemd_units.systemctl = lambda *a: self.calls.append(a) or subprocess.CompletedProcess(a, 0, "active\n", "")
+        systemd_units.systemctl = lambda *a: self.calls.append(a) or subprocess.CompletedProcess(
+            a, 0, {"is-active": "inactive\n", "show": "LoadState=not-found\nFragmentPath=\n"}.get(a[0], ""), "")
         self.m.hubconf.service_manager = lambda: "systemd"
         self.m.RENDERED = self.tmp / "rendered.json"
         (self.tmp / "ws").mkdir()
@@ -101,12 +159,12 @@ class RenderServicesOnSystemd(unittest.TestCase):
     def test_plan_apply_then_nothing_left(self):
         first = self.m.plan(self.index)
         self.assertEqual([c.op for c in first], ["add"])
-        self.assertFalse(self.calls, "plan does not touch systemd")
+        self.assertFalse([c for c in self.calls if c[0] != "show"], "plan only asks systemd")
         self.m.apply(self.index)
         unit = (self.tmp / "units" / "local.demo.web.service").read_text()
         self.assertIn('ExecStart="/bin/sh" "-c" ', unit)   # through render-services.cli_last (a service started by path)
         self.assertIn('"sh" "/bin/echo" "hi"\n', unit)
-        self.assertIn(("enable", "--now", "local.demo.web.service"), self.calls)
+        self.assertIn(("enable", "--now", "--", "local.demo.web.service"), self.calls)
         self.assertEqual(self.m.plan(self.index), [], "plan after apply is empty")
         self.index["projects"]["demo"]["services"] = []
         self.assertEqual([c.op for c in self.m.plan(self.index)], ["remove"])

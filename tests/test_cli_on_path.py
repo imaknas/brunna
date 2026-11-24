@@ -113,14 +113,16 @@ class Services(Base):
                                      check=True)
                 self.assertEqual(out.stdout, f"{path}:{self.cli}")
 
-    def test_a_sandboxed_one_gets_it_around_its_sandbox(self):
+    def test_a_sandboxed_one_started_by_path_keeps_the_managers_path_in_its_unit(self):
+        """sandboxed-run adds the folder (tests/test_service_units.py): the unit has no shell before it"""
         import isolation
         doc = {**self.doc, "enforce": {"sandbox": True}}
         with mock.patch.object(isolation, "can_sandbox", lambda: None):
-            args = self.render({"name": "f", "run": "bin/serve.sh"}, doc)["ProgramArguments"]
-        self.assertEqual(args[:2], ["/bin/sh", "-c"])
-        self.assertEqual(args[3], "sh")
-        self.assertTrue(any(a.endswith("sandboxed-run") for a in args[4:6]), args)
+            plist = self.render({"name": "f", "run": "bin/serve.sh"}, doc)
+            by_name = self.render({"name": "g", "run": "sh -c true"}, doc)
+        self.assertTrue(plist["ProgramArguments"][3].endswith("sandboxed-run"), plist)
+        self.assertNotIn("EnvironmentVariables", plist)
+        self.assertEqual(by_name["EnvironmentVariables"], {"PATH": f"{rs.DEFAULT_PATH}:{self.cli}"})
 
     def test_brunna_by_name_resolves_to_the_wrapper(self):
         hubconf.write_cli_wrapper()
