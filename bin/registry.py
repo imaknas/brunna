@@ -1396,26 +1396,19 @@ def every_minutes(s: str) -> int:
 NIGHTLY_AT = "04:00"
 
 
-def follows_releases() -> bool:
-    """The platform's checkout sits at a release tag (detached HEAD, as install.sh and `brunna upgrade` leave it), not on
-    main or a branch where it is developed."""
-    r = subprocess.run(["git", "-C", str(hubconf.ROOT), "symbolic-ref", "-q", "HEAD"], capture_output=True, text=True)
-    return r.returncode != 0 and (hubconf.ROOT / ".git").exists()
-
-
 def nightly_test_jobs(index: dict, taken: set[str]) -> list[dict]:
     """The nightly run of every project that declares a tier for it (docs/design/test-waiting.md B4): synthesized here,
     not written into the project's file, so a manifest.update cannot remove the run that overrides flaky passes.
     `agenthub test --when nightly --force --rev HEAD` in the project's main checkout, as one of its command jobs
     (sandboxed like the others when the project is)."""
     out = []
-    # the platform tests itself only where it is developed: an install at a release tag would run the whole suite of a
-    # release that was tested before it was tagged, every night
-    released = follows_releases()
+    # the platform tests itself only where its owner said so (tests.platform_nightly): its suite takes every core for
+    # minutes and, on macOS, makes and attaches disk images. Never inferred: a checkout on main is not a developer's (11-25)
+    own = hubconf.get("tests.platform_nightly") is True
     for name, doc in sorted(index["projects"].items()):
         if not any("nightly" in (t.get("when") or []) for t in doc.get("tests") or []):
             continue
-        if name == hubconf.hub_project() and released:
+        if name == hubconf.hub_project() and not own:
             continue
         full = f"{name}/nightly-tests"
         cwd = dirs(doc)["workspace"]

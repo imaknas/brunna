@@ -739,6 +739,8 @@ replaces; each step only adds to the ones before it.
       kept, the result checked to read exactly as the upgrade; a command, not part of `config apply`, which would
       change the config it records as applied); the nightly run as a job `registry.scheduler_jobs` synthesizes for
       every project with a nightly tier (`<project>/nightly-tests`, 04:00); deploy is muninn's change, requested.
+      (The platform's own only with `tests.platform_nightly: true` in brunna.json, since 11-25: it was inferred from the
+      checkout not being at a release tag, so a user's checkout on main ran the whole suite every night.)
       Not yet: re-running a failing nightly test once.)
       (Ahead of it, 11-01: the hook installer for `gate: strict`, `commit_gate` and `commits: conventional`
       repos, which skips agent-hub until this merge. Left out of it, 11-01: `session.report` v2 and lease-handover v2,

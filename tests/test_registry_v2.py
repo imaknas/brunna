@@ -185,18 +185,20 @@ class NightlyJobs(unittest.TestCase):
         finally:
             shutil.rmtree(ws, ignore_errors=True)
 
-    def test_the_platform_tests_itself_only_where_it_is_developed(self):
-        """An install at a release tag runs no nightly suite of the platform (the release was tested; found on a clean
-        macOS, 11-03); a checkout on main or a branch, where the platform is developed, does."""
+    def test_the_platform_tests_itself_only_where_its_owner_said_so(self):
+        """No install runs the platform's own suite at night unless its settings say so (found on a clean macOS, 11-03, at a
+        release tag; 11-25: a user's checkout on main ran it too, disk images included)."""
         ws = pathlib.Path(tempfile.mkdtemp())
         try:
             hub = hubconf.hub_project()
             idx = {"projects": {name: {"v": 2, "name": name, "paths": {"workspace": str(ws)},
                                        "tests": [{"tier": "full", "run": "x", "when": ["nightly"]}]}
                                 for name in (hub, "a")}}
-            with mock.patch.object(registry, "follows_releases", return_value=True):
-                self.assertEqual([j["name"] for j in registry.nightly_test_jobs(idx, set())], ["a/nightly-tests"])
-            with mock.patch.object(registry, "follows_releases", return_value=False):
+            real = hubconf.get
+            for said in (None, False, "true", 1):   # only true itself: the schema refuses the others, this doesn't rely on it
+                with mock.patch.object(hubconf, "get", lambda k, d=None: said if k == "tests.platform_nightly" else real(k, d)):
+                    self.assertEqual([j["name"] for j in registry.nightly_test_jobs(idx, set())], ["a/nightly-tests"], said)
+            with mock.patch.object(hubconf, "get", lambda k, d=None: True if k == "tests.platform_nightly" else real(k, d)):
                 self.assertEqual(sorted(j["name"] for j in registry.nightly_test_jobs(idx, set())),
                                  sorted(["a/nightly-tests", f"{hub}/nightly-tests"]))
         finally:

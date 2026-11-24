@@ -27,7 +27,8 @@
 - **Tests and the merge gate.** Each project declares its test tiers in the registry. `brunna test` runs them on an
   exported copy of the code with fresh environments and reuses a recorded pass for the same tree; commits on a branch
   run the fast tiers, `brunna merge-branch` rebases, runs the merge tiers, optionally checks Conventional Commits
-  titles, and fast-forwards `main`. Every project's tests also run nightly.
+  titles, and fast-forwards `main`. Every project's tests also run nightly (brunna's own only
+  with `tests.platform_nightly: true` in `brunna.json`, for developing it).
 - **Event-triggered jobs.** A job can run when something happens on the bus (a letter, a merge, a failed job), with loop
   protection, a daily cap and a confined environment.
 - **Model calls for projects.** A project's own code asks for a model by tier (`brunna complete`); the platform picks

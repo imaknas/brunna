@@ -406,6 +406,10 @@
     "tests": {
       "type": "object",
       "properties": {
+        "platform_nightly": {
+          "type": "boolean",
+          "description": "run the platform's own test suite every night on this machine (for developing it); off unless true"
+        },
         "config_inputs": {
           "type": "array",
           "items": {
