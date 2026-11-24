@@ -287,7 +287,8 @@ class FollowCode(unittest.TestCase):
                 self.assertEqual(self.exited, [])
                 self.assertIsNone(p.poll(), "the lease mid-work keeps its process")
                 self.assertEqual(other.state, "running", "nothing is stopped while one is mid-work")
-                self.assertIn(busy.id[:8], self.drains[-1], "the record says what holds it")
+                self.assertEqual(self.drains[-1], self.m._("a lease in a turn or waiting for the owner's answer"),
+                                 "the record says what holds it")
                 busy.in_turn, busy.waiting = False, 0   # its turn ends
                 self.m.follow_code()
                 self.assertEqual(self.exited, [0])
@@ -309,8 +310,7 @@ class FollowCode(unittest.TestCase):
         with self.m.in_flight():
             self.assertFalse(self.m.follow_code())
             self.assertEqual(self.exited, [])
-            self.assertEqual(self.drains[-1], self.m._("{n} {n:request or handover|requests or handovers} in flight",
-                                                       n=1))
+            self.assertEqual(self.drains[-1], self.m._("requests or handovers in flight"))
         self.m.follow_code()
         self.assertEqual(self.exited, [0])
 
@@ -343,6 +343,48 @@ class FollowCode(unittest.TestCase):
         l = self.add("running", proc=self.proc(), waiting=1)
         self.m.stop_proc(l, "terminal")
         self.assertEqual(l.waiting, 0)
+
+    def test_starts_with_no_runtime_for_leases(self):
+        # runtime none or one without the long-running port: the runner still serves (leases answer
+        # runtime_unsupported), it doesn't crash at start and restart every ten seconds
+        started = []
+
+        class Server:
+            def __init__(self, *a):
+                pass
+
+            def serve_forever(self):
+                started.append("serving")
+
+        def unsupported(*a, **k):
+            raise self.m.runtime_ports.Unsupported("no long-running sessions")
+        with mock.patch.object(self.m.code_watch, "Watch", lambda *a, **k: mock.Mock()), \
+                mock.patch.object(self.m.code_watch, "preload", lambda names: None), \
+                mock.patch.object(self.m.runtime_ports, "load", unsupported), \
+                mock.patch.object(self.m, "registrar", lambda: None), mock.patch.object(self.m, "token", lambda: "t"), \
+                mock.patch.object(self.m.threading, "Thread", lambda **k: mock.Mock()), \
+                mock.patch.object(self.m.http.server, "ThreadingHTTPServer", Server):
+            self.m.main()
+        self.assertEqual(started, ["serving"])
+        self.assertIn("no long-running sessions", (self.m.DIR / "runner.log").read_text())
+
+    def test_a_turns_last_line_is_handled_whole_under_the_lock(self):
+        # the runner leaving for new code takes the lock: it must not find the turn over before its events are sent
+        seen = []
+        lease = self.add("running", in_turn=True)
+        rt = mock.Mock(parse_stream=lambda line: [types.SimpleNamespace(type="turn_end", data={"num_turns": 1})])
+        orig = lease.emit
+
+        def emit(t, **d):
+            seen.append((t, self.m._lock._is_owned()))
+            return orig(t, **d)
+        lease.emit = emit
+        proc = mock.Mock(stdout=["line\n"], wait=lambda: 0)
+        lease.proc = proc
+        lease.intent_stop = True
+        with mock.patch.object(self.m, "rt", lambda: rt):
+            self.m.reader(lease, proc)
+        self.assertEqual(seen, [("turn_end", True)])
 
     def test_an_error_in_the_check_does_not_end_the_thread(self):
         self.m.WATCH = mock.Mock(stale=mock.Mock(side_effect=[OSError("mid-checkout"), True]))

@@ -451,8 +451,10 @@ def reader(lease: Lease, proc: subprocess.Popen) -> None:
     for line in proc.stdout:
         events = runtime.parse_stream(line)
         done = [e for e in events if e.type == "turn_end" and "num_turns" in e.data]
-        if done:
-            with _lock:
+        # a line that ends a turn is handled whole under the lock: the turn is over only once its events are sent and a
+        # detach it asks for is counted, or a runner leaving for new code could exit in between (service-code.md D3)
+        with _lock if done else contextlib.nullcontext():
+            if done:
                 lease.in_turn = False
                 # a process that fails at start also emits a result with is_error and num_turns=0 before exiting: that
                 # isn't a success and mustn't reset crashes to zero (or it never reaches 2, is never reclaimed
@@ -462,12 +464,12 @@ def reader(lease: Lease, proc: subprocess.Popen) -> None:
                 if done[0].data.get("num_turns"):
                     lease.started_once = True  # the transcript has been written; it can be resumed from now on
                 lease.touch()
-        for e in events:
-            if e.type == "quota":
-                STATUS["quota"] = {**e.data, "at": iso()}
-            lease.emit(e.type, **e.data)
-            if e.data.get("_detach"):
-                spawn_detach(lease, e.data["_detach"])
+            for e in events:
+                if e.type == "quota":
+                    STATUS["quota"] = {**e.data, "at": iso()}
+                lease.emit(e.type, **e.data)
+                if e.data.get("_detach"):
+                    spawn_detach(lease, e.data["_detach"])
     proc.wait()
     with _lock:
         if lease.proc is not proc or lease.intent_stop:
@@ -836,11 +838,12 @@ def mid_work(l: "Lease") -> bool:
 
 
 def held_by() -> str | None:
-    """What keeps a runner on old code from exiting now; None when nothing does. Called under _lock."""
+    """What keeps a runner on old code from exiting now, in words that stay the same while it lasts (render-services'
+    alert carries them, and a changed wording is a new alert); None when nothing does. Called under _lock."""
     if ACTIVE:
-        return _("{n} {n:request or handover|requests or handovers} in flight", n=ACTIVE)
-    if (busy := [l.id[:8] for l in LEASES.values() if mid_work(l)]):
-        return _("lease {ids} in a turn or waiting for the owner's answer", ids=_(", ").join(busy))
+        return _("requests or handovers in flight")
+    if any(mid_work(l) for l in LEASES.values()):
+        return _("a lease in a turn or waiting for the owner's answer")
     if any(c.poll() is None for c in CHILDREN):
         return _("a handover is still being sent")
     return None
@@ -1393,7 +1396,10 @@ def main() -> None:
     global WATCH
     WATCH = code_watch.Watch("lease-runner", on_error=lambda e: log(_("follow_code: {e!r}", e=e)))
     code_watch.preload(PRELOAD)
-    rt()
+    try:
+        rt()
+    except runtime_ports.Unsupported as e:   # leases answer runtime_unsupported, as before; the rest still serves
+        log(_("no runtime for leases: {e}", e=e))
     try:
         registrar()
     except (Exception, SystemExit) as e:   # earlier_tasks says so again at each handover

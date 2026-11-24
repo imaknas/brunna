@@ -154,12 +154,17 @@ def old_code(index: dict) -> list[str]:
                 continue
             first = new[label] = float(seen.get(label) or now)
             if now - first >= wait_limit_s():
-                problems.append(_("{label} ({project}): still runs the code of {old} {hours:g} hours after the checkout "
-                                  "moved to {new}; it exits by itself once nothing is in flight ({why})", label=label,
-                                  project=name, old=str(old)[:8], hours=round((now - first) / 3600, 1), new=rev[:8],
+                # the same words on every run while it lasts: a changed wording is a new alert (alert.once)
+                problems.append(_("{label} ({project}): still runs the code of {old} since {since}, the checkout is at "
+                                  "{new}; it exits by itself once nothing is in flight ({why})", label=label,
+                                  project=name, old=str(old)[:8], new=rev[:8],
+                                  since=time.strftime("%m-%d %H:%M", time.localtime(first)),
                                   why=rec.get("draining") or _("it says nothing holds it: its check may have stopped")))
     if new != seen:
-        hubconf.write_atomic(OLD_CODE, json.dumps(new))
+        try:
+            hubconf.write_atomic(OLD_CODE, json.dumps(new))
+        except OSError as e:
+            problems.append(_("{path} could not be written: {why}", path=OLD_CODE, why=e.strerror or e))
     return problems
 
 

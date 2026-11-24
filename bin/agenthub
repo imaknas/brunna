@@ -2337,7 +2337,7 @@ def cmd_land(argv: list[str]) -> int:
     re-rendered). Each leaves an unchanged thing alone. All run whatever the others said; the worst exit code is
     returned.
     First, what sandboxed code reads moves out of .state at once (hubconf.move_shared; docs/design/capabilities.md 11-08).
-    Last, the commit is marked landed (hubconf.mark_landed): only then do the long-running services move to it,
+    Last, when every step passed, the commit is marked landed (hubconf.mark_landed): only then do the long-running services move to it,
     cap-runner and lease-runner exiting by themselves once nothing is in flight and launchd or systemd starting them on
     the new code (code_watch; docs/design/service-code.md D1), so none starts before the steps above are done."""
     import upgrade
@@ -2352,6 +2352,8 @@ def cmd_land(argv: list[str]) -> int:
     steps += [[*hubconf.launch(BIN / "agenthub"), "init", "--scheduler-only"],
               [*hubconf.launch(BIN / "agenthub"), "config", "apply"]]
     rc = max([1 if left else 0, *(subprocess.run(s).returncode for s in steps)])
+    if rc:   # a land that failed isn't marked: the services follow after code_watch.LAND_GRACE_S
+        return rc
     try:
         hubconf.mark_landed()
     except OSError as e:   # the services then move after code_watch.LAND_GRACE_S instead

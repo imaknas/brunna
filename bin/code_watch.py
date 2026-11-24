@@ -81,7 +81,9 @@ class Watch:
                 stamp = hubconf.code_stamp()
                 return stamp > self.stamp and time.time() - stamp >= SETTLE_S
             now = hubconf.code_rev()
-            if now is None or now == self.rev:
+            if now is None:   # unreadable for a moment (mid-checkout): no answer, the grace keeps counting
+                return False
+            if now == self.rev:
                 self.moved = None
                 return False
             if not self.moved or self.moved[0] != now:

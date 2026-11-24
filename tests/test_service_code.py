@@ -186,9 +186,36 @@ class Watching(unittest.TestCase):
         self.assertFalse(w.stale())
         self.now = "b" * 40           # merge-branch fast-forwarded; land is still running its steps
         self.assertFalse(w.stale())
-        hubconf.mark_landed()         # land is done
+        self.land("b" * 40)           # land, a process started on b, is done
         self.assertTrue(w.stale())
         self.assertEqual(hubconf.landed_rev(), "b" * 40)
+
+    def land(self, rev):
+        with mock.patch.object(hubconf, "LOADED_REV", rev), mock.patch.object(hubconf, "worktree_lookup", lambda: False):
+            hubconf.mark_landed()
+
+    def test_land_marks_its_own_commit_not_a_later_one(self):
+        w = code_watch.Watch("svc")
+        self.now = "c" * 40           # the checkout moved again while a land started on b ran
+        self.land("b" * 40)
+        self.assertFalse(w.stale(), "c has had no land of its own")
+
+    def test_a_worktree_marks_nothing(self):
+        with mock.patch.object(hubconf, "LOADED_REV", "b" * 40), mock.patch.object(hubconf, "worktree_lookup", lambda: True):
+            hubconf.mark_landed()
+        self.assertIsNone(hubconf.landed_rev())
+
+    def test_a_moment_unreadable_keeps_the_grace_counting(self):
+        with self.at(1000.0):
+            w = code_watch.Watch("svc")
+            self.now = "b" * 40
+            w.stale()
+        self.now = None
+        with self.at(1100.0):
+            self.assertFalse(w.stale())
+        self.now = "b" * 40
+        with self.at(1000.0 + code_watch.LAND_GRACE_S):
+            self.assertTrue(w.stale())
 
     def test_with_no_land_it_moves_after_the_grace(self):
         with self.at(1000.0):
@@ -202,7 +229,7 @@ class Watching(unittest.TestCase):
 
     def test_its_own_start_not_a_later_read(self):
         self.now = "b" * 40           # a merge between the process's start (LOADED_REV a) and the watch
-        hubconf.mark_landed()
+        self.land("b" * 40)
         self.assertTrue(code_watch.Watch("svc").stale())
 
     def test_an_unreadable_checkout_mid_change_is_not_stale(self):
@@ -254,14 +281,16 @@ class CapRunnerDrains(unittest.TestCase):
                 if len(ticks) == 3:
                     self.running = []
 
-        events = []
+        events, held = [], []
+        watch = mock.Mock(stale=lambda: True, draining=held.append)
         with mock.patch.object(m, "Runner", Runner), mock.patch.object(m, "log", lambda **k: events.append(k)), \
-                mock.patch.object(m.code_watch, "Watch", lambda *a, **k: mock.Mock(stale=lambda: True)), \
+                mock.patch.object(m.code_watch, "Watch", lambda *a, **k: watch), \
                 mock.patch.object(m.code_watch, "preload", lambda names: None), \
                 mock.patch.object(m.time, "sleep", lambda s: None), mock.patch.object(sys, "argv", ["cap-runner.py"]):
             self.assertEqual(m.main(), 0)
         self.assertEqual(len(ticks), 3, "it kept running its jobs (and taking requests) until none was left")
         self.assertEqual(events[-1]["event"], "code_changed_restart")
+        self.assertEqual(held, [m._("jobs running or queued")] * 2, "its record says what holds it while it drains")
 
 
 def platform_services() -> list[tuple[str, dict]]:
@@ -357,6 +386,8 @@ class OldCodeIsReported(unittest.TestCase):
             self.assertEqual(self.rs.old_code(self.index), [])
         with self.at(1000.0 + self.rs.wait_limit_s()):
             got = self.rs.old_code(self.index)
+        with self.at(1000.0 + self.rs.wait_limit_s() + 900):
+            self.assertEqual(self.rs.old_code(self.index), got, "the same words on the next run: not a new alert")
         self.assertEqual(len(got), 1, got)
         self.assertTrue(got[0].startswith("local.brunna.lease-runner"), got)
         self.assertIn("aaaaaaaa", got[0])

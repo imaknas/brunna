@@ -55,8 +55,9 @@ class CmdLand(unittest.TestCase):
                                                                                         lambda: None), \
                 mock.patch.object(self.mod.hubconf, "mark_landed", lambda: calls.append(["mark_landed"])):
             rc = self.mod.main(["land", *argv])
-        self.assertEqual(calls[-1], ["mark_landed"], "the commit is marked landed after every step")
-        return rc, calls[:-1]
+        marked = calls[-1] == ["mark_landed"]
+        self.assertEqual(marked, not any(codes), "the commit is marked landed after every step, only when all passed")
+        return rc, calls[:-1] if marked else calls
 
     def test_order_and_arguments(self):
         rc, calls = self.land([0, 0, 0, 0], ["--rebuild"])

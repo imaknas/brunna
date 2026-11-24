@@ -843,9 +843,11 @@ def main() -> int:
         # the checkout moved on (docs/design/service-code.md D3): exit once nothing runs or waits, and the service
         # manager starts the new code. It keeps taking requests meanwhile: one left waiting 10 minutes is refused as too
         # old, and an agent call may run an hour
-        if not r.running and not r.queue and watch.stale():
-            log(event="code_changed_restart")
-            return 0
+        if watch.stale():
+            if not r.running and not r.queue:
+                log(event="code_changed_restart")
+                return 0
+            watch.draining(_("jobs running or queued"))
         time.sleep(1)
 
 

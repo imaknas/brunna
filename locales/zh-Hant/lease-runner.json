@@ -50,8 +50,9 @@
  "this conversation was written by version {version}, and the platform's copy {current} failed resuming one ({reason}): not resumed": "這段對話是版本 {version} 寫的,而平台的版本 {current} 接續這種對話失敗({reason}):不接續",
  "follow_code: {e!r}": "follow_code:{e!r}",
  "the platform's code has moved on and nothing is in flight: exiting so the service manager starts the new code": "平台的程式已經換新,手上沒有事:結束,讓服務管理員用新的程式重啟",
- "{n} {n:request or handover|requests or handovers} in flight": "{n} 個請求或交接正在進行",
- "lease {ids} in a turn or waiting for the owner's answer": "租約 {ids} 正在回答或等主人回覆",
  "a handover is still being sent": "交接還在送出",
- "registrar.py could not be loaded: {e!r}": "registrar.py 載入不了:{e!r}"
+ "registrar.py could not be loaded: {e!r}": "registrar.py 載入不了:{e!r}",
+ "requests or handovers in flight": "有請求或交接正在進行",
+ "a lease in a turn or waiting for the owner's answer": "有租約正在回答或等主人回覆",
+ "no runtime for leases: {e}": "租約沒有可用的 runtime:{e}"
 }

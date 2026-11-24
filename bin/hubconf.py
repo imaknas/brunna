@@ -1086,10 +1086,12 @@ def landed_file() -> pathlib.Path:
 
 
 def mark_landed() -> None:
-    """`brunna land` is done with the checkout's commit (after merge-branch's fast-forward, and as upgrade's land step,
-    after setup-python and the config steps): the long-running services move to it now (code_watch, D1)."""
-    if (rev := code_rev()):
-        write_atomic(landed_file(), rev + "\n")
+    """`brunna land` is done with the commit it runs (its process started after merge-branch's fast-forward, or as
+    upgrade's land step after setup-python and the config steps): the long-running services move to it now (code_watch,
+    D1). The process's own commit, not a later read, so a checkout moved during the land isn't marked by it; never from a
+    linked worktree, whose commit the live services don't run."""
+    if LOADED_REV and not worktree_lookup():
+        write_atomic(landed_file(), LOADED_REV + "\n")
 
 
 def landed_rev() -> str | None:

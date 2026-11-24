@@ -31,5 +31,6 @@
  "This project has not declared the capability 'pdf' (its registry entry's enforce.capabilities: {caps})": "這個專案沒有宣告能力 'pdf'(它登錄的 enforce.capabilities:{caps})",
  "html {rel} is not inside the project folder": "html {rel} 不在專案資料夾裡",
  "html {rel} is not a file": "html {rel} 不是檔案",
- "a page prints only from the project's workspace folder": "頁面只能從專案的工作資料夾印"
+ "a page prints only from the project's workspace folder": "頁面只能從專案的工作資料夾印",
+ "jobs running or queued": "還有工作在跑或排隊"
 }

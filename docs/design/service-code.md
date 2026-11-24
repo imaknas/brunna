@@ -57,8 +57,10 @@ registry entry), on macOS and Linux alike.
 **The services move when the commit is landed, not when HEAD moves.** What follows the move must be done before new code
 starts: `brunna land` moves what sandboxed code reads out of `.state`, rebuilds the index and applies the config; upgrade
 runs `setup-python` (new packages) and `config migrate` first. So `land` ends by writing the commit to
-`<state>/code-landed` (`hubconf.mark_landed`), and a service follows a commit only once it is marked there (merge-branch
-runs land after its fast-forward; upgrade's step list ends with land). A checkout moved some other way (a manual `git
+`<state>/code-landed` (`hubconf.mark_landed`) when every step passed, and a service follows a commit only once it is
+marked there (merge-branch runs land after its fast-forward; upgrade runs land after setup-python and the config steps).
+The mark is the land process's own commit (`LOADED_REV`), so a checkout moved again during a land isn't marked by it, and
+a linked worktree never marks. A checkout moved some other way (a manual `git
 pull`, a land that failed) is followed after `LAND_GRACE_S` (10 minutes) with no land. HEAD itself stays the test for D2:
 old code must not write even before the land is done.
 
@@ -136,8 +138,10 @@ the old handover code with the old modules, not a mix. lease-runner also loads i
 configured runtime is) and `registrar.py`, which it used to load from its file at every handover, once at start. A test
 reads each service's source and fails when a function-level import of a platform module is missing from its list.
 
-What this doesn't cover: imports made lazily inside those modules, and files read at call time (templates, locales,
-modules' YAML). The drain keeps that window to the work in flight.
+What this doesn't cover: imports made lazily inside those modules, files read at call time (templates, locales,
+modules' YAML), and the platform's programs a service starts as subprocesses (`llm.py`, `hubbus`), which are new code
+from the moment the checkout moves (each is a process of its own, consistent in itself). The drain keeps that window to
+the work in flight.
 
 ### D5. The platform checks that every service follows
 
@@ -151,12 +155,21 @@ modules' YAML). The drain keeps that window to the work in flight.
   reused after a reboot would pass) and whose commit isn't the checkout's is "on old code since" the first run that saw
   it. Past `wait_limit_s()` (two hours beyond the longest agent call, as for a unit change that waits) it is a problem,
   alerted like the others and shown red on the status page, naming what the record says holds it (a lease waiting hours
-  for the owner's answer reads as that, not as a broken service). A missing record is not a problem by itself: a
+  for the owner's answer reads as that, not as a broken service). The words stay the same on every run while it lasts
+  (when it was first seen, never a count of hours, and what holds it by kind, never lease ids): `alert.once` takes a
+  changed wording for a new alert. A missing record is not a problem by itself: a
   service started before this change writes none until its own restart. A module turned off has no services in the
   index, so its old record is never read.
 - render-services does not restart a service for its code. Only the service knows what is in flight at the moment it
   decides (a message can start a turn between an outside check and an outside kill); the outside's part is to say it
   when that doesn't happen.
+
+## Landing this change
+
+The runners that are running when this merges still have the old mechanism: they move to the new code by it (bin/'s
+times, the 60-second settle), and in that minute they can still write the index once more without the guard. A
+`registry` they import for the first time in that minute finds no `LOADED_REV` in their old `hubconf` and treats it as
+unknown (no guard), rather than failing.
 
 ## Out of scope
 

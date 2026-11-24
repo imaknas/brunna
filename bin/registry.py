@@ -1291,7 +1291,7 @@ def superseded() -> bool:
     process started before a merge (a long-running service, a long job, a command caught mid-merge) never overwrites what
     the new code wrote. None (not a git checkout): nothing to compare."""
     global _said_superseded
-    LOADED_REV = hubconf.LOADED_REV
+    LOADED_REV = getattr(hubconf, "LOADED_REV", None)   # an old hubconf in memory (a service started before it) has none
     if LOADED_REV is None:
         return False
     try:
