@@ -70,8 +70,8 @@ class Terminal:
                 return default
             if a.isdigit() and 1 <= int(a) <= len(values):
                 return values[int(a) - 1]
-            if a.lower() in values:
-                return a.lower()
+            if (named := next((v for v in values if v.lower() == a.lower()), None)):
+                return named
             print(_("{answer}: not one of the choices. Type a number from 1 to {n}, or one of: {values}", answer=a,
                     n=len(values), values=", ".join(values)))
 

@@ -169,6 +169,13 @@ class Answers(unittest.TestCase):
         self.assertEqual(self.ask("Anthropic")[0], "anthropic")
         self.assertEqual(self.ask("")[0], "none")
 
+    def test_every_value_the_question_lists_can_be_typed(self):
+        values = [("en", "English"), ("zh-Hant", "Traditional Chinese")]   # the first question: a value with capitals
+        for typed, want in (("zh-Hant", "zh-Hant"), ("ZH-HANT", "zh-Hant"), ("en", "en")):
+            with mock.patch.object(init_dialogue.Terminal, "can_ask", property(lambda self: True)), \
+                    mock.patch("builtins.input", side_effect=[typed, ""]), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(init_dialogue.Terminal().menu("language", "Language", values, "en"), want)
+
     def test_the_model_question_lists_every_choice_and_asks_again(self):
         ah = load("agenthub_llm_again", "agenthub")
         answers = iter(("gpt", "none"))

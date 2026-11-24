@@ -145,6 +145,28 @@ class Onboard(unittest.TestCase):
         self.assertEqual(r.stderr, "")
         self.assertIn("[11/11]", log.read_text())
 
+    def test_log_leaves_the_setups_warnings_on_the_screen(self):
+        stub = self.hub / "bin" / "sync-local-setup.sh"
+        stub.write_text(stub.read_text() + '''[ "${1:-}" = . ] && cat <<'SAID'
+sync-local-setup: hooks aligned
+sync-local-setup: ⚠️ CLAUDE.local.md is tracked by this repo
+sync-local-setup: .agent-memory/ added to .git/info/exclude
+⚠️ Files committed in this repo contain this machine's paths:
+  - notes.md
+Please handle it in this project
+SAID
+exit 0
+''')
+        log = self.tmp / "steps.log"
+        r = self.onboard("--no-remote", "--log", log, self.ws / "warned")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(r.stdout.splitlines(), [
+            "sync-local-setup: ⚠️ CLAUDE.local.md is tracked by this repo",
+            "⚠️ Files committed in this repo contain this machine's paths:", "  - notes.md",
+            "Please handle it in this project", "Done: warned is connected to brunna."])
+        self.assertIn("hooks aligned", log.read_text())
+        self.assertIn("tracked by this repo", log.read_text())
+
     def test_log_leaves_an_error_on_the_screen(self):
         r = self.onboard("--no-remote", "--log", self.tmp / "l", self.ws / "twice")
         r = self.onboard("--no-remote", "--log", self.tmp / "l", self.ws / "twice")

@@ -269,7 +269,12 @@ if [ "$RESUME" != true ]; then
   # --- 5-6. Local-only setup: the hooks (.claude/settings.local.json) and the agent-hub block in CLAUDE.local.md:
   # neither goes into the repo (they contain the hub's path and names, which a public repo would leak).
   # Handed to sync-local-setup.sh, the same logic as recover and every SessionStart.
-  "$AGENT_HUB/bin/sync-local-setup.sh" .
+  setup_said="$("$AGENT_HUB/bin/sync-local-setup.sh" .)"
+  [ -z "$setup_said" ] || printf '%s\n' "$setup_said"
+  # its warnings (a tracked rules file, this machine's paths in committed files) reach the person under --log too: a ⚠️
+  # line of its own, or the block a ⚠️ opens
+  [ -z "$LOG" ] || LC_ALL=C awk '/⚠️/ { block = !/^sync-local-setup:/; print; next } /^sync-local-setup:/ { block = 0 } block' \
+    <<<"$setup_said" >&3
   # say only what this runtime really has (with no coding agent there is neither; sync-local-setup said why)
   rt_has() { "$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hub-runtime" has "$1" >/dev/null 2>&1; }
   if rt_has instructions && rt_has lifecycle; then
