@@ -6,8 +6,10 @@ it was asked; no agent or session is started, and no live file is touched.
 """
 import datetime
 import json
+import os
 import pathlib
 import sys
+import time
 import unittest
 from unittest import mock
 
@@ -1384,7 +1386,12 @@ class ThroughTheService(tbs.WorktreeFixture):
             if start:
                 break
         (self.sessions / f"{self.SID}.live").write_text(json.dumps({"runtime": "claude", "pid": self.proc.pid, "start": start, "cwd": str(self.ws[project]), "project": project}))
-        (self.sessions / f"{self.SID}.waiter").write_text("1-a")
+        waiter = self.sessions / f"{self.SID}.waiter"
+        waiter.write_text("1-a")
+        # no process here keeps the heartbeat going, and it counts for WAITER_FRESH_S (10 s) only: written once, a slow machine
+        # made the session gone before dispatch looked (11-16, a 700 s run). Dated ahead, it lasts as long as the test
+        ahead = time.time() + 3600
+        os.utime(waiter, (ahead, ahead))
 
     def checked_copy(self):
         """The platform's checked copy, in the child's store (<its STATE>/runtimes, this process's hubconf.STATE too):

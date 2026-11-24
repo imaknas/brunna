@@ -150,7 +150,7 @@ class WorktreeFixture(Fixture):
         super().setUp()
         cfg = json.loads((self.tmp / "config" / "hub.json").read_text())
         (self.tmp / "config" / "hub.json").write_text(json.dumps({**cfg, "runtime": {"default": "claude"}}))
-        self.proc = subprocess.Popen(["sleep", "60"])
+        self.proc = subprocess.Popen(["sleep", "600"])   # the session's process: outlives the test on a slow machine too
         self.addCleanup(self.proc.wait)
         self.addCleanup(self.proc.kill)
         self.letter_to("open", "a bus to be on")
