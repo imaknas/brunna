@@ -848,3 +848,108 @@ sandbox. Tests: `tests/test_service_units.py`.
   scheduler couldn't read isn't given to it.
 - **Left for later.** `contracts-check` and `check-secrets` read the paths a project declares as the user (their results
   go to the owner only).
+
+## 11-25: A project's own settings files
+
+A sandboxed project's sessions run under the settings file the platform renders in the project's folder (for Claude Code,
+its local one). The tool merges it with the one the project commits and, in a plain subfolder, with that folder's; a repo of
+its own inside the project's folder has its own files instead. This section is what the platform makes of those, and what it
+doesn't claim.
+
+### What is and isn't claimed
+
+- **Not claimed: containing hostile committed files.** A committed settings file can name hooks, helpers and tool servers,
+  which the tool runs as the user, before and beside anything in the local file. Nothing the platform writes into the local
+  file is a gate for those. Look at a project's committed settings before you open its sessions, and again when they change.
+- **Not claimed: that nothing a session does changes a later one's sandbox.** Committed settings, and a `.git` made in a
+  subfolder by anything that ran in the workspace (the project's own sessions included), decide what a *later* session opened
+  there loads. The platform renders the real nested repos it finds, every 15 minutes, and tells the owner of new ones; until
+  then, and always in a folder with any other kind of `.git`, a session opened there has no sandbox settings. No user-level hook closes that window.
+- **Claimed:** where the local file's value wins, the platform's is there (below); every other committed entry of the listed
+  kinds is told to the owner, once per content, as soon as a render sees it; no widening entry of a local file is carried into
+  a rendered one; the platform's project hooks don't take what they run from the session's environment; a live session
+  keeps its settings when its local file is replaced by something the platform didn't write.
+
+### Neutralised (`runtime_claude.session_settings`, `session_fixed`, `neutral_env`)
+
+- `disableAllHooks: false`, `allowUnsandboxedCommands: false`, `allowLocalBinding` explicit;
+- `allowAllUnixSockets` and `autoAllowBashIfSandboxed`: the owner's own value from their user settings, else `false` (the tool's
+  default, measured on 2.1.331; left out, a committed `true` beats even an owner's `false`);
+- `sandbox.credentials.files` deny for the places reading is denied: an `allowRead` inside a `denyRead` wins, and doesn't
+  over this. Not for the raw notes' glob; on Linux only for what exists;
+- `apiKeyHelper: ""`, unless the owner has a key helper of their own (then a committed one is told);
+- in `env`, the owner's own value from their user settings, else empty: `CLAUDE_CODE_SHELL_PREFIX`, `BASH_ENV`, `ENV`, on Linux
+  `LD_PRELOAD` and `LD_AUDIT`; and the variables that say where the platform is (`BRUNNA_*`, `AGENT_HUB_*`, `HUB_AS_PROJECT`).
+
+Not rendered, since people set them for their own work: `PYTHONPATH`, `disableSkillShellExecution`. The conformance checks
+`session-neutral` and `nested-settings` (the real tool, a stand-in model on this machine, no login) hold each with its control.
+
+### The platform's hooks
+
+A project hook's command is `exec /usr/bin/env -i <literals> <variables passed by name> <python> -I -B -c <start> <script> …`, with no
+other word of the shell's. The literals are written when the hook is: home, the platform's PATH, language, user, and what the
+writing process itself runs under (`NVM_DIR`, `XDG_CONFIG_HOME`, the platform's places). Passed by name (`HOOK_PASSES`, the one
+list, which `worktree-memory.sh` reads too): which session it is, `SSH_AUTH_SOCK`, `TMPDIR`, the proxies, and what marks a
+platform run, which can only silence a hook. Never `HUB_AS_PROJECT`, git's, Python's or the platform's places. A missing or
+broken script exits 0 (Python's own exit for a script that isn't there is 2, which the tool takes for a refusal); a missing
+Python fails visibly; the waiter's
+exit 2 passes; the worktree hand-over fails closed.
+
+So a token or an ssh command set only in the shell (`GH_TOKEN`, `GIT_SSH_COMMAND`) doesn't reach the hooks' git, nor does an
+`XDG_CONFIG_HOME` or `NVM_DIR` the scheduler doesn't have; the ssh agent and `gh`'s own login do.
+
+`worktree-memory.sh`, which the user's own settings call, starts itself again the same way on an install, and takes whether it
+is the run inside a project's sandbox from an argument only its own call gives. The line in the user's settings that starts
+it is the user's, unchanged: the shell that reads that line has the session's environment. Codex's hooks, in the user's own
+settings too, are unchanged.
+
+### Told (`runtime_claude.foreign_controls`)
+
+Of the workspace, its worktrees, the repos in it and plain subfolders with a settings file: what lets sessions write
+(`allowWrite`, `additionalDirectories`, edit rules), read, reach over the network, run outside the sandbox (and skills that run
+commands as they are read, where something is excluded), start in another permission mode, or otherwise changes their
+sandbox; hooks, helpers, plugins, tool servers; env outside a short list of plain ones. A path isn't said
+only where it can be read in one way (letters and digits of any script, `_ . / ~ @ + , = ( ) # -` and inner spaces, and `*` in a
+rule or a sandbox path; no `..`, brace, bracket, `?`, quote or escape) and resolves, up to its first `*`, inside what the session may
+write; of any other it is said that it can't be told: how the tool reads any other isn't guessed. `Edit` with no path gives nothing more;
+`Write` or `WebFetch` alone does (measured). Where nothing of the platform's holds (a `.git` that is no real repo's), nothing
+counts as held. An entry is told once for its content, whole (an unrelated edit, a longer line or another language tells nothing
+again; a changed one, or one that went away and came back, is told again), in one bounded notice a
+project, which shows the first 20; the render job says them as drift every time, as it did. Nothing is refused, and nothing is written into the project's own files. The
+agents, skills and plugins of a nested repo or a worktree aren't looked through, only the workspace's.
+
+### Never carried
+
+A rule or folder in a local settings file that gives more than the project's entry does, or isn't a plain one (above), isn't rendered, nor is
+`enableAllProjectMcpServers: true`: it is in the kept copy, told, and back when the sandbox goes off.
+
+### Repos in the project's folder
+
+A real repo (a `.git` folder with a `HEAD`) gets the same file, which its own `info/exclude` keeps out of its status. Any
+other folder with a `.git` (a file: a submodule, a linked worktree of such a repo; an empty or bare folder; a link) gets
+nothing, since the file would keep a session from removing what it otherwise can: **a session opened there has no settings of
+the platform's, no sandbox among them.** The owner is told of each once, and what its own files would do is told as of the others. Found by a walk run as the project that follows no link and enters no git dir; not
+`.agent-memory`, whose branch holds notes only (open no session there). Bounded (100,000 folders, 30 seconds, 200 repos with the
+settings): beyond, the owner is told of each reason once and how many repos aren't covered, and a repo that has the settings keeps
+them while it is a real one, whatever the walk lists.
+
+Nothing keeps such a repo, or the tool folder in it, where it is: a session can move it, and what is there after that is
+read by the next session opened there, until the next render. A file that was removed is rendered again, and a repo that is
+gone is forgotten, without a word; a path is told once, however often a repo comes and goes there (the last 2000 paths). A
+folder too big to be looked through is told once until it isn't. Where a repo stops being a real one, the platform's file in it
+goes, or is what it was before. What was already so stays so: the rule on the settings file's name at any depth
+keeps a session from removing the file itself (so `rm -rf` leaves it, where the tool's own denies on a repo's `.git/config`
+and hooks didn't already stop it there; measured on macOS). The platform's worktree mode is refused in such a repo. Turning the sandbox off
+removes the files, or puts back what was there.
+
+### A settings file that changes under a live session
+
+The tool takes its settings files in again when one changes. A `ConfigChange` hook (exit 2: not taken in) asks whether the
+local file is still what the platform wrote: the same sandbox, hooks, denies and env, and nothing beside them but what would be
+carried (`render-project-settings.config_changed`; what is about to be written counts). Else the session goes on with what it
+has. Only for the local file: it is no gate on what a project commits.
+
+### Not verified
+
+Linux with the real tool; interactive prompts; plugins; a real subscription login beside the empty key helper (with a made-up
+token the same is sent as without it); whether the tool's own "always allow" write fires `ConfigChange` (allowed either way).

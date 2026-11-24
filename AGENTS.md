@@ -439,13 +439,17 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   `bin/render-project-settings.py` (platform job, every 15 minutes) writes the sandbox (may write only its own
   project/runtime/cache, cannot read other projects or the bus, network allowlist) and deny rules into its tool settings
   (Claude Code: `.claude/settings.local.json`); if they are changed it writes them back and the status page shows red;
-  when `enforce` is turned off it removes them. `--report` shows what it would write for each project. What to write is
+  when `enforce` is turned off it removes them and puts back what was the user's (kept in
+  `.state/rendered-settings/saved/<project>/`). `--report` shows what it would write for each project. What to write is
   computed by `bin/policy.py` (the neutral policy, no runtime syntax allowed, checked by
   `tests/test_runtime_boundary.py`) and translated into Claude's format by `runtime_claude.settings()`.
   **Capabilities** (`enforce.capabilities`, e.g. `gpu` for idea sandboxes; the list is in `brunna.json` `capabilities` +
   `capabilities/<name>.sb`): a program the sandbox blocks runs with `bin/hub-run --cap <capability> -- …`, executed by
   the platform's runner service `bin/cap-runner.py` under the platform's own Seatbelt profile (`bin/seatbelt.py`, which
   can block the Keychain; macOS only). Design in `docs/design/capabilities.md`.
+  **A project's own settings files** (docs/design/capabilities.md, 11-25): the platform renders the values that win over a
+  committed file's, tells the owner of what it can't take away (never gates it), renders the repos inside the project's folder
+  too, and its hooks run under `env -i` (`runtime_claude._hook`; a new hook, or a variable one needs, goes there).
   **The owner's checkout race** (`docs/design/git-broker.md` r3 B-1, still open): a sandboxed project's Claude Code
   worktrees are made by the platform as the project (the `WorktreeCreate` hook → `hub-event worktree-make` →
   `bin/session_worktree.py`), never as the user. Nothing refuses its processes' symbolic links (a link rule for its

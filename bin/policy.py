@@ -236,14 +236,15 @@ def protected_changes(paths) -> list[str]:
       its sessions by the denies on each entry present);
     - at or under a whole control name (protect, a tree entry) at any depth, nested ones included
       (every sandbox denies those wherever they are; docs/design/runtime-codex.md, Step 4 r2, review S2)."""
-    roots = protect_roots()
-    trees = [c["name"] for c in protect() if c["tree"]]
+    roots = [{"name": r["name"].casefold(), "writable": r["writable"]} for r in protect_roots()]
+    trees = [c["name"].casefold() for c in protect() if c["tree"]]
     out = []
-    for p in paths:
+    for path in paths:
+        p = path.casefold()   # a volume that opens any case as the name checks it out as the platform's file
         parts = pathlib.PurePosixPath(p).parts
         if any(len(parts) > 1 and parts[0] == r["name"] and parts[1] not in r["writable"] for r in roots) \
                 or is_control(p, trees):
-            out.append(p)
+            out.append(path)
     return out
 
 

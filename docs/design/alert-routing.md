@@ -61,8 +61,8 @@ Answers (11-18):
    10 minutes); "release when busy" was measured and left out. The alert letters are its first real traffic.
 
 The mailbox lane's further points, adopted:
-- What watches the mailbox itself (the scheduler watchdog, the dispatch service, a bus that can't be written, hubbus
-  broken, an alert that can't be sent) never goes through the mailbox: straight to the owner.
+- What watches the mailbox itself (the scheduler watchdog, the dispatch service, a bus that can't be written or was
+  broken and moved aside (key `mailbox-bus-moved`), hubbus broken, an alert that can't be sent) never goes through the mailbox: straight to the owner.
 - What only the owner can do (logins, credentials, a token to issue again) goes straight to the owner, not through
   brunna for a day.
 - `update-runtimes` and `session_versions` keys go to brunna, a version failing a safety check included; after a day

@@ -933,7 +933,8 @@ class Results(Instance):
         self.assertEqual(sorted(n for n, s in sides.items() if s == "session"),
                          sorted(["lifecycle-events", "lifecycle-deny", "lifecycle-context", "instructions-reach",
                                  "sessions-read", "sessions-fork", "confine-sandbox", "control", "session-status",
-                                 "session-summary", "wake", "worktree-maker", "session-write"]))
+                                 "session-summary", "wake", "worktree-maker", "session-write", "settings-taken",
+                                 "session-neutral", "nested-settings"]))
         self.assertTrue(set(sides.values()) <= set(runtime_ports.CHECK_SIDES))
 
 

@@ -539,8 +539,11 @@ class Person(RealFacts):
         def older(d):
             hooks = d["hooks"]
             first = next(iter(hooks))
-            hooks[first] = [{"hooks": [{"type": "command", "command": json.dumps(hooks[first]).split("command\": \"")[1].split(
-                "\"")[0].replace("session_start", "some_older_event")}]}]
+            now = hooks[first][0]["hooks"][0]["command"]
+            before = (f"[ -x {hubconf.hub_bin('hub-event')} ] && {hubconf.sh_py(hubconf.MAIN / 'bin' / 'hub-event')} "
+                      f"--runtime claude some_older_event || true")   # what it was up to 0.21
+            hooks[first] = [{"hooks": [{"type": "command", "command": c}]}
+                            for c in (before, now.replace("session_start", "some_older_event"))]
             d["permissions"]["additionalDirectories"] = ["/where/it/was/.agent-memory"]
         self.settings(p, older)
         self.main_settings({"permissions": {"allow": ["Bash(make *)", "Bash(ls)"], "deny": ["Read(./.env)"]}, "model": "x"})

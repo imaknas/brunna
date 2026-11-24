@@ -413,7 +413,7 @@ class Golden(unittest.TestCase):
         with mock.patch.object(m, "desired", desired), mock.patch.object(m.registry, "refresh", lambda: index), \
                 mock.patch.object(m, "desired_env", lambda name, doc, index: {"UV_CACHE_DIR": "/cache/uv"}), \
                 mock.patch.object(m.runtime_claude, "platform_hooks",   # the command's form differs by OS
-                                  lambda: {"SessionStart": [{"hooks": [{"type": "command", "command": "hub-event"}]}]}):
+                                  lambda: {"SessionStart": [{"hooks": [{"type": "command", "command": "/x/bin/hub-event"}]}]}):
             plan("plan, first")
             main("report", "--report")
             main("write")

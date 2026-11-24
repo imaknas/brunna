@@ -41,12 +41,15 @@ For shell scripts ("$HUB/bin/py" hubconf.py …):
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import pathlib
 import re
+import secrets
 import shlex
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import i18n  # noqa: E402
@@ -121,11 +124,33 @@ def data_file(name: str) -> pathlib.Path:
     return data_dir() / name
 
 
+class BrokenSettings(SystemExit, ValueError):
+    """The settings file can't be read. Read while this module is imported, so nearly every command meets it first: one
+    nobody catches ends the command with this line on stderr and exit 1 (SystemExit), no traceback; code that expects a
+    broken file (i18n) catches the ValueError."""
+
+
 def config() -> dict:
     global _cfg
     if _cfg is None:
         p = config_path()
-        _cfg = json.loads(p.read_text()) if p.exists() else {}
+        try:
+            cfg = json.loads(p.read_text()) if p.exists() else {}
+            if not isinstance(cfg, dict):
+                raise ValueError("not a JSON object")
+        except ValueError as e:   # empty, half written or mistyped
+            _cfg = {}   # the line is written with no settings (i18n would read them again): the environment's language
+            try:
+                raise BrokenSettings(_(
+                    "{file} can't be read: {error}. Put that right in it; or go back to its last committed version, with what it "
+                    "says now kept beside it: cp -p {path} {copy} && git -C {folder} checkout -- {name}",
+                    file=p, error=_("line {line}, column {column}: {why}", line=e.lineno, column=e.colno, why=e.msg)
+                    if isinstance(e, json.JSONDecodeError) else e, path=shlex.quote(str(p)),
+                    copy=shlex.quote(f"{p}.broken-{time.strftime('%Y%m%d-%H%M%S')}"),
+                    folder=shlex.quote(str(p.parent)), name=shlex.quote(p.name))) from None
+            finally:
+                _cfg = None
+        _cfg = cfg
     return _cfg
 
 
@@ -466,16 +491,36 @@ def _same(a: pathlib.Path, b: pathlib.Path) -> bool:
         return False
 
 
-def write_atomic(path: pathlib.Path, text: str) -> None:
-    """path's new content, never half written: a file beside it, synced, renamed over it."""
+def write_atomic(path: pathlib.Path, text: str | bytes, keep: bool = False, mode: int | None = None) -> None:
+    """path's new content, never half written: a file beside it (of an unpredictable name, made new: nothing put there
+    first is written to), synced, renamed over it (so a link there is replaced). A write that fails leaves what was there
+    and nothing beside it. mode: the file's, exactly (else what the umask gives).
+    keep: a file of the user's. It keeps its mode, and one kept elsewhere stays there: a link is written through, its
+    target replaced as whole (a link to what isn't there fails: no folder is made outside for it). One the user can't
+    write (0444) is refused as a write in place would be, though the rename could replace it. A hard link's other names
+    keep the old content: it is this name that is replaced."""
     path = pathlib.Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
-    with open(tmp, "w", encoding="utf-8") as fh:
-        fh.write(text)
-        fh.flush()
-        os.fsync(fh.fileno())
-    os.replace(tmp, path)
+    if keep and path.is_symlink():
+        path = pathlib.Path(os.path.realpath(path))
+    else:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    if keep and path.exists():
+        if not os.access(path, os.W_OK):
+            raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), str(path))
+        mode = path.stat().st_mode & 0o7777
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o666)
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            if mode is not None:   # before the text is in it
+                os.fchmod(fh.fileno(), mode)
+            fh.write(text.encode("utf-8") if isinstance(text, str) else text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def _merge_renames(old: pathlib.Path, new: pathlib.Path) -> list[str] | None:
@@ -1126,6 +1171,38 @@ def launch(script: pathlib.Path | str) -> list[str]:
     Linux kernel takes everything after #! as one argument). Shell scripts are called directly as usual."""
     script = pathlib.Path(script)
     return [sys.executable, str(script)] if is_platform_python(script) else [str(script)]
+
+
+def python_path() -> str:
+    """The platform's Python, by the rule of bin/py (an override of the process that asks included), for a command that
+    runs later with nothing of its starter's environment (a hook); this process's own where that finds none."""
+    if (v := names.env("PYTHON")):
+        return v
+    share = pathlib.Path.home() / ".local" / "share"
+    at = [share / n / "python/bin/python3" for n in names.all("share_dir")]
+    return str(next((p for p in at if os.access(p, os.X_OK)), sys.executable))
+
+
+# what says where the platform is: a hook has them as they are for the process that writes it (none on an install whose
+# places are the settings'), never as its session's environment does
+POINTERS = ("ROOT", "HOME", "CONFIG", "DATA", "SECRETS", "STATE", "PYTHON")
+
+
+def own_pointers() -> dict[str, str]:
+    """The pointers this process itself runs under, in the current spelling; not one that says what the pointer file
+    says already."""
+    out = {}
+    for x in POINTERS:
+        v = names.env(x)
+        if x == "HOME" and v:
+            try:
+                if pathlib.Path((MAIN / ".hub-home").read_text().splitlines()[0]).expanduser() == pathlib.Path(v).expanduser():
+                    continue
+            except (OSError, IndexError):
+                pass
+        if v:
+            names.env_set(out, x, v)
+    return out
 
 
 _SH_PLAIN = re.compile(r"[A-Za-z0-9._/+@%=:,-]+")

@@ -62,12 +62,14 @@ exit 1
         "hooks": [
           {
             "type": "command",
-            "command": "hub-event"
+            "command": "/x/bin/hub-event"
           }
         ]
       }
     ]
   },
+  "disableAllHooks": false,
+  "apiKeyHelper": "",
   "env": {
     "UV_CACHE_DIR": "/cache/uv"
   }
@@ -86,7 +88,7 @@ gamma: the platform's hooks are not installed (the project uses its own core.hoo
 gamma: would write sandbox (allowWrite 2, denyRead 1, 3 domains), 2 deny rules, 1 allow rule → <TMP>/ws/gamma/.claude/settings.local.json
 === write, drift
 [exit 1]
-⚠️ alpha's settings drifted (written back): sandbox was changed; permissions.deny is missing 1 rule (e.g. Read(/other/**))
+⚠️ alpha's settings drifted (written back): sandbox was changed; permissions.deny is missing 1 rule (e.g. Read(/other/**)); alpha: the sandbox settings replaced sandbox.enabled, put in its agent settings file while the sandbox was on; kept in <TMP>/state/rendered-settings/saved/alpha/e59ebb1abb3ed414.json
 beta: .git/hooks/pre-commit is already the project's own hook; not overwriting it (the gate only detects)
 gamma: the platform's hooks are not installed (the project uses its own core.hooksPath=.husky); detecting only
 === plan, policy changed
@@ -116,7 +118,7 @@ gamma: the platform's hooks are not installed (the project uses its own core.hoo
         "hooks": [
           {
             "type": "command",
-            "command": "hub-event"
+            "command": "/x/bin/hub-event"
           }
         ]
       }

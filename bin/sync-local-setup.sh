@@ -71,6 +71,7 @@ fi
 # it can't be asked, stop; don't guess a default file name: that would hard-code Claude back in.
 # Exit code 3 = no installed runtime has a rules file (e.g. runtime.default is none): skipped explicitly, the other
 # steps run as usual.
+INSTR=""   # none, with no coding agent set up
 INSTRS=$("$AGENT_HUB/bin/py" "$AGENT_HUB/bin/hub-runtime" instructions-files "$PWD" 2>/dev/null); rc=$?
 if [ "$rc" = 3 ]; then
   $QUIET || hub_say "sync-local-setup: this runtime has no rules file ({settings} runtime.default); the managed block is not written"
@@ -84,7 +85,10 @@ while IFS= read -r INSTR; do
 # stdout: "<name>\t<path>" for each listed rule whose file is missing (reported below, in the UI language). A temp file,
 # not $(…): bash 3.2 misparses a heredoc inside a command substitution
 missing=$(mktemp) || exit 1
-"$AGENT_HUB/bin/py" - "$AGENT_HUB/bin" "$INSTR" .agent-memory/RULES <<'PY' >"$missing"
+tracked=""   # a link the repo commits says where to write (a fresh clone's, anywhere): never written through
+[ -L "$INSTR" ] && git ls-files --error-unmatch -- "$INSTR" >/dev/null 2>&1 && tracked=1
+"$AGENT_HUB/bin/py" - "$AGENT_HUB/bin" "$INSTR" .agent-memory/RULES "$tracked" <<'PY' >"$missing"
+import os
 import sys
 from pathlib import Path
 sys.path.insert(0, sys.argv[1])
@@ -100,18 +104,36 @@ proj = next((d for n, d in hubconf.projects().items()
 body, absent = prompts.agent_rules(prompts.listed_rules(rules_file, proj))   # the template minus its title, the listed rules, filled
 for name in absent:
     print(f"{name}\t{hubconf.ROOT / 'templates' / 'rules' / f'{name}.md'}")
-old = path.read_text() if path.exists() else ""
-# the block in either spelling becomes the current one (docs/design/rename-brunna.md); none yet: it goes after what the
-# file has
-new = names.put_block(old, body)
-
-if new != old:
-    tmp = path.with_name(path.name + ".tmp")
-    tmp.write_text(new)
-    tmp.replace(path)
+# a rules file the user keeps elsewhere (a link) is written there and stays a link: unless the repo commits that link, it
+# points at no file, or a sandboxed project could have put it there and this doesn't run as the project
+try:
+    if path.is_symlink() and (sys.argv[4] or not path.is_file() or (
+            not os.environ.get("HUB_AS_PROJECT") and (proj.get("enforce") or {}).get("sandbox"))):
+        sys.exit(6)
+    old = path.read_text() if path.exists() else ""
+    # the block in either spelling becomes the current one (docs/design/rename-brunna.md); none yet: it goes after what
+    # the file has. Markers that don't pair: nothing is changed
+    try:
+        new = names.put_block(old, body)
+    except names.Unpaired:
+        sys.exit(5)
+    if new != old:
+        hubconf.write_atomic(path, new, keep=True)
+except (OSError, ValueError) as e:   # where it is kept can't be written (a sandbox, a folder), it isn't text…
+    print(f"!\t{e}")
+    sys.exit(7)
 PY
 rc=$?
+said=""
+[ "$rc" = 5 ] && said=$(hub_msg "⚠️ {file} has a begin marker of brunna's block (a line <!-- …:begin -->) without its own end marker, so brunna changed nothing in it and its rules there may be out of date. Put the missing marker back, or delete the lone one (what is between the two is replaced at every session start); the next session start goes on from there." file="$INSTR")
+[ "$rc" = 6 ] && said=$(hub_msg "⚠️ {file} is a link brunna doesn't write through (the repo commits it, it points at no file, or the project is sandboxed), so its rules there were not updated. Make it a plain file that isn't committed." file="$INSTR")
+[ "$rc" = 7 ] && said=$(hub_msg "⚠️ {file} could not be updated ({why}), so brunna's rules in it may be out of date." file="$INSTR" why="$(sed -n 's/^!	//p' "$missing")")
+if [ -n "$said" ]; then   # --quiet: stdout is what the session is told
+  printf '%s\n' "$said" >&2
+  $QUIET && printf '%s\n' "$said"
+fi
 while IFS=$'\t' read -r name rule; do
+  [ "$name" != "!" ] || continue
   hub_say "sync-local-setup: RULES lists {name}, but {rule} is not there" name="$name" rule="$rule" >&2
 done <"$missing"
 rm -f "$missing"
@@ -183,7 +205,12 @@ done
 # project's own session, without relying on anyone remembering to check. No violation, nothing printed.
 leak_re='~/(agent-hub|brunna)/|/Users/[A-Za-z0-9._-]+/(agent-hub|brunna|workspace|\.agent-hub|\.brunna|services|git-origin)'
 leaks=$(git grep -l -I -E "$leak_re" HEAD -- . 2>/dev/null | sed 's#^HEAD:##' | head -10)
-if [ -n "$leaks" ]; then
+if [ -n "$leaks" ] && [ -z "$INSTR" ]; then
+  hub_say "⚠️ Files committed in this repo contain this machine's paths (the repo may become public, and local paths must not be committed; naming brunna is fine):
+{files}
+Please handle it in this project: in committed files write it without local paths or delete it, then commit. For details:
+{command}" files="$(echo "$leaks" | sed 's/^/  - /')" command="git grep -n -E '$leak_re'"
+elif [ -n "$leaks" ]; then
   hub_say "⚠️ Files committed in this repo contain this machine's paths (the repo may become public, and local paths must not be committed; naming brunna is fine):
 {files}
 Please handle it in this project: move what is needed to operate it into {file} (outside the brunna:begin/end block, not version-controlled),

@@ -627,7 +627,7 @@ class ClaudeWake(ClaudeSessionsDir):
             for e in entries:
                 for x in e["hooks"]:
                     if name != "Stop":
-                        self.assertFalse(x.get("asyncRewake") or x["command"].endswith(" wait; exit 0"), name)
+                        self.assertFalse(x.get("asyncRewake") or x["command"].endswith(" wait"), name)
 
     def test_the_hook_command_passes_the_exit_code_on_and_is_quiet_without_the_hub(self):
         import subprocess
@@ -637,10 +637,7 @@ class ClaudeWake(ClaudeSessionsDir):
             cmd = self.rc.wait_command()
             r = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True, text=True, timeout=30)
             self.assertEqual(r.returncode, 0, "no hub-event: nothing, quietly")
-            (hub / "bin" / "hub-event").write_text('#!/bin/sh\necho "woke $*" >&2\nexit 2\n')
-            (hub / "bin" / "py").write_text('#!/bin/sh\nexec /bin/sh "$@"\n')   # Linux: py in front
-            for f in ("hub-event", "py"):
-                (hub / "bin" / f).chmod(0o755)
+            (hub / "bin" / "hub-event").write_text('import sys\nprint("woke", *sys.argv[1:], file=sys.stderr)\nsys.exit(2)\n')
             r = subprocess.run(["/bin/sh", "-c", cmd], capture_output=True, text=True, timeout=30)
         self.assertEqual((r.returncode, r.stderr.strip()), (2, "woke --runtime claude wait"))
 

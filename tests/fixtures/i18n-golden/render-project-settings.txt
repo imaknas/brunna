@@ -62,12 +62,14 @@ exit 1
         "hooks": [
           {
             "type": "command",
-            "command": "hub-event"
+            "command": "/x/bin/hub-event"
           }
         ]
       }
     ]
   },
+  "disableAllHooks": false,
+  "apiKeyHelper": "",
   "env": {
     "UV_CACHE_DIR": "/cache/uv"
   }
@@ -86,7 +88,7 @@ gamma:平台的 hook 沒裝(專案用自己的 core.hooksPath=.husky),只偵測
 gamma:會寫 sandbox(allowWrite 2、denyRead 1、網域 3)、deny 2 條、allow 1 條 → <TMP>/ws/gamma/.claude/settings.local.json
 === write, drift
 [exit 1]
-⚠️ alpha 的設定偏移(已寫回):sandbox 被改過; permissions.deny 少了 1 條(例:Read(/other/**))
+⚠️ alpha 的設定偏移(已寫回):sandbox 被改過; permissions.deny 少了 1 條(例:Read(/other/**)); alpha:沙盒開著的時候放進它 agent 設定檔的 sandbox.enabled,被沙盒的設定換掉了;留在 <TMP>/state/rendered-settings/saved/alpha/e59ebb1abb3ed414.json
 beta:.git/hooks/pre-commit 已經有專案自己的 hook,不覆蓋(gate 只偵測)
 gamma:平台的 hook 沒裝(專案用自己的 core.hooksPath=.husky),只偵測
 === plan, policy changed
@@ -116,7 +118,7 @@ gamma:平台的 hook 沒裝(專案用自己的 core.hooksPath=.husky),只偵測
         "hooks": [
           {
             "type": "command",
-            "command": "hub-event"
+            "command": "/x/bin/hub-event"
           }
         ]
       }

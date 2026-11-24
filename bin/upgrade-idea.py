@@ -92,8 +92,7 @@ def record(idea: str, **fields) -> None:
     rec = records()
     rec[idea] = {**rec.get(idea, {}), **fields,
                  "at": datetime.datetime.now().astimezone().isoformat(timespec="seconds")}
-    RECORD.parent.mkdir(parents=True, exist_ok=True)
-    RECORD.write_text(json.dumps(rec, ensure_ascii=False, indent=1))
+    hubconf.write_atomic(RECORD, json.dumps(rec, ensure_ascii=False, indent=1))
 
 
 def unfinished_rename(name: str) -> str | None:
@@ -295,13 +294,13 @@ def main(argv: list[str]) -> int:
     if errs:
         fail(_("the registry entry is not valid: {errors} (the GitHub repo is already created; fix the registry entry "
                "and run this again to continue)", errors='; '.join(errs)))
-    reg.write_text(head + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200))
+    hubconf.write_atomic(reg, head + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200), keep=True)
 
     # config (the instance directory; before the move, the one in the hub)
     mirror = hubconf.config_file("mirror-list.txt")
     lines = mirror.read_text().splitlines() if mirror.exists() else []
     if url not in lines:
-        mirror.write_text("\n".join(lines + [url]) + "\n")
+        hubconf.write_atomic(mirror, "\n".join(lines + [url]) + "\n", keep=True)
     subprocess.run([str(HUB / "bin" / "gen-index-roster.sh")], check=False)
     subprocess.run([str(HUB / "bin" / "commit-hub-files.sh"), f"upgrade idea {name} → project {final} (upgrade-idea.py)",
                     f"projects/{final}.yaml", "mirror-list.txt", "index.md"], check=False)

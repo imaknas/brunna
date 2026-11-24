@@ -64,5 +64,21 @@
  "{kind} {run} run: {why}": "{kind} 的 {run} run:{why}",
  "tests nothing: {places} didn't load in a {kind} run without --restricted either": "什麼都沒測到:{places} 在沒有 --restricted 的 {kind} run 裡也沒載入",
  "a platform run ({kind}) loaded these plugins, whose hooks run as you: {places}": "平台的 run({kind})載入了這些 plugin,它們的 hook 以你的身分執行:{places}",
- "no plugin loaded in either run kind; each loaded without --restricted": "兩種 run 都沒載入任何 plugin;沒有 --restricted 時每個都會載入"
+ "no plugin loaded in either run kind; each loaded without --restricted": "兩種 run 都沒載入任何 plugin;沒有 --restricted 時每個都會載入",
+ "the tool gave no result": "工具沒有給結果",
+ "not taken with the permission mode: {modes}": "權限模式是 {modes} 時,設定檔沒有被採用",
+ "tests nothing: a file with a value it doesn't take ran its hook too": "什麼都沒測到:有不收的值的設定檔,裡面的 hook 也跑了",
+ "every hook off": "關掉所有 hook",
+ "sockets": "socket",
+ "commands without asking": "不經詢問跑指令",
+ "reading what is denied": "讀不給讀的東西",
+ "the key helper": "金鑰程式",
+ "the hooks' environment": "hook 的環境變數",
+ "{what}: the tool gave no result": "{what}:工具沒有給結果",
+ "a committed settings file's value held: {what}": "專案 commit 的設定檔的值生效了:{what}",
+ "tests nothing: {what} did nothing without the platform's value": "沒測到東西:沒有平台的值時 {what} 也沒作用",
+ "an empty key helper changes what a login sends": "空的金鑰程式改變了登入送出的東西",
+ "the settings file of a repo in the project's folder isn't read ({what})": "專案資料夾裡的 repo 的設定檔沒被讀取({what})",
+ "a live session takes in a settings file its check refuses": "進行中的 session 載入了檢查拒絕的設定檔",
+ "tests nothing: a settings file replaced under a live session changed nothing": "沒測到東西:session 進行中換掉設定檔沒有任何改變"
 }

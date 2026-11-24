@@ -10,5 +10,6 @@
  "couldn't clear what the platform wrote in {path} ({why}); nothing more was removed": "清不掉平台在 {path} 裡寫的東西({why});其他的都沒有移除",
  "couldn't make {path} ({why})": "建不了 {path}({why})",
  "{file} isn't there after it was written": "{file} 寫了之後卻不在",
- "the worktree's sandbox settings couldn't be written ({why}); it was taken back, so no session starts there without them": "這個 worktree 的沙盒設定寫不進去({why});已經收回,不會有 session 在沒有設定的地方開始"
+ "the worktree's sandbox settings couldn't be written ({why}); it was taken back, so no session starts there without them": "這個 worktree 的沙盒設定寫不進去({why});已經收回,不會有 session 在沒有設定的地方開始",
+ "{folder} is a repo of its own in {project}'s folder: the platform makes worktrees of the project only; make this one with git worktree": "{folder} 是 {project} 資料夾裡另一個 repo:平台只替專案本身建 worktree;這個請自己用 git worktree 建"
 }

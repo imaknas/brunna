@@ -54,7 +54,9 @@ import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
+import sys
 from typing import NamedTuple
 
 import i18n
@@ -299,9 +301,37 @@ def session_settings(pol: dict) -> tuple[dict, list[str], list[str]]:
     """settings() for the project's sessions (render-project-settings, the only caller): plus what only its sessions may
     write (policy session_write: its push request folder, docs/design/platform-push.md), as an allowWrite and as a place
     where no control tree may be built (_protect_rules). Never in settings() itself: platform_settings, leases and the
-    services' profiles are made from the same policy and must not carry it (r2 S-h, S-i)."""
+    services' profiles are made from the same policy and must not carry it (r2 S-h, S-i). And, its sessions' only too:
+    the switches a settings file the project commits could turn on next to these (the local file's value wins:
+    docs/design/capabilities.md, "A project's own settings files")."""
     extra = [_tilde(p) for p in pol.get("session_write") or []]
-    return settings({**pol, "write": [*pol["write"], *[w for w in extra if w not in pol["write"]]]})
+    sandbox, deny, allow = settings({**pol, "write": [*pol["write"], *[w for w in extra if w not in pol["write"]]]})
+    mine = user_settings()
+    theirs = mine.get("sandbox") if isinstance(mine.get("sandbox"), dict) else {}
+    net = theirs.get("network") if isinstance(theirs.get("network"), dict) else {}
+    sandbox["autoAllowBashIfSandboxed"] = theirs.get("autoAllowBashIfSandboxed") is True   # the owner's own, else off, as by default
+    sandbox["network"]["allowAllUnixSockets"] = net.get("allowAllUnixSockets") is True
+    # a deny here holds whatever any file allows reading (a denyRead entry doesn't: an allowRead inside it wins). Linux
+    # gets what exists: what a mount is made of, and what the tool does with one that isn't there isn't measured
+    sandbox["credentials"] = {"files": [{"path": p, "mode": "deny"} for p in _unread(pol)
+                                        if sys.platform == "darwin" or os.path.lexists(p)]}
+    return sandbox, deny, allow
+
+
+def _unread(pol: dict) -> list[str]:
+    """The places settings() denies reading, as absolute paths: each in every spelling, none with a glob in it."""
+    places = [*pol["other_projects"], *pol["deny_read"], *_not_home(pol.get("credentials") or []),
+              *(pol.get("credential_files") or []), *(pol.get("platform_state") or [])]
+    return [p for p in _spelled([os.path.expanduser(str(x)) for x in places]) if not _GLOB.search(p)]
+
+
+def user_settings() -> dict:
+    """The user's own settings (read only, what they chose for every session): {} when there are none to read."""
+    try:
+        got = json.loads((_home() / "settings.json").read_text())
+    except (OSError, ValueError, RecursionError):
+        return {}
+    return got if isinstance(got, dict) else {}
 
 
 # Where its sandbox may let a session's Bash write outside the project's folders: the temp area, as given and as it
@@ -352,7 +382,29 @@ def _other_controls(pol: dict) -> list[pathlib.Path]:
 def session_env(pol: dict) -> dict[str, str]:
     """The settings file's env for a sandboxed project's sessions: its own tool caches (policy.py env), and no git of the CLI's own
     in the folder. A session a person opens has the tool's own protection; this is reinforcement."""
-    return {**(pol.get("env") or {}), **NO_FOLDER_GIT}
+    return {**(pol.get("env") or {}), **NO_FOLDER_GIT, **neutral_env()}
+
+
+# What a settings file's env could set that makes the shells of the session or of its hooks run something else, or tells
+# the platform's programs where they are: the user's own value (their settings), or what this platform runs under, else
+# empty, which each of them takes as not set (measured 11-25 on 2.1.331: the local file's value wins). PYTHONPATH and the
+# like aren't here: people set them
+NEUTRAL_ENV = ("CLAUDE_CODE_SHELL_PREFIX", "BASH_ENV", "ENV")
+NEUTRAL_ENV_LINUX = ("LD_PRELOAD", "LD_AUDIT")
+
+
+def neutral_names() -> list[str]:
+    import hubconf
+    import names
+    return [*NEUTRAL_ENV, *(NEUTRAL_ENV_LINUX if sys.platform.startswith("linux") else ()), "HUB_AS_PROJECT",
+            *(n for x in hubconf.POINTERS for n in names.env_names(x))]
+
+
+def neutral_env() -> dict[str, str]:
+    import hubconf
+    mine = user_settings().get("env")
+    mine = {k: v for k, v in mine.items() if isinstance(v, str)} if isinstance(mine, dict) else {}
+    return {n: mine.get(n, "") if not n.startswith(("AGENT", "BRUNNA", "HUB_")) else "" for n in neutral_names()} | hubconf.own_pointers()
 
 
 def lease_settings(pol: dict) -> dict:
@@ -1658,27 +1710,71 @@ MANAGED = re.compile(r"/bin/hub-event(?=['\s]|$)|/agent-hub/bin/")
 NAME = "claude"   # this runtime's name in runtime_ports.RUNTIMES: the hooks say whose they are
 
 
-def hook_command(event: str) -> str:
-    # as before: if the entry point is missing, quietly do nothing; the exit code is always 0, so the session never
-    # shows an error. The hub's location is resolved now (hubconf.hub_bin); after the hub moves, installing again
-    # rewrites it. --runtime: hub-event parses the input with this runtime's lifecycle and records the session in the
-    # platform's ids (docs/design/mailbox-runtimes.md A1)
+# A hook runs as the user, outside every sandbox, with the environment of its session, which the project's own settings
+# files may set (their `env`) and which says what a shell, a loader, an interpreter or the platform itself runs. So a
+# hook's command is `exec` of /usr/bin/env -i (nothing of the project's comes before it or after it), what it has is
+# written here when it is, and of the session's it takes only these, by name: which session it is in and how its
+# processes reach the network, and what says it is one of the platform's own runs, which can only keep a hook from doing
+# something. Not HUB_AS_PROJECT (it would make the platform's work the project's, as the user), git's, Python's or the
+# platform's own places.
+HOOK_PASSES = ("CLAUDE_PID", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CONFIG_DIR", "CLAUDE_CODE_ENTRYPOINT", "SSH_AUTH_SOCK",
+               "TMPDIR", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "no_proxy",
+               "all_proxy", "HUB_LLM_POINT", "HUBBUS_LEASE")
+HOOK_PASSES_PLATFORM = ("JOB_CHAIN", "JOB_DEPTH", "CONFINED")   # in either spelling
+HOOK_UTF8 = "en_US.UTF-8" if sys.platform == "darwin" else "C.UTF-8"
+_BOOT = "import os,runpy,sys;del sys.argv[0];"
+_BOOT_RUN = 'runpy.run_path(sys.argv[0],run_name="__main__")'
+# the platform gone, or broken: quietly nothing (a Python that is given a script that isn't there exits 2, which the tool
+# takes for a refusal); the script's own exit code otherwise
+HOOK_BOOT = f"{_BOOT}sys.excepthook=lambda *a:os._exit(0);os.path.exists(sys.argv[0]) and {_BOOT_RUN}"
+
+
+def hook_env() -> dict[str, str]:
+    """What a hook's environment has whoever started its session, the same whichever of the platform's processes writes
+    the hook: its home, its PATH, its language, its user, and what that process itself was told (hubconf.own_pointers,
+    NVM_DIR, XDG_CONFIG_HOME)."""
     import hubconf
-    return (f"[ -x {hubconf.hub_bin('hub-event')} ] && {hubconf.sh_py(hubconf.MAIN / 'bin' / 'hub-event')} "
-            f"--runtime {NAME} {event} || true")
+    import pwd
+    try:
+        user = pwd.getpwuid(os.getuid()).pw_name
+    except KeyError:
+        user = os.environ.get("USER") or str(os.getuid())
+    out = {"HOME": str(pathlib.Path.home()), "PATH": f"{hubconf.LAUNCHD_PATH}:/usr/sbin:/sbin", "LANG": HOOK_UTF8, "USER": user}
+    for k in ("NVM_DIR", "XDG_CONFIG_HOME"):
+        v = os.environ.get(k)
+        if v and (k != "NVM_DIR" or pathlib.Path(v) != pathlib.Path.home() / ".nvm"):   # nvm sets it in every shell
+            out[k] = v
+    return {**out, **hubconf.own_pointers()}
+
+
+def _hook(args: str, boot: str = HOOK_BOOT) -> str:
+    """The shell command of one of the platform's hooks: hub-event with these arguments. Absolute paths, resolved now (the
+    hub's: after it moves, installing again rewrites them); no word of the shell's but the passed variables. With the
+    platform's Python gone it fails, and the tool says so (never a quiet fallback to another interpreter)."""
+    import hubconf
+    import names
+    passes = [*HOOK_PASSES, *(n for x in HOOK_PASSES_PLATFORM for n in names.env_names(x))]
+    words = ["exec", "/usr/bin/env", "-i", *(shlex.quote(f"{k}={v}") for k, v in hook_env().items()),
+             *(f'${{{n}+{n}="${n}"}}' for n in passes),
+             shlex.quote(hubconf.python_path()), "-I", "-B", "-c", shlex.quote(boot),
+             shlex.quote(str(hubconf.MAIN / "bin" / "hub-event")), "--runtime", NAME, args]
+    return " ".join(words)
+
+
+def hook_command(event: str) -> str:
+    # --runtime: hub-event parses the input with this runtime's lifecycle and records the session in the platform's ids
+    # (docs/design/mailbox-runtimes.md A1)
+    return _hook(event)
 
 
 # The waiter (wait() above): a Stop hook run in the background that may wake the session (asyncRewake), with a timeout
 # long enough to wait through an idle day. Never on SessionStart: the session's first reply would wait for it. Its
-# command passes the waiter's exit code on (exec; no `|| true`, which would turn the wake's 2 into 0), and is silent
-# when the entry point is missing.
+# command passes the waiter's exit code on (exec), and is silent when the entry point is missing.
 WAIT_HOOK = "Stop"
 
 
 def wait_command() -> str:
-    import hubconf
-    return (f"[ -x {hubconf.hub_bin('hub-event')} ] && exec {hubconf.sh_py(hubconf.MAIN / 'bin' / 'hub-event')} "
-            f"--runtime {NAME} wait; exit 0")
+    return _hook("wait")
 
 
 def wait_hook() -> dict:
@@ -1792,13 +1888,15 @@ def install_hooks(settings: dict) -> dict:
 
 
 def install_lifecycle(workspace, check: bool = False) -> bool:
+    import hubconf
     path = settings_path(workspace)
+    if path.exists() and not path.is_file():   # a FIFO: never waited on
+        raise OSError(f"{path} is not a file")
     settings = json.loads(path.read_text()) if path.exists() else {}
     out = json.dumps(install_hooks(settings), indent=2) + "\n"
     changed = not path.exists() or path.read_text() != out
     if changed and not check:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(out)
+        hubconf.write_atomic(path, out, keep=True)
     return changed
 
 
@@ -1815,7 +1913,8 @@ def remove_lifecycle(workspace, check: bool = False) -> bool:
     out = json.dumps(settings, indent=2) + "\n"
     if out != before and not check:
         if settings:
-            path.write_text(out)
+            import hubconf
+            hubconf.write_atomic(path, out, keep=True)
         else:   # only the platform's were there: the file goes
             path.unlink()
     return out != before
@@ -2033,7 +2132,7 @@ def user_cleanup(apply: bool) -> list[str]:
     if out == before:
         return []
     if apply:
-        path.write_text(out)
+        hubconf.write_atomic(path, out, keep=True)
     return [_("the worktree hooks in {file}", file=path)]
 
 
@@ -2161,58 +2260,113 @@ def control_notes(workspace) -> list[tuple[str, str]]:
 
 def session_folders(workspace) -> list[pathlib.Path]:
     """The folder and its worktrees (the app makes them under .claude/worktrees): real folders only, no links."""
-    import os
+    import nofollow   # neither it nor a folder above it is a link
     ws = pathlib.Path(workspace)
-    out = [ws]
     try:
-        with os.scandir(ws / WORKTREES) as it:
-            out += [ws / WORKTREES / e.name for e in it if e.is_dir(follow_symlinks=False)]
+        return [ws, *(ws / WORKTREES / n for n in nofollow.entries(ws, WORKTREES) or [] if nofollow.is_dir(ws, WORKTREES / n))]
     except OSError:
-        pass
-    return out
+        return [ws]
 
 
-def foreign_controls(workspace, owned=None) -> list[str]:
-    """Committed hooks or tool servers its sessions would load: the platform can't remove a committed file, so these
-    are only reported (read without following links: nofollow.py). A skill `brunna skills sync` installed and that is
-    still exactly as installed (owned) is the platform's: its hooks were shown to the owner (skill_notes)."""
+def foreign_controls(workspace, owned=None, reach: dict | None = None, folders=(), bare=(), rendered=None) -> list[str]:
+    """What its own files make its sessions run, or let them reach beyond what the platform gives (reach, as carried's; none:
+    its folder only): the platform can't take a committed entry away, so these are only reported (Entry; read without
+    following links: nofollow.py). Of its folder, each worktree (what is the same there as in its folder isn't said twice),
+    these other folders in it (relative paths: repos in it, and plain folders with a settings file of their own, which a
+    session opened in them loads) and those in which nothing of the platform's holds (bare). rendered: whether the local
+    settings in a folder are the platform's, as its record has them, never as they look. A skill `brunna skills sync`
+    installed and that is still exactly as installed (owned) is the platform's: its hooks were shown to the owner."""
     import nofollow
     ws, out = pathlib.Path(workspace), []
-    try:
-        raw = nofollow.read(ws, ".claude/settings.json")
-        doc = json.loads(raw) if raw else {}
-        if isinstance(doc, dict) and doc.get("hooks"):
-            out.append(_("{file} declares hooks", file=".claude/settings.json"))
-        # keys that make its sessions load plugins (a marketplace's, as the user, outside every sandbox) or change their
-        # environment (the agent-surface review, S7)
-        for key in COMMITTED_KEYS:
-            if isinstance(doc, dict) and doc.get(key):
-                out.append(_("{file} sets {key}", file=".claude/settings.json", key=key))
-    except (OSError, ValueError) as e:
-        out.append(_("{file} can't be read as a plain file ({why})", file=".claude/settings.json", why=e))
-    if os.path.lexists(ws / ".mcp.json"):
-        out.append(_("{file} declares tool servers", file=".mcp.json"))
+    reach = {"workspace": str(ws), "write": [], "network": [], **(reach or {})}
+    trees = {f.relative_to(ws).as_posix() for f in session_folders(ws)[1:]}
+    seen: set[str] = set()
+    excluded = False
+
+    def settings(file: str) -> dict:
+        try:
+            raw = nofollow.read(ws, file)
+            doc = json.loads(raw.decode("utf-8-sig")) if raw else {}
+        except (OSError, ValueError, RecursionError) as e:
+            out.append(entry(_("{file} can't be read as a plain file ({why})", file=file, why=e), file, "unreadable"))
+            return {}
+        return doc if isinstance(doc, dict) else {}
+
+    for rel in [".", *sorted(trees), *sorted(({str(f) for f in folders} | {str(f) for f in bare}) - trees)]:
+        at = pathlib.PurePosixPath(rel)
+        files = [(SETTINGS_FILES[0], True)]
+        if rel != "." and rel not in trees:   # its local settings: the platform's, or the folder's own, which nothing is known to stand above
+            local = settings((at / SETTINGS_FILES[1]).as_posix())
+            mine = bool(local) and bool(rendered) and rendered(local)
+            repo = os.path.lexists(ws / at / ".git")
+            files = [(SETTINGS_FILES[0], mine if repo else rel not in bare), *([] if mine or not local else [(SETTINGS_FILES[1], False)])]
+        for name, held in files:
+            file = (at / name).as_posix()
+            doc = settings(file)
+            try:
+                lines = committed_runs(doc, file, held) + committed_reach(doc, file, reach, ws / at, held)
+            except (RecursionError, ValueError) as e:
+                lines = [entry(_("{file} can't be read as a plain file ({why})", file=file, why=type(e).__name__), file, "unreadable")]
+            excluded |= bool(isinstance(doc.get("sandbox"), dict) and _texts(doc["sandbox"].get("excludedCommands")))
+            for text in lines:
+                if rel == ".":
+                    seen.add(text.what)
+                elif rel in trees and text.what in seen:
+                    continue
+                out.append(text)
+        file = (at / SETTINGS_FILES[2]).as_posix()
+        if os.path.lexists(ws / file):
+            servers = _bytes(ws, file)
+            if rel == ".":
+                seen.add(repr(servers))
+            if rel not in trees or repr(servers) not in seen:
+                out.append(entry(_("{file} declares tool servers", file=file), file, "servers", servers))
     for kind in ("agents", "skills"):
         for f in sorted((ws / ".claude" / kind).rglob("*.md")) if (ws / ".claude" / kind).is_dir() else []:
             rel = f.relative_to(ws)
             if kind == "skills" and owned and len(rel.parts) > 3 and owned("/".join(rel.parts[:3])):
                 continue
-            if not f.is_symlink() and "hooks" in frontmatter_keys(f.read_text(errors="replace")[:FRONTMATTER_MAX]):
-                out.append(_("{file} declares hooks", file=str(rel)))
+            if f.is_symlink():
+                continue
+            try:   # its own file, in any shape: no link followed on the way, no FIFO waited on
+                text = (nofollow.read(ws, rel, FRONTMATTER_MAX) or b"").decode("utf-8", "replace")
+            except OSError as e:
+                out.append(entry(_("{file} can't be read as a plain file ({why})", file=str(rel), why=e), rel, "unreadable"))
+                continue
+            if "hooks" in frontmatter_keys(text):
+                out.append(entry(_("{file} declares hooks", file=str(rel)), rel, "hooks", text.split("\n---", 1)[0]))
+            if kind == "skills" and excluded and INLINE_SHELL.search(text):
+                out.append(entry(_("{file} runs commands as it is read, outside the sandbox where a settings file leaves them out of it", file=str(rel)), rel,
+                                 "inline", [x for x in text.splitlines() if INLINE_SHELL.search(x)]))
     # a plugin in a skills folder (SKILL_REFUSED, at any depth, any case): its sessions load it as code that runs as the
     # user (measured 11-18 on 2.1.327: a project's .claude/skills/<x> plugin's hooks ran in a session of a trusted
     # folder). Never excused as an installed skill: skills sync refuses these names, and one installed before it did
     # could hold one
     found, unwalked = plugin_markers(ws)
-    out += [_("{file} is a plugin's manifest in a skills folder: its sessions would load it as code that runs as you",
-              file=rel) for rel in found] + unwalked
+    out += [entry(_("{file} is a plugin's manifest in a skills folder: its sessions would load it as code that runs as you",
+                    file=rel), rel, "plugin", _bytes(ws, rel)) for rel in found] + unwalked
     return out
 
 
-# What a project's committed .claude/settings.json may set that the owner must see: plugins it turns on or marketplaces
-# it adds (both load a plugin's hooks, which run as the user), and env (what every session and hook there starts with)
-COMMITTED_KEYS = ("enabledPlugins", "extraKnownMarketplaces", "env")
+# What a project's committed .claude/settings.json may set that the owner must see, by its key: plugins it turns on or
+# marketplaces it adds (both load a plugin's hooks, which run as the user) and its tool servers. What else it runs, and
+# what it lets its sessions reach, is committed_runs' and committed_reach's. It can't turn the sandbox off, nor can a
+# value the tool doesn't take in it: that drops only this file (measured 11-25 on 2.1.331)
+COMMITTED_KEYS = ("enabledPlugins", "extraKnownMarketplaces", "enableAllProjectMcpServers", "enabledMcpjsonServers")
+INLINE_SHELL = re.compile(r"!`|^```!", re.M)   # a skill's commands that run before the model reads it
 PLUGIN_WALK_MAX = 20000   # entries looked at in the skills folders at most
+
+
+def _bytes(ws, rel) -> list[str]:
+    """What a plain file holds, or the plain files in a folder do, as digests; in any other shape, that it is there."""
+    import hashlib
+    import nofollow
+    try:
+        names = nofollow.entries(ws, rel) if nofollow.is_dir(ws, pathlib.PurePosixPath(rel)) else None
+        files = [pathlib.PurePosixPath(rel) / n for n in sorted(names)[:200]] if names is not None else [pathlib.PurePosixPath(rel)]
+        return [f"{f.name} {hashlib.sha256(nofollow.read(ws, f) or b'').hexdigest()}" for f in files if not nofollow.is_dir(ws, f)]
+    except OSError:
+        return []
 
 
 def plugin_markers(workspace) -> tuple[list[str], list[str]]:
@@ -2371,7 +2525,320 @@ def platform_hooks() -> dict:
     worktree hand-over included (worktree_hooks)."""
     hooks = install_hooks({})["hooks"]
     hooks.update(worktree_maker_hooks())
+    hooks[CHANGE_HOOK] = [{"matcher": CHANGE_SOURCE, "hooks": [{"type": "command", "command": _hook(CHANGE_EVENT, CHANGE_BOOT)}]}]
     return hooks
+
+
+# A live session takes its settings files in again when one changes, unless this hook refuses (exit 2): then the session
+# goes on with the settings it has (measured 11-25 on 2.1.331: a local file replaced under a session by one without the
+# sandbox took its sandbox away; with this it kept it). It asks the platform whether the file is still one of its own
+# (render-project-settings.config_changed). No gate on what a project commits: that is read from other files, and at a
+# session's start from these
+CHANGE_HOOK, CHANGE_SOURCE, CHANGE_EVENT = "ConfigChange", "local_settings", "config-changed"
+# can't tell: refused (the session keeps what it has); the platform gone: quietly nothing
+CHANGE_BOOT = f"{_BOOT}sys.excepthook=lambda *a:os._exit(2);os.path.exists(sys.argv[0]) and {_BOOT_RUN}"
+
+
+def changed_settings(raw: str) -> tuple[str, str] | None:
+    """(the session's folder, the settings file that changed) of this hook's input; None when it isn't a local file's.
+    Raises ValueError for an input that can't be read."""
+    data = json.loads(raw)
+    if not isinstance(data, dict) or not isinstance(data.get("cwd"), str):
+        raise ValueError("no folder")
+    if data.get("source") != CHANGE_SOURCE:
+        return None
+    if not isinstance(data.get("file_path"), str):
+        raise ValueError("no file")
+    return data["cwd"], data["file_path"]
+
+
+# ---------- what of a user's settings may stand next to the platform's in one file ----------
+# Claude Code loads nothing of a settings file in which one value is of a kind it doesn't take: `"model": 5` or
+# `"permissions": {"defaultMode": "no-such"}` beside the platform's sandbox, and the session runs with no sandbox and
+# says nothing (measured 11-25 on 2.1.331, with a made-up API that asks for a Bash write). So only what was measured to
+# be taken whatever its value stays in a sandboxed project's file, by type (the check settings-taken holds it for every
+# version, on settings with all of it): a rule, an env value, a folder or a name of any text; a mode of these. Any other
+# key doesn't stay, unknown ones included (one may become known), nor does what runs a command as the user (statusLine,
+# apiKeyHelper) or turns every hook off.
+CARRIED_TEXT = ("model", "outputStyle", "language")
+CARRIED_LISTS = ("enabledMcpjsonServers", "disabledMcpjsonServers")   # what the tool's own prompts write here
+CARRIED_SWITCHES = ("enableAllProjectMcpServers",)   # only off: on, every tool server the project declares runs as the user
+CARRIED_RULES = ("deny", "allow", "ask", "additionalDirectories")
+CARRIED_MODES = ("default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions")
+# the platform's own besides the sandbox, the rules and the hooks: a committed settings file can't turn its hooks off, nor
+# name a program to run for the key of a model call (the local file's value wins; measured with the above)
+SESSION_FIXED = {"disableAllHooks": False, "apiKeyHelper": ""}
+
+
+def session_fixed() -> dict:
+    """SESSION_FIXED as rendered: a user who has a key helper of their own (their settings) keeps it."""
+    return {k: v for k, v in SESSION_FIXED.items() if k != "apiKeyHelper" or not user_settings().get(k)}
+
+
+def carried(settings: dict, reach: dict | None = None) -> dict:
+    """What of these settings may stand next to the platform's: in lists and env, the entries that are text. With reach (what
+    the project's sessions may reach: {"workspace", "write", "network"}, as policy), no rule or folder that gives them
+    more."""
+    def texts(x):
+        return [v for v in x if isinstance(v, str)] if isinstance(x, list) else None
+    perms, env = settings.get("permissions"), settings.get("env")
+    out = {k: v for k, v in settings.items() if k in CARRIED_TEXT and isinstance(v, str) or k in CARRIED_SWITCHES and v is False}
+    out |= {k: got for k in CARRIED_LISTS if (got := texts(settings.get(k))) is not None}
+    if isinstance(perms, dict):
+        out["permissions"] = {k: got for k in CARRIED_RULES if (got := texts(perms.get(k))) is not None}
+        if "additionalDirectories" in out["permissions"]:   # only what a folder can be called
+            out["permissions"]["additionalDirectories"] = [
+                d for d in out["permissions"]["additionalDirectories"]
+                if 0 < len(d.encode()) < 1000 and "\0" not in d and all(len(p.encode()) <= 255 for p in d.split("/"))
+                and (reach is None or not outside(d, reach))]
+        if reach is not None and "allow" in out["permissions"]:
+            out["permissions"]["allow"] = [x for x in out["permissions"]["allow"] if not widens(x, reach)]
+        if perms.get("defaultMode") in CARRIED_MODES:
+            out["permissions"]["defaultMode"] = perms["defaultMode"]
+    if isinstance(env, dict) and (kept := {k: v for k, v in env.items() if isinstance(v, str)}):
+        out["env"] = kept
+    return out
+
+
+# ---------- what of a settings file gives sessions more than the platform does ----------
+# Claude Code merges the lists of every settings file that holds in a folder, so an entry in one the project commits adds
+# to the platform's (measured 11-25 on 2.1.331, by what Bash and the Write tool then could do: allowWrite,
+# additionalDirectories, an Edit rule with a path outside, a Write rule with none, allowRead, allowedDomains,
+# WebFetch with no domain or another one, sockets, a proxy's port, excludedCommands). A path counts only where it resolves outside what the
+# session may write anyway; `Edit`, `Edit(**)` and the like give nothing more (measured too).
+
+PATH_SIGNS = frozenset("_./~@+,=()#- ")   # and letters, digits and their marks, of any script; `*` where a glob may stand
+
+
+def readable(path: str, glob: bool = False) -> bool:
+    """Whether this path of a settings file can be read one way only: no `..`, brace, bracket, `?`, backslash, quote, control
+    character or space around a part, `~` as `~/` in front or not at all; with glob, `*` anywhere."""
+    import unicodedata
+    return bool(path) and all(c in PATH_SIGNS or glob and c == "*" or unicodedata.category(c)[0] in "LNM" for c in path) \
+        and not any(p == ".." or p != p.strip(" ") for p in path.split("/")) and "~" not in path.removeprefix("~/")
+
+
+def outside(path: str, reach: dict, base=None, rooted: bool = True, glob: bool = False) -> bool:
+    """Whether this path of a settings file isn't known to be inside the folders reach lets the session write: only one
+    that can be read one way only (readable) and resolves inside them is, a glob by the folder in front of its first `*`
+    (with no `..` it goes nowhere else). base: the folder of the settings file; rooted: whether `/x` is from the root (in
+    a rule it is from base)."""
+    if not readable(path, glob):
+        return True
+    if "*" in path:
+        path = path[:path.rfind("/", 0, path.index("*")) + 1] or "."   # with its slash: `//**` is the root, `/**` what `/` is
+    ws = str(reach["workspace"])
+    base = str(base or ws)
+    if path.startswith("//"):
+        p = path[1:]
+    elif path.startswith("~/"):
+        p = os.path.expanduser(path)
+    elif path.startswith("/"):
+        p = path if rooted else base + path
+    else:
+        p = f"{base}/{path}"
+    try:
+        real = os.path.realpath(p)
+        for root in [ws, *map(str, reach.get("write") or []), f"/tmp/claude-{os.getuid()}"]:   # and its own temp folder
+            root = os.path.realpath(os.path.expanduser(root))
+            if real == root or real.startswith(root.rstrip("/") + "/"):
+                return False
+    except (OSError, ValueError):   # a path no folder can have
+        pass
+    return True
+
+
+PLAIN_DOMAIN = re.compile(r"(?:\*\.)?[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*")
+
+
+def _domain_outside(domain: str, reach: dict) -> bool:
+    if not PLAIN_DOMAIN.fullmatch(domain):
+        return True
+    d = domain.lower()
+    for x in (str(n).lower() for n in reach.get("network") or []):
+        if d == x or x.startswith("*.") and (d.endswith(x[1:])):
+            return False
+    return True
+
+
+# a tool's name as a rule has it, and the one kind of it with a star that is of one server's tools
+RULE_HEAD = re.compile(r"[A-Za-z][A-Za-z0-9_-]*(?:\*)?")
+
+
+def widens(rule, reach: dict, base=None) -> bool:
+    """Whether this allow rule may let the session write or reach more than reach does: one of a tool that writes or
+    fetches, unless what it names is known to be inside (outside, _domain_outside); one whose tool can't be told."""
+    if not isinstance(rule, str):
+        return False
+    head, paren, rest = rule.partition("(")
+    if unclear(rule):
+        return True
+    tool, arg = head.casefold(), rest[:-1] if paren else None
+    if tool in {t.casefold() for t in WRITE_TOOLS}:
+        if arg is None:
+            return head != "Edit"   # `Write` alone: the file tool writes anywhere, and asks for nothing (`Edit` alone still asks)
+        return head not in WRITE_TOOLS or outside(arg, reach, base, rooted=False, glob=True)
+    if tool == "webfetch":   # alone, the tool fetches anywhere and asks for nothing; a domain is Bash's to reach too
+        return head != "WebFetch" or not (arg or "").startswith("domain:") or _domain_outside(arg[len("domain:"):], reach)
+    return False
+
+
+def unclear(rule: str) -> bool:
+    """Whether which tool or which path this allow rule is of can't be told."""
+    head, paren, rest = rule.partition("(")
+    if not RULE_HEAD.fullmatch(head) or head.endswith("*") and not head.startswith("mcp__") or paren and not rest.endswith(")"):
+        return True
+    arg, tool = rest[:-1] if paren else None, head.casefold()
+    if tool in {t.casefold() for t in WRITE_TOOLS}:
+        return head not in WRITE_TOOLS or arg is not None and not readable(arg, glob=True)
+    return tool == "webfetch" and (head != "WebFetch" or bool(arg) and arg.startswith("domain:") and not PLAIN_DOMAIN.fullmatch(arg[len("domain:"):]))
+
+
+# what of a committed `sandbox` the platform's own value stands in the place of, or which only takes something away
+SANDBOX_HELD = ("enabled", "failIfUnavailable", "allowUnsandboxedCommands", "autoAllowBashIfSandboxed")
+FILESYSTEM_HELD = ("denyRead", "denyWrite")
+NETWORK_HELD, NETWORK_LESS = ("allowLocalBinding", "allowAllUnixSockets"), ("deniedDomains", "strictAllowlist")
+# programs a settings file names that the tool runs as the user (apiKeyHelper only where the user has one: else the
+# platform's empty one wins)
+HELPERS = ("apiKeyHelper", "awsAuthRefresh", "awsCredentialExport", "gcpAuthRefresh", "otelHeadersHelper", "statusLine",
+           "subagentStatusLine", "fileSuggestion", "proxyAuthHelper", "forceLoginHelper")
+COMMITTED_MODES = ("acceptEdits", "auto", "dontAsk", "bypassPermissions")
+# what a committed env may set without being told: the tool's own limits and quiet switches, and how text looks
+PLAIN_ENV = frozenset(("LANG", "LC_ALL", "LC_CTYPE", "TZ", "CI", "NO_COLOR", "FORCE_COLOR", "TERM", "COLORTERM", "NODE_ENV",
+                       "BASH_DEFAULT_TIMEOUT_MS", "BASH_MAX_TIMEOUT_MS", "BASH_MAX_OUTPUT_LENGTH", "MAX_THINKING_TOKENS",
+                       "MAX_MCP_OUTPUT_TOKENS", "MCP_TIMEOUT", "MCP_TOOL_TIMEOUT", "CLAUDE_CODE_MAX_OUTPUT_TOKENS",
+                       "CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
+                       "DISABLE_TELEMETRY", "DISABLE_ERROR_REPORTING", "DISABLE_AUTOUPDATER", "DISABLE_COST_WARNINGS",
+                       "CLAUDE_CODE_DISABLE_TERMINAL_TITLE", "CLAUDE_CODE_EFFORT_LEVEL", "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"))
+SETTINGS_FILES = (".claude/settings.json", ".claude/settings.local.json", ".mcp.json")   # what a folder of its own is found by
+
+
+def _on(v) -> bool:
+    return v not in (None, False, "", [], {})
+
+
+def _several(values, n: int = 10) -> str:
+    """These, on one bounded line."""
+    vs = [re.sub(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+", " ", str(v))[:120] for v in values]
+    return ", ".join(vs[:n]) + (f" (+{len(vs) - n})" if len(vs) > n else "")
+
+
+def _texts(x) -> list[str]:
+    return [v for v in x if isinstance(v, str)] if isinstance(x, list) else [x] if isinstance(x, str) else []
+
+
+class Entry(str):
+    """A line of what a project's own files do, with what it stands for: `what`, the content it was made from (whole, as no
+    line has it, and in no language), and `key`, that of this file."""
+    key = what = ""
+
+
+def entry(text: str, file: str, *content) -> Entry:
+    import hashlib
+    e = Entry(text)
+    e.what = hashlib.sha256(json.dumps(content, sort_keys=True, default=str).encode()).hexdigest()[:24]
+    e.key = hashlib.sha256(json.dumps([str(file), e.what]).encode()).hexdigest()[:24]
+    return e
+
+
+def committed_reach(doc: dict, file: str, reach: dict, base, held: bool) -> list[str]:
+    """What this settings file of the project's own makes its sessions reach beyond what the platform gives them. held: the
+    platform's own settings hold where it does (what they stand in the place of isn't said then)."""
+    out = []
+    sb = doc.get("sandbox") if isinstance(doc.get("sandbox"), dict) else {}
+    fs = sb.get("filesystem") if isinstance(sb.get("filesystem"), dict) else {}
+    net = sb.get("network") if isinstance(sb.get("network"), dict) else {}
+    perms = doc.get("permissions") if isinstance(doc.get("permissions"), dict) else {}
+    allow = _texts(perms.get("allow"))
+
+    def say(kind: str, text: str, values: list) -> None:
+        if values:
+            out.append(entry(text.replace("{what}", _several(values)), file, kind, values))
+    writes, reads, dirs = _texts(fs.get("allowWrite")), _texts(fs.get("allowRead")), _texts(perms.get("additionalDirectories"))
+    untold = [p for p in (*writes, *reads) if not readable(p, glob=True)] + [p for p in dirs if not readable(p)] + [x for x in allow if unclear(x)]
+    writes, reads, dirs = ([p for p in x if p not in untold] for x in (writes, reads, dirs))
+    allow = [x for x in allow if x not in untold]
+    write = [p for p in writes if outside(p, reach, base, glob=True)] + [p for p in dirs if outside(p, reach, base)]
+    web = [x for x in allow if x.startswith("WebFetch")]
+    write += [x for x in allow if x not in web and widens(x, reach, base)]
+    say("write", _("{file} lets its sessions write outside its folders: {what}", file=file, what="{what}"), sorted(set(write)))
+    say("read", _("{file} lets its sessions read what is denied them: {what}", file=file, what="{what}"),
+        sorted({p for p in reads if outside(p, reach, base, glob=True)}))
+    say("untold", _("{file} has entries of which it can't be told what they let its sessions reach: {what}", file=file, what="{what}"), sorted(set(untold)))
+    say("network", _("{file} lets its sessions reach {what} over the network", file=file, what="{what}"),
+        sorted({d for d in _texts(net.get("allowedDomains")) if _domain_outside(d, reach)} | {x for x in web if widens(x, reach, base)}))
+    say("excluded", _("{file} lets its sessions run these outside the sandbox: {what}", file=file, what="{what}"), sorted(set(_texts(sb.get("excludedCommands")))))
+    if perms.get("defaultMode") in COMMITTED_MODES:
+        say("mode", _("{file} starts its sessions in the permission mode {what}", file=file, what="{what}"), [perms["defaultMode"]])
+    known = {"sandbox": ("filesystem", "network", "excludedCommands", *(SANDBOX_HELD if held else ())),
+             "sandbox.filesystem": ("allowWrite", "allowRead", *FILESYSTEM_HELD),
+             "sandbox.network": ("allowedDomains", *NETWORK_LESS, *(NETWORK_HELD if held else ()))}
+    rest = [f"{name}.{k}" + ("" if v is True else f" {json.dumps(v, sort_keys=True)}")
+            for name, d in (("sandbox", sb), ("sandbox.filesystem", fs), ("sandbox.network", net))
+            for k, v in d.items() if k not in known[name] and (_on(v) or not held)]
+    rest += [k for k in ("sandbox", "permissions") if _on(doc.get(k)) and not isinstance(doc[k], dict)]
+    say("sandbox", _("{file} changes its sessions' sandbox: {what}", file=file, what="{what}"), sorted(rest))
+    return out
+
+
+def committed_runs(doc: dict, file: str, held: bool) -> list[str]:
+    """What this settings file of the project's own makes its sessions run as the user, or start with (held: as
+    committed_reach's)."""
+    out = []
+    if doc.get("hooks"):
+        out.append(entry(_("{file} declares hooks", file=file), file, "hooks", doc["hooks"]))
+    for key in (*COMMITTED_KEYS, *(() if held else ("disableAllHooks",))):
+        if doc.get(key):
+            out.append(entry(_("{file} sets {key}", file=file, key=key), file, key, doc[key]))
+    fixed = session_fixed() if held else {}
+    if (helpers := {k: doc[k] for k in HELPERS if _on(doc.get(k)) and k not in fixed}):
+        out.append(entry(_("{file} names programs its sessions run as you: {what}", file=file, what=_several(helpers)), file, "helpers", helpers))
+    env = doc.get("env")
+    if _on(env):
+        quiet = PLAIN_ENV | set(neutral_names() if held else ())
+        sets = {k: v for k, v in env.items() if k not in quiet} if isinstance(env, dict) else {"env": env}
+        if sets:
+            out.append(entry(_("{file} sets env for its sessions and their hooks: {what}", file=file, what=_several(sorted(sets), 20)), file, "env", sets))
+    return out
+
+
+def own_hooks(settings: dict):
+    """The hooks in these settings that aren't the platform's ({}: none; in a shape Claude Code wouldn't read: as they are)."""
+    hooks = settings.get("hooks") or {}
+    try:
+        return _strip_hooks({"hooks": dict(hooks)}, MANAGED.search)["hooks"]
+    except (AttributeError, TypeError, ValueError):
+        return hooks
+
+
+def session_hooks_of(settings: dict) -> dict:
+    """The platform's hooks in these settings that any project's have: not the user's, nor the worktree hand-over."""
+    try:
+        hooks = without_worktree_maker(settings).get("hooks") or {}
+        return _strip_hooks({"hooks": dict(hooks)}, lambda command: not MANAGED.search(command))["hooks"]
+    except (AttributeError, TypeError, ValueError):
+        return {}
+
+
+def without_worktree_maker(settings: dict) -> dict:
+    """settings without the platform's hand-over of the worktree mode and its check of a changed settings file, which only
+    a sandboxed project's have (platform_hooks); the rest of its hooks, and the user's, stay."""
+    hooks = settings.get("hooks")
+    if not isinstance(hooks, dict):
+        return settings
+    mine = {e: hooks[e] for e in (*(e for e, _what in WORKTREE_EVENTS), CHANGE_HOOK) if e in hooks}
+    return {**settings, "hooks": {**{e: v for e, v in hooks.items() if e not in mine}, **own_hooks({"hooks": mine})}}
+
+
+def platform_rendered(settings: dict) -> bool:
+    """Whether the platform wrote these settings for a sandboxed project, wherever the hub was: only those hand the
+    worktree mode over (worktree_maker_hooks)."""
+    try:
+        return any(_hands_over(h.get("command"), what)
+                   for event, what in WORKTREE_EVENTS for e in (settings.get("hooks") or {}).get(event) or []
+                   for h in e.get("hooks") or [])
+    except (AttributeError, TypeError):
+        return False
 
 
 # ---------- its own worktree mode, handed to the platform (runtime_ports' worktree_maker interface) ----------
@@ -2388,11 +2855,17 @@ WORKTREES = pathlib.PurePosixPath(".claude") / "worktrees"   # where its worktre
 WORKTREE_BRANCH = "worktree-"
 
 
+WORKTREE_BOOT = (_BOOT + 'os.path.exists(sys.argv[0]) or sys.exit("brunna: the platform makes worktrees in this sandboxed '
+                 'project, and its entry point is missing");' + _BOOT_RUN)   # sys.exit of a text: it goes to stderr, 1
+
+
 def worktree_command(what: str) -> str:
-    import hubconf
-    return (f"[ -x {hubconf.hub_bin('hub-event')} ] && exec {hubconf.sh_py(hubconf.MAIN / 'bin' / 'hub-event')} "
-            f"--runtime {NAME} {what}; echo 'brunna: the platform makes worktrees in this sandboxed project, and its "
-            f"entry point is missing' >&2; exit 1")
+    return _hook(what, WORKTREE_BOOT)
+
+
+def _hands_over(command, what: str) -> bool:
+    """One of the platform's worktree hand-over commands, as this release or an earlier one wrote it, wherever the hub was."""
+    return bool(MANAGED.search(str(command or "")) and re.search(rf"\s{re.escape(what)}(?:;|$)", str(command)))
 
 
 def worktree_maker_hooks() -> dict:
@@ -2433,7 +2906,9 @@ def makes_worktrees(workspace) -> bool:
         hooks = json.loads(settings_path(pathlib.Path(workspace)).read_text()).get("hooks") or {}
     except (OSError, ValueError, AttributeError):
         return False
-    return all(any(h.get("command") == worktree_command(what) for e in hooks.get(event) or [] for h in e.get("hooks") or [])
+    import hubconf
+    here = (str(hubconf.MAIN / "bin" / "hub-event"), hubconf.hub_bin("hub-event"))
+    return all(any(_hands_over(h.get("command"), what) and any(p in h["command"] for p in here) for e in hooks.get(event) or [] for h in e.get("hooks") or [])
                for event, what in WORKTREE_EVENTS)
 
 

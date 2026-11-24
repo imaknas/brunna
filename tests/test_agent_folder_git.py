@@ -152,7 +152,7 @@ class StandIn(unittest.TestCase):
         self.assertEqual(runtime_claude._env(task)[VAR], "1")
 
     def test_a_sandboxed_projects_sessions_get_it_too(self):
-        self.assertEqual(runtime_claude.session_env({"env": {"A": "b"}}), {"A": "b", VAR: "1"})
+        self.assertEqual(runtime_claude.session_env({"env": {"A": "b"}}), {"A": "b", VAR: "1", **runtime_claude.neutral_env()})
         self.assertEqual(runtime_claude.session_env({})[VAR], "1")
 
 

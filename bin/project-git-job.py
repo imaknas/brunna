@@ -51,8 +51,11 @@ readable. Nothing here decides anything for the platform; the caller treats the 
                                           blob byte for byte (taken before the agent starts; usually empty)
   changed <repo> <base>                   stdin: checkout-sigs' JSON; JSON [[path, exists]]: changed since <base> by
                                           their bytes, committed or not, untracked too
-  copy-back <src> <dst> <rel>…            copy each rel from src to dst (deleted in dst when gone from src); a symlink
-                                          in src is refused, not followed; JSON {copied, refused}
+  copy-back <src> <dst> <base> <rel>…     stdin: checkout-sigs' JSON; copy each rel from src to dst (deleted in dst when
+                                          gone from src); a symlink in src is refused, not followed; a rel that in dst is
+                                          not what src started from (its checkout of <base>; a file not in it: nothing)
+                                          is never written over, and then nothing is copied; JSON {copied, refused,
+                                          conflicts}
   hooks <repo> <hook>…                    JSON {hooks_path, hooks: {name: text, "-> target" for a symlink, or null}}
                                           for <repo>/.git/hooks
   hook-write <repo> <hook>                stdin → <repo>/.git/hooks/<hook>, replacing a symlink instead of writing
@@ -61,6 +64,9 @@ readable. Nothing here decides anything for the platform; the caller treats the 
   bundle-unpushed <ws>                    stdout: a bundle of the branches not on any remote (exit 3: nothing)
   diff-head <ws>                          stdout: git diff HEAD --binary
   exclude <repo> <pattern>                the pattern into the repo's .git/info/exclude
+  session-folders <ws> <folders> <seconds> <most> <settings file>…
+                                          JSON: the repos in ws, the other folders with a .git, with a settings file, why it stopped
+                                          early (bounded; no link followed, no git run)
   save <ws> <folder> <name>               stdin → a new file <ws>/<folder>/<name> (never overwriting, never through a
                                           link); prints its path relative to ws
   head <ws>                               JSON {branch, dirty}
@@ -86,6 +92,7 @@ readable. Nothing here decides anything for the platform; the caller treats the 
 from __future__ import annotations
 
 import datetime
+import errno
 import hashlib
 import json
 import os
@@ -95,6 +102,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import names  # noqa: E402  (standard library only, like this file)
@@ -461,22 +469,38 @@ def op_tracked(repo: str, *names: str) -> int:
     return emit(out)
 
 
-def op_copy_back(src: str, dst: str, *rels: str) -> int:
-    copied, refused = [], []
-    for rel in rels:
+def op_copy_back(src: str, dst: str, base: str, *rels: str) -> int:
+    wrote = json.loads(sys.stdin.read())
+    tree = _tree(src, base)[0]
+    algo = _algo(tree)
+
+    def meanwhile(rel: str) -> bool:   # someone else has written it since: neither what src started from nor what it is now
+        have = _sig(dst, rel, algo)
+        if have is None and os.path.lexists(pathlib.Path(dst) / rel):   # under a folder that is a link
+            return True
+        # (the blob's own bytes too: a file the project's filters would write otherwise, left as it was committed)
+        return have not in (wrote.get(rel, tree.get(rel)), tree.get(rel, wrote.get(rel)), _sig(src, rel, algo))
+
+    ok = [r for r in rels if not (".." in pathlib.PurePath(r).parts or r.startswith("/") or (pathlib.Path(src) / r).is_symlink())]
+    copied, refused, conflicts = [], [r for r in rels if r not in ok], [r for r in ok if meanwhile(r)]
+    for rel in [] if conflicts else ok:
         s, d = pathlib.Path(src) / rel, pathlib.Path(dst) / rel
-        if ".." in pathlib.PurePath(rel).parts or rel.startswith("/") or s.is_symlink():
-            refused.append(rel)
-            continue
-        if s.exists():
-            d.parent.mkdir(parents=True, exist_ok=True)
-            if d.is_symlink():
-                d.unlink()
-            shutil.copy2(s, d)
-        elif d.exists() or d.is_symlink():
-            d.unlink()
+        tmp = d.with_name(f".{d.name}.{os.getpid()}.copy-back")
+        try:
+            if s.exists():
+                d.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(s, tmp)
+            if meanwhile(rel):   # asked again with everything ready: only the rename (or the removal) is left
+                conflicts.append(rel)
+                break
+            if s.exists():
+                os.replace(tmp, d)   # replaces a link at d instead of writing to where it points
+            else:
+                d.unlink(missing_ok=True)
+        finally:
+            tmp.unlink(missing_ok=True)
         copied.append(rel)
-    return emit({"copied": copied, "refused": refused})
+    return emit({"copied": copied, "refused": refused, "conflicts": conflicts})
 
 
 def hook_file(repo: str, hook: str) -> pathlib.Path:
@@ -626,6 +650,44 @@ def op_exclude(repo: str, pattern: str) -> int:
     return 0
 
 
+def op_session_folders(ws: str, folders: str, seconds: str, most: str, *settings: str) -> int:
+    """JSON {"repos": [folders in ws, not ws, with a .git folder that has a HEAD], "others": [the ones with any other .git:
+    a file, a link, a folder without one], "settings": [other folders holding one of these settings files], "over": why it
+    stopped early, or null}, as relative paths. Nothing followed, nothing read."""
+    end, left, cap = time.monotonic() + float(seconds), int(folders), int(most)
+    repos, others, found, over, todo = [], [], [], None, [""]
+    tops = {s.split("/")[0].casefold() for s in settings}
+    for rel in todo:   # grows as it goes: the nearest first
+        left -= 1
+        if left < 0 or time.monotonic() > end:
+            over = "more folders than are looked through" if left < 0 else "it took too long"
+            break
+        here = os.path.join(ws, rel) if rel else ws
+        try:
+            with os.scandir(here) as it:
+                got = [(e.name, e.is_dir(follow_symlinks=False)) for e in it]
+        except OSError as e:
+            if e.errno not in (errno.EACCES, errno.EPERM, errno.ENOENT, errno.ENOTDIR) or not rel:   # no session opens those
+                over = over or f"{rel or '.'}: {e.strerror}"
+            continue
+        names_ = {n.casefold() for n, _d in got}
+        if rel and ".git" in names_ and os.path.lexists(os.path.join(here, ".git")):   # as the volume opens it
+            dot = os.path.join(here, ".git")
+            real = stat.S_ISDIR(os.lstat(dot).st_mode) if os.path.lexists(dot) else False
+            (repos if real and os.path.lexists(os.path.join(dot, "HEAD")) else others).append(rel)
+        elif rel and names_ & tops and any(os.path.lexists(os.path.join(here, *s.split("/"))) for s in settings):
+            found.append(rel)
+        if max(len(repos), len(others), len(found)) > cap:
+            over = "more repos or settings files than are listed"
+            break
+        # never inside a git dir (in another case only where the volume opens it as one); the memory checkout is the
+        # platform's, and holds notes only
+        folds = ".git" not in {n for n, _d in got} and os.path.lexists(os.path.join(here, ".git"))
+        todo += [os.path.join(rel, n) if rel else n for n, d in sorted(got)
+                 if d and n != ".git" and not (folds and n.casefold() == ".git") and (rel or n != ".agent-memory")]
+    return emit({"repos": repos, "others": others, "settings": found, "over": over})
+
+
 def op_save(ws: str, folder: str, name: str) -> int:
     """stdin's bytes into <ws>/<folder>/<name>, a new file (a number added when the name is taken); prints its path
     relative to ws."""
@@ -761,7 +823,7 @@ def op_test_runs(repo: str, since: str) -> int:
     return emit(keep[-MAX_RUNS:])
 
 
-OPS = {"test-runs": op_test_runs, "worktrees": op_worktrees, "ignored": op_ignored, "worktree-add": op_worktree_add,
+OPS = {"session-folders": op_session_folders, "test-runs": op_test_runs, "worktrees": op_worktrees, "ignored": op_ignored, "worktree-add": op_worktree_add,
        "worktree-remove": op_worktree_remove, "worktree-plan": op_worktree_plan, "session-worktree": op_session_worktree,
        "session-worktree-undo": op_session_worktree_undo, "session-worktree-remove": op_session_worktree_remove, "branch-delete": op_branch_delete, "remove-dep": op_remove_dep,
        "checkout-sigs": op_checkout_sigs, "changed": op_changed, "copy-back": op_copy_back, "hooks": op_hooks,

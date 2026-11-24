@@ -227,6 +227,7 @@ class PlatformWritesTheSettings(Base):
         super().setUp()
         self.rps = load("render_project_settings_cf", BIN / "render-project-settings.py")
         self.rps.RENDERED = self.tmp / "rendered"
+        self.rps.look = lambda *_a: ([], [], [])
         subprocess.run(["git", "init", "-q", str(self.ws)], check=True)
         self.doc = {"name": "proj", "paths": {"workspace": str(self.ws)}, "enforce": {"sandbox": True}}
         self.index = {"projects": {"proj": self.doc}}
@@ -272,7 +273,8 @@ class PlatformWritesTheSettings(Base):
         (self.ws / ".claude" / "settings.json").write_text(json.dumps({"hooks": {"Stop": []}}))
         (self.ws / ".mcp.json").write_text("{}")
         drift = self.rps.write_project("proj", self.doc, self.index, report=False)
-        self.assertEqual(sum(1 for d in drift if "settings.json" in d or ".mcp.json" in d), 2, drift)
+        [said] = [d for d in drift if "settings.json" in d]   # one line of it per project
+        self.assertIn(".mcp.json", said)
 
 
 class ForeignPlugins(unittest.TestCase):
@@ -338,13 +340,14 @@ class ForeignPlugins(unittest.TestCase):
         self.assertIn(".claude/skills", got[0], "a skills folder that is a link is said, never walked")
 
     def test_the_settings_keys_are_reported(self):
-        for key, value in (("enabledPlugins", {"x@y": True}), ("extraKnownMarketplaces", {"y": {"source": {}}}),
-                           ("env", {"PATH": "/tmp"})):
+        for key, value, said in (("enabledPlugins", {"x@y": True}, "enabledPlugins"),
+                                 ("extraKnownMarketplaces", {"y": {"source": {}}}, "extraKnownMarketplaces"),
+                                 ("env", {"PATH": "/tmp"}, "PATH")):
             with self.subTest(key=key):
                 (self.ws / ".claude" / "settings.json").write_text(json.dumps({key: value}))
                 got = self.found()
                 self.assertEqual(len(got), 1, got)
-                self.assertIn(key, got[0])
+                self.assertIn(said, got[0])
                 (self.ws / ".claude" / "settings.json").write_text(json.dumps({"permissions": {}}))
                 self.assertEqual(self.found(), [], "control")
 

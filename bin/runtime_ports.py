@@ -94,7 +94,7 @@ The current interfaces (the other layers get added one at a time, following the 
                                                          can't be moved away or replaced)
     session_folders(workspace) -> list[Path]             where sessions of this project start (the folder, its
                                                          worktrees): each gets the platform's settings
-    foreign_controls(workspace, owned=None) -> list[str] what in the folder would make its sessions run something the
+    foreign_controls(workspace, owned=None[, reach, folders, bare, rendered]) -> list[str] what in the folder would make its sessions run something the
                                                          platform didn't put there (committed hooks, tool servers);
                                                          owned(rel) → True for an entry the platform installed and that
                                                          is still exactly as installed (skills_sync.owned): not foreign

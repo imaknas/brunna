@@ -16,5 +16,6 @@
  "could not copy back: {e}": "複製不回去:{e}",
  "the agent stopped before finishing ({why})": "agent 沒做完就停了({why})",
  "{project} is not in the registry's index, so whether it is sandboxed can't be told: no propose run for it": "{project} 不在 registry 的索引裡,分不出它有沒有沙箱:不替它跑 propose",
- "mailbox.handler: propose is off for {project}: it is sandboxed, and an agent running as you in a folder it can write can be sent elsewhere by it. Its letters stay open for its sessions": "mailbox.handler: propose 對 {project} 是關的:它有沙箱,而用你的身分跑在它寫得到的資料夾裡的 agent,會被它指到別的地方去。它的信留給它的 session 處理"
+ "mailbox.handler: propose is off for {project}: it is sandboxed, and an agent running as you in a folder it can write can be sent elsewhere by it. Its letters stay open for its sessions": "mailbox.handler: propose 對 {project} 是關的:它有沙箱,而用你的身分跑在它寫得到的資料夾裡的 agent,會被它指到別的地方去。它的信留給它的 session 處理",
+ "what the project has is not what the agent was given (a session wrote it meanwhile, or it wasn't committed), so the agent's version was not written over it: {paths}": "專案裡的跟給 agent 的不一樣(有 session 同時寫了,或還沒 commit),所以沒有用 agent 的版本蓋過去:{paths}"
 }

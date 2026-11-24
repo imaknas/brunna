@@ -1886,8 +1886,7 @@ def cmd_add(name: str, workspace: str, origin: str, memory_bare: str, extra: str
         if errs:
             print(_("the registry entry is invalid; not written: {errors}", errors="; ".join(errs)), file=sys.stderr)
             return 1
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(header() + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200))
+    hubconf.write_atomic(f, header() + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200), keep=True)
     print(_("registry: {file}", file=f))
     # known at once, not at the scheduler's next tick (which may not run yet on a new machine): the commands run right
     # after connecting (first-look, send in the new folder) read the index
@@ -1906,7 +1905,7 @@ def cmd_rename(old: str, new: str, workspace: str, origin: str, memory_bare: str
     doc.setdefault("paths", {}).update(workspace=tilde(workspace), origin=origin, memory_bare=tilde(memory_bare))
     # keep the header comments
     head = "".join(l for l in text.splitlines(keepends=True) if l.startswith("#")) if text.startswith("#") else header()
-    dst.write_text(head + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200))
+    hubconf.write_atomic(dst, head + yaml.safe_dump(doc, allow_unicode=True, sort_keys=False, width=200), keep=True)
     src.unlink()
     if (reg / old).is_dir():
         (reg / old).rename(reg / new)
@@ -1965,8 +1964,8 @@ def cmd_apply_updates() -> int:
             print(_("{sender}: manifest.update {mid} changed nothing", sender=sender, mid=mid))
             continue
         index["projects"][sender] = normalise(tiers.upgrade(new))   # the next letter of this run sees its labels
-        f.write_text("# " + _("Project registry (see bin/registry.py). Last updated by manifest.update {mid}", mid=mid) + "\n"
-                     + yaml.safe_dump(new, allow_unicode=True, sort_keys=False, width=200))
+        hubconf.write_atomic(f, "# " + _("Project registry (see bin/registry.py). Last updated by manifest.update {mid}", mid=mid)
+                             + "\n" + yaml.safe_dump(new, allow_unicode=True, sort_keys=False, width=200), keep=True)
         r = subprocess.run([str(hubconf.ROOT / "bin" / "commit-hub-files.sh"), f"registry: {sender} manifest.update {mid}",
                             f"projects/{sender}.yaml"], capture_output=True, text=True)
         # what a part changed, as it now stands: a list is replaced whole, so the project keeps what it needs to send
@@ -2060,7 +2059,7 @@ def cmd_upgrade_files(apply: bool) -> int:
         changed.append(f)
         print(_("{file}: v1 → v2{tests}", file=f.name, tests=_(" (runtime.test → a full tier)") if "\ntests:" in new and "tests:" not in text else ""))
         if apply:
-            f.write_text(new)
+            hubconf.write_atomic(f, new, keep=True)
     for name in stuck:
         print(_("{file}: not rewritten (a form this command does not know; edit it by hand)", file=name), file=sys.stderr)
     if not changed:

@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import shlex
 import re
 import shutil
 import subprocess
@@ -54,17 +55,22 @@ class AtHomeToday(unittest.TestCase):
             p.start()
             self.addCleanup(p.stop)
 
+    def command(self, what, boot=None):
+        """The hook's words: /usr/bin/env -i, the literals, the variables passed by name, Python, hub-event."""
+        words = shlex.split(runtime_claude._hook(what, boot or runtime_claude.HOOK_BOOT))
+        return words[:3], words[words.index(hubconf.python_path()):]
+
     def test_hook_commands(self):
         for _name, _matcher, ev in runtime_claude.HOOK_TABLE:
-            self.assertEqual(runtime_claude.hook_command(ev),
-                             f"[ -x ~/agent-hub/bin/hub-event ] && {py('~/agent-hub/bin/hub-event')} --runtime claude {ev}"
-                             " || true")
+            head, tail = self.command(ev)
+            self.assertEqual(head, ["exec", "/usr/bin/env", "-i"])
+            self.assertEqual(tail, [hubconf.python_path(), "-I", "-B", "-c", runtime_claude.HOOK_BOOT,
+                                    str(hubconf.MAIN / "bin" / "hub-event"), "--runtime", "claude", ev])
+            self.assertEqual(runtime_claude.hook_command(ev), runtime_claude._hook(ev))
 
     def test_installed_hooks(self):
         def entry(ev, matcher=None):
-            e = {"hooks": [{"type": "command",
-                            "command": f"[ -x ~/agent-hub/bin/hub-event ] && {py('~/agent-hub/bin/hub-event')} "
-                                       f"--runtime claude {ev} || true"}]}
+            e = {"hooks": [{"type": "command", "command": runtime_claude._hook(ev)}]}
             return {"matcher": matcher, **e} if matcher else e
         self.assertEqual(runtime_claude.install_hooks({}), {"hooks": {
             "SessionStart": [entry("session_start")],
@@ -73,10 +79,9 @@ class AtHomeToday(unittest.TestCase):
             "UserPromptSubmit": [entry("prompt")],
             "PostToolUse": [entry("tool_used", "Bash")],
             "PreToolUse": [entry("open_session_attempt", "mcp__ccd_session__start_session")],
-            # the wake waiter: in the background, its exit code passed on (no `|| true`), its timeout
-            "Stop": [{"hooks": [{"type": "command", "command": "[ -x ~/agent-hub/bin/hub-event ] && exec "
-                                 f"{py('~/agent-hub/bin/hub-event')} --runtime claude wait; exit 0",
-                                 "asyncRewake": True, "timeout": 14 * 86400}]}],
+            # the wake waiter: in the background, its exit code passed on, its timeout
+            "Stop": [{"hooks": [{"type": "command", "command": runtime_claude._hook("wait"), "asyncRewake": True,
+                                 "timeout": 14 * 86400}]}],
         }})
 
     def test_worktree_hooks(self):
@@ -122,15 +127,13 @@ class Elsewhere(unittest.TestCase):
     def test_everything_written_names_this_hub(self):
         for text in self.written():
             with self.subTest(text=text):
+                text = text.split(" -I -B -c ")[-1]   # what a hook has of its environment is this run's own (HOME, the platform's places)
                 self.assertNotIn("agent-hub/", text.replace(str(self.tmp), "<TMP>"))   # the temp folder may be under an instance of that name
                 self.assertIn(str(self.hub / "bin"), text)
 
     def test_the_hook_reaches_the_hub(self):
         """Run as the agent runs it: through a shell, from a project folder."""
-        (self.hub / "bin" / "hub-event").write_text('#!/bin/sh\necho "reached $*"\n')
-        (self.hub / "bin" / "py").write_text('#!/bin/sh\nexec /bin/sh "$@"\n')   # Linux: py in front (hubconf.sh_py)
-        for f in ("hub-event", "py"):
-            (self.hub / "bin" / f).chmod(0o755)
+        (self.hub / "bin" / "hub-event").write_text('import sys\nprint("reached", *sys.argv[1:])\n')
         r = subprocess.run(["/bin/sh", "-c", runtime_claude.hook_command("session_start")], cwd=self.tmp,
                            capture_output=True, text=True, timeout=30)
         self.assertEqual(r.stdout.strip(), "reached --runtime claude session_start", r.stderr)

@@ -125,10 +125,33 @@ def block(spelling: str | None = None) -> tuple[str, str]:
     return f"<!-- {s}:begin -->", f"<!-- {s}:end -->"
 
 
+class Unpaired(ValueError):
+    """A rules file whose markers don't pair: which text between them is the platform's can't be told."""
+
+
+def _paired(text: str) -> bool:
+    """Whether every begin marker is followed by its own end before another begin (a lone end holds nothing)."""
+    import re
+    marks = {m: s for s in all("marker") for m in block(s)}
+    begins = {block(s)[0] for s in all("marker")}
+    inside = None
+    for m in re.findall("|".join(map(re.escape, marks)), text):
+        if m in begins:
+            if inside is not None:
+                return False
+            inside = marks[m]
+        elif marks[m] == inside:
+            inside = None
+    return inside is None
+
+
 def put_block(text: str, body: str) -> str:
     """text with the platform's block (in either spelling) replaced by one in the current spelling around body; a
-    second block in the other spelling goes; with none, the block is appended."""
+    second block in the other spelling goes; with none, the block is appended. Unpaired when a begin marker has no end of
+    its own: replacing up to a later one's end would take the user's text between."""
     import re
+    if not _paired(text):
+        raise Unpaired("a begin marker without its end")
     begin, end = block()
     new_block = f"{begin}\n{body}\n{end}\n"
     found = [(b, e) for b, e in map(block, all("marker")) if b in text and e in text]

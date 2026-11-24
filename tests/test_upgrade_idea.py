@@ -156,6 +156,20 @@ class Upgrade(unittest.TestCase):
         self.assertEqual([args[args.index(k) + 1] for k in ("--to", "--type", "--id")], ["idea-7", "info", "idea-upgraded-idea-7"])
         self.assertIn(str(self.remote()), args[args.index("--text") + 1])
 
+    def test_the_registry_entry_and_the_mirror_list_are_replaced_whole(self):
+        """Never written in place (a full disk would leave half an entry): another name of the old file still has it all."""
+        files = {self.hub / "projects" / "idea-7.yaml": IDEA, self.hub / "mirror-list.txt": "git@example.invalid:o/x.git\n"}
+        for i, (f, text) in enumerate(files.items()):
+            f.write_text(text)
+            f.chmod(0o600)
+            os.link(f, self.hub / f"old-{i}")
+        res, code = self.upgrade()
+        self.assertEqual((code, res["result"]), (0, "upgraded"), res)
+        for i, (f, text) in enumerate(files.items()):
+            self.assertEqual((self.hub / f"old-{i}").read_text(), text)
+            self.assertNotEqual(f.read_text(), text)
+            self.assertEqual(f.stat().st_mode & 0o777, 0o600)
+
     def test_push_is_a_choice_of_three_and_a_local_remote_gets_no_platform_push(self):
         """docs/design/platform-push.md section 2: --push none|others|all; the grant is GitHub's deploy key, so a remote
         that is a local path (this harness's "GitHub") gets no platform push, said, and the upgrade still completes."""

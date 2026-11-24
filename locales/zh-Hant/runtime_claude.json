@@ -98,5 +98,15 @@
  "{folder} has too many entries to look through": "{folder} 的項目太多,查不完",
  "{folder} is a link to a folder, so it isn't looked through": "{folder} 是指向資料夾的連結,所以沒有往裡面看",
  "not started: a run here without --restricted would load the plugin at {paths}, whose hooks run as you outside every sandbox; remove it from the skills folder first": "沒有啟動:這裡一個不帶 --restricted 的執行會載入 {paths} 的 plugin,它的 hooks 會以你的身分在所有沙箱之外執行;請先把它從 skills 資料夾移走",
- "not started: a run here without --restricted loads any plugin in its skills folders, and these can't be looked through for one: {why}": "沒有啟動:這裡一個不帶 --restricted 的執行會載入它 skills 資料夾裡的任何 plugin,而這些資料夾無法逐一查看是否有 plugin:{why}"
+ "not started: a run here without --restricted loads any plugin in its skills folders, and these can't be looked through for one: {why}": "沒有啟動:這裡一個不帶 --restricted 的執行會載入它 skills 資料夾裡的任何 plugin,而這些資料夾無法逐一查看是否有 plugin:{why}",
+ "{file} lets its sessions write outside its folders: {what}": "{file} 讓它的 session 寫到它的資料夾以外:{what}",
+ "{file} lets its sessions read what is denied them: {what}": "{file} 讓它的 session 讀到不給讀的東西:{what}",
+ "{file} lets its sessions reach {what} over the network": "{file} 讓它的 session 可以連到 {what}",
+ "{file} lets its sessions run these outside the sandbox: {what}": "{file} 讓它的 session 在沙箱外跑這些:{what}",
+ "{file} starts its sessions in the permission mode {what}": "{file} 讓它的 session 一開始就是權限模式 {what}",
+ "{file} changes its sessions' sandbox: {what}": "{file} 改了它的 session 的沙箱:{what}",
+ "{file} names programs its sessions run as you: {what}": "{file} 指定了它的 session 會以你的身分跑的程式:{what}",
+ "{file} sets env for its sessions and their hooks: {what}": "{file} 替它的 session 跟 hook 設了環境變數:{what}",
+ "{file} runs commands as it is read, outside the sandbox where a settings file leaves them out of it": "{file} 被讀到的時候就會跑指令,設定檔把那些指令排除在沙箱外時就在沙箱外跑",
+ "{file} has entries of which it can't be told what they let its sessions reach: {what}": "{file} 有些項目看不出會讓它的 session 碰到什麼:{what}"
 }

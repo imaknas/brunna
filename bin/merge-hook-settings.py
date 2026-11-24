@@ -35,6 +35,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import hubconf  # noqa: E402
 import runtime_claude  # noqa: E402
 
 WORKTREE_HOOKS = runtime_claude.worktree_hooks()   # the table and the merge live in the adapter (it keeps them current)
@@ -56,14 +57,14 @@ def main():
         settings = json.loads(path.read_text()) if path.exists() else {}
         out = json.dumps(runtime_claude.install_hooks(settings), indent=2) + "\n"
         if not path.exists() or path.read_text() != out:
-            path.write_text(out)
+            hubconf.write_atomic(path, out, keep=True)
         return
     # --worktree: the owner installs them, by hand; after that upgrade keeps them current (runtime_claude.user_refresh)
     path = Path(args[1])
     settings = json.loads(path.read_text()) if path.exists() else {}
     out = json.dumps(runtime_claude.merge_worktree_hooks(settings), indent=2) + "\n"
     if not path.exists() or path.read_text() != out:
-        path.write_text(out)
+        hubconf.write_atomic(path, out, keep=True)
 
 
 if __name__ == "__main__":

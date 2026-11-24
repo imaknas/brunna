@@ -222,6 +222,90 @@ class ProposeApply(unittest.TestCase):
         self.assertIn("use SQLite", (self.ws / notes[0]).read_text())
         self.assertEqual((self.ws / "README.md").read_text(), "the original README\n")
 
+    def day_note(self):
+        import datetime
+        return self.ws / ".agent-memory" / "memory" / f"{datetime.date.today().isoformat()}.md"
+
+    def agent_that(self, *lines):
+        """The stand-in agent, doing this first (a session of the project works meanwhile)."""
+        script = self.tmp / "agent.py"
+        script.write_text("\n".join(["import pathlib", f"WS = pathlib.Path({str(self.ws)!r})", *lines, script.read_text()]))
+
+    def test_a_note_a_session_wrote_meanwhile_is_kept_and_the_owner_asked(self):
+        self.agent_that(f"pathlib.Path({str(self.day_note())!r}).write_text('a session wrote this\\n')")
+        mid = self.letter()
+        r = self.run_("propose_apply.py", "mailbox", "demo", mid)
+        self.assertEqual(self.day_note().read_text(), "a session wrote this\n")
+        out = json.loads(r.stdout)
+        self.assertEqual((out["ok"], out["applied"], out["sent"], out["done"]), (False, [], [], []), r.stderr)
+        self.assertIn(self.day_note().name, out["error"])
+        self.assertTrue(self.held_and_asked(mid))
+
+    ADDS = r"""
+import json, pathlib, re, sys
+prompt = open(sys.argv[1]).read()
+mid = re.search(r"- id ([^\s,]+),", prompt).group(1)
+day = re.search(r"memory/(\d{4}-\d{2}-\d{2})\.md", prompt).group(1)
+note = pathlib.Path(".agent-memory/memory") / f"{day}.md"
+note.parent.mkdir(parents=True, exist_ok=True)
+note.write_text((note.read_text() if note.exists() else "") + "the agent's line\n")
+print(json.dumps({"replies": [{"reply_to": mid, "type": "done", "text": "noted"}], "done": [{"id": mid}], "ask_owner": [], "summary": "s"}))
+"""
+
+    def both_notes(self):
+        (self.tmp / "agent.py").write_text(self.ADDS)
+        mid = self.letter()
+        self.day_note().write_text("a session's line, not committed\n")
+        r = self.run_("propose_apply.py", "mailbox", "demo", mid)
+        out = json.loads(r.stdout)
+        self.assertEqual((r.returncode, out["ok"], out["done"]), (0, True, [mid]), r.stdout + r.stderr)
+        self.assertEqual(self.day_note().read_text(), "a session's line, not committed\nthe agent's line\n")
+
+    def test_a_note_not_committed_when_the_agent_started_is_in_its_copy(self):
+        self.both_notes()
+        shown = sh("git", "--git-dir", str(self.tmp / "bare.git"), "show", f"agent-memory:memory/{self.day_note().name}")
+        self.assertIn("the agent's line", shown)
+
+    def test_a_note_in_a_plain_notes_folder_is_in_its_copy(self):
+        mem = self.ws / ".agent-memory"
+        shutil.rmtree(mem)
+        (mem / "memory").mkdir(parents=True)
+        (mem / "memory" / "other.md").write_text("untouched\n")
+        (mem / "memory" / ".hidden.md").write_text("hidden\n")
+        (mem / "memory" / "link.md").symlink_to(self.tmp / "nowhere")
+        self.both_notes()
+        self.assertEqual((mem / "memory" / "other.md").read_text(), "untouched\n")
+        self.assertTrue((mem / "memory" / "link.md").is_symlink())
+        self.assertTrue((mem / "memory" / ".hidden.md").exists(), "what the copy didn't get is not taken for deleted")
+
+    def test_a_plain_notes_folders_note_written_meanwhile_is_kept(self):
+        mem = self.ws / ".agent-memory"
+        shutil.rmtree(mem)
+        (mem / "memory").mkdir(parents=True)
+        self.day_note().write_text("at the start\n")
+        (self.tmp / "agent.py").write_text(self.ADDS)
+        self.agent_that(f"pathlib.Path({str(self.day_note())!r}).write_text('a session wrote this\\n')")
+        mid = self.letter()
+        self.run_("propose_apply.py", "mailbox", "demo", mid)
+        self.assertEqual(self.day_note().read_text(), "a session wrote this\n")
+        self.assertTrue(self.held_and_asked(mid))
+
+    def test_a_memory_that_cant_be_synced_first_is_never_written_over(self):
+        """Uncommitted notes the copy then doesn't have: the run is refused where it would write over them, and says so."""
+        (self.ws / ".agent-memory" / ".git" / "index.lock").write_text("")   # no commit while another git holds it
+        self.day_note().write_text("a session's line\n")
+        mid = self.letter()
+        r = self.run_("propose_apply.py", "mailbox", "demo", mid)
+        self.assertEqual(self.day_note().read_text(), "a session's line\n")
+        self.assertFalse(json.loads(r.stdout)["ok"])
+        self.assertTrue(self.held_and_asked(mid))
+
+    def test_nothing_is_copied_when_one_file_clashes(self):
+        self.agent_that("pathlib.Path('.agent-memory/memory/another.md').write_text('the agent\\n')",
+                        f"pathlib.Path({str(self.day_note())!r}).write_text('a session wrote this\\n')")
+        self.run_("propose_apply.py", "mailbox", "demo", self.letter())
+        self.assertEqual(sorted(p.name for p in self.day_note().parent.iterdir()), sorted([self.day_note().name, "README.md"]))
+
     def test_a_failed_run_holds_the_letter_and_asks_the_owner(self):
         """claimed by dispatch, failed: held, the owner asked, never dispatched again (nothing loops)"""
         (self.tmp / "agent.py").write_text("import sys\nsys.exit(2)\n")
@@ -405,6 +489,83 @@ class ChangeListing(unittest.TestCase):
         (self.wt / "plain.txt").unlink()
         (self.wt / "new.md").write_text("x\n")
         self.assertEqual(self.changed(sigs), [".gitattributes", "a.mark", "link", "new.md", "plain.txt", "run.sh"])
+
+    def back(self, sigs, *rels):
+        return self.job("copy-back", self.wt, self.repo, self.base, *rels, stdin=json.dumps(sigs))
+
+    def test_copy_back_writes_only_over_what_the_copy_started_from(self):
+        sigs = self.job("checkout-sigs", self.wt, self.base)
+        for name in ("plain.txt", "run.sh", "new.md"):
+            (self.wt / name).write_text("the agent\n")
+        (self.repo / "run.sh").write_text("a session\n")
+        self.assertEqual(self.back(sigs, "plain.txt", "run.sh"), {"copied": [], "refused": [], "conflicts": ["run.sh"]})
+        self.assertEqual((self.repo / "plain.txt").read_text(), "three\n", "all or nothing")
+        self.assertEqual(self.back(sigs, "plain.txt", "new.md"),
+                         {"copied": ["plain.txt", "new.md"], "refused": [], "conflicts": []})
+        self.assertEqual([(self.repo / n).read_text() for n in ("plain.txt", "new.md")], ["the agent\n"] * 2)
+        self.assertEqual(self.back(sigs, "plain.txt")["copied"], ["plain.txt"], "there already: nothing to lose")
+        # gone from the copy: changed meanwhile in the project, then gone there too
+        (self.wt / "run.sh").unlink()
+        self.assertEqual(self.back(sigs, "run.sh")["conflicts"], ["run.sh"])
+        (self.repo / "run.sh").unlink()
+        self.assertEqual(self.back(sigs, "run.sh")["copied"], ["run.sh"])
+        # edited by the agent, deleted by a session
+        (self.wt / "b.crlf").write_text("the agent\n")
+        (self.repo / "b.crlf").unlink()
+        self.assertEqual(self.back(sigs, "b.crlf")["conflicts"], ["b.crlf"])
+        self.assertFalse((self.repo / "b.crlf").exists())
+        # a new file where the project has one now, and one under a folder that is a link there
+        (self.wt / "note.md").write_text("the agent\n")
+        (self.repo / "note.md").write_text("a session\n")
+        self.assertEqual(self.back(sigs, "note.md")["conflicts"], ["note.md"])
+        (self.tmp / "out").mkdir()
+        (self.tmp / "out" / "n.txt").write_text("elsewhere\n")
+        (self.repo / "lk").symlink_to(self.tmp / "out")
+        (self.wt / "lk").mkdir()
+        (self.wt / "lk" / "n.txt").write_text("the agent\n")
+        self.assertEqual(self.back(sigs, "lk/n.txt")["conflicts"], ["lk/n.txt"])
+        self.assertEqual((self.tmp / "out" / "n.txt").read_text(), "elsewhere\n")
+        self.assertEqual([p.name for p in self.repo.iterdir() if p.name.endswith(".copy-back")], [])
+
+    def test_copy_back_asks_again_right_before_it_writes(self):
+        """A session writes the file while the copy is being made ready."""
+        import importlib.machinery
+        import importlib.util
+        import io
+        from unittest import mock
+        loader = importlib.machinery.SourceFileLoader("pgj", str(BIN / "project-git-job.py"))
+        m = importlib.util.module_from_spec(importlib.util.spec_from_loader("pgj", loader))
+        loader.exec_module(m)
+        sigs = self.job("checkout-sigs", self.wt, self.base)
+        (self.wt / "plain.txt").write_text("the agent\n")
+        (self.wt / "new.md").write_text("the agent\n")
+        real = shutil.copy2
+
+        def copying(s, d, **kw):
+            (self.repo / pathlib.Path(s).name).write_text("a session\n")
+            return real(s, d, **kw)
+        for rel in ("plain.txt", "new.md"):
+            out = io.StringIO()
+            with mock.patch.object(m.shutil, "copy2", copying), mock.patch.object(sys, "stdin", io.StringIO(json.dumps(sigs))), \
+                    mock.patch.object(sys, "stdout", out):
+                m.op_copy_back(str(self.wt), str(self.repo), self.base, rel)
+            self.assertEqual(json.loads(out.getvalue()), {"copied": [], "refused": [], "conflicts": [rel]})
+            self.assertEqual((self.repo / rel).read_text(), "a session\n")
+        self.assertEqual([p.name for p in self.repo.iterdir() if p.name.endswith(".copy-back")], [])
+
+    def test_copy_back_of_a_file_the_copy_was_given_and_a_session_deleted(self):
+        """Seeded (a plain notes folder's note, in no tree): deleted meanwhile is a change of someone's too."""
+        sigs = {**self.job("checkout-sigs", self.wt, self.base), "note.md": "f:" + "0" * 40 + ":-"}
+        (self.wt / "note.md").write_text("the agent\n")
+        self.assertEqual(self.back(sigs, "note.md")["conflicts"], ["note.md"])
+
+    def test_copy_back_of_a_file_the_checkout_converts(self):
+        """The project's file is as it was committed or as a checkout writes it: neither is a change of anyone's."""
+        sigs = self.job("checkout-sigs", self.wt, self.base)
+        (self.repo / "b.crlf").write_bytes((self.wt / "b.crlf").read_bytes())
+        for name in ("a.mark", "b.crlf"):
+            (self.wt / name).write_text("the agent\n")
+        self.assertEqual(self.back(sigs, "a.mark", "b.crlf")["copied"], ["a.mark", "b.crlf"])
 
     def test_stdin_that_is_not_the_snapshot_fails(self):
         r = subprocess.run([sys.executable, str(BIN / "project-git-job.py"), "changed", self.wt, self.base],

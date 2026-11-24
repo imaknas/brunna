@@ -10,7 +10,11 @@ workspace) is opened normally: its parent is not the project's to change. Standa
   read(base, rel, cap) → bytes | None        None: the file or a folder on the way is missing
                                              single: refused when the file has another hard link
   lstat(base, rel) → stat_result | None      the entry itself, not followed
-  replace(base, rel, data)                   creates missing folders
+  replace(base, rel, data, mode)             creates missing folders; mode: the file's, exactly (else 0644 less the umask)
+  readlink(base, rel) → str                  where the link there points (OSError when it isn't a link)
+  symlink(base, rel, target)                 a link in place of the entry there, or new
+  link(base, rel, name) → str                a second name (a hard link) for the entry in its own folder, beginning with
+                                             name; the one it has already, if any
   append(base, rel, data)                    adds to the end; creates the file and only the folder it is in
   entries(base, rel) → [name] | None         the names in a folder (None: missing); what each is isn't looked at
   remove(base, rel)                          unlink one entry (a link is removed, never what it points to); missing
@@ -26,6 +30,7 @@ from __future__ import annotations
 import errno
 import os
 import pathlib
+import secrets
 import stat
 
 FLAGS = os.O_NOFOLLOW | os.O_CLOEXEC
@@ -88,16 +93,19 @@ def read(base, rel, cap: int = 1 << 20, single: bool = False) -> bytes | None:
         os.close(d)
 
 
-def replace(base, rel, data: bytes) -> None:
+def replace(base, rel, data: bytes, mode: int | None = None) -> None:
     parts = _parts(rel)
     d = _folder(base, parts[:-1], create=True)
     tmp = f".{parts[-1]}.{os.getpid()}.agent-hub-new"
     try:
         f = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | FLAGS, 0o644, dir_fd=d)
         try:
+            if mode is not None:
+                os.fchmod(f, mode)
             view = memoryview(data)
             while view:
                 view = view[os.write(f, view):]
+            os.fsync(f)
         finally:
             os.close(f)
         os.replace(tmp, parts[-1], src_dir_fd=d, dst_dir_fd=d)
@@ -107,6 +115,49 @@ def replace(base, rel, data: bytes) -> None:
         except OSError:
             pass
         raise
+    finally:
+        os.close(d)
+
+
+def readlink(base, rel) -> str:
+    parts = _parts(rel)
+    d = _folder(base, parts[:-1], create=False)
+    try:
+        return os.readlink(parts[-1], dir_fd=d)
+    finally:
+        os.close(d)
+
+
+def symlink(base, rel, target: str) -> None:
+    parts = _parts(rel)
+    d = _folder(base, parts[:-1], create=True)
+    tmp = f".{parts[-1]}.{os.getpid()}.agent-hub-new"
+    try:
+        os.symlink(target, tmp, dir_fd=d)
+        try:
+            os.replace(tmp, parts[-1], src_dir_fd=d, dst_dir_fd=d)
+        except BaseException:
+            os.unlink(tmp, dir_fd=d)
+            raise
+    finally:
+        os.close(d)
+
+
+def link(base, rel, name: str) -> str:
+    parts = _parts(rel)
+    if len(_parts(name)) != 1:
+        raise OSError(errno.EINVAL, f"not a plain name: {name}")
+    d = _folder(base, parts[:-1], create=False)
+    try:
+        src = os.stat(parts[-1], dir_fd=d, follow_symlinks=False)
+        for n in sorted(os.listdir(d)):   # it has one already
+            if n.startswith(name) and n != parts[-1]:
+                st = os.stat(n, dir_fd=d, follow_symlinks=False)
+                if (st.st_dev, st.st_ino) == (src.st_dev, src.st_ino):
+                    return n
+        name = f"{name}-{secrets.token_hex(6)}"   # none anything put there first can have
+        os.link(parts[-1], name, src_dir_fd=d, dst_dir_fd=d, follow_symlinks=False)
+        return name
     finally:
         os.close(d)
 

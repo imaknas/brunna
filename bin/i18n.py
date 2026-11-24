@@ -49,9 +49,13 @@ def lang() -> str:
     try:
         import hubconf
     except (OSError, ValueError):
+        ui = None
+    else:   # half imported: its own import met a hub.json it can't read, and is writing the line that says so
+        ui = getattr(hubconf, "lang_ui", None)
+    if ui is None:
         import names
         return names.env("LANG_UI") or "en"
-    return hubconf.lang_ui()
+    return ui()
 
 
 def catalog(name: str, language: str) -> dict[str, str]:

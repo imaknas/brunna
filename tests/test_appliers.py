@@ -9,6 +9,7 @@ real services are never touched.
 
     bin/py -m unittest discover -s tests
 """
+import json
 import pathlib
 import shutil
 import subprocess
@@ -73,7 +74,11 @@ class AgentSettingsFixture:
     def setup(self, m, tmp: pathlib.Path):
         self._rendered = m.RENDERED
         m.RENDERED = tmp / "state" / "rendered-settings"
-        (tmp / "ws").mkdir()
+        # with settings of the user's: some of them the platform sets too, in an order of their own
+        (tmp / "ws" / ".claude").mkdir(parents=True)
+        (tmp / "ws" / ".claude" / "settings.local.json").write_text(json.dumps({
+            "env": {"UV_CACHE_DIR": "/mine", "MINE": "1"}, "statusLine": "x", "model": "y",
+            "permissions": {"ask": ["Bash(a)"], "defaultMode": "plan", "deny": ["Read(/a)", "Bash(security:*)", "Read(/b)"]}}))
         return {"v": 1, "errors": {}, "projects": {"demo": {
             "name": "demo", "paths": {"workspace": str(tmp / "ws")}, "enforce": {"sandbox": True}}}}
 

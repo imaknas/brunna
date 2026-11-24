@@ -89,7 +89,11 @@ class WorktreeHook(Base):
         for event, what in (("WorktreeCreate", "worktree-make"), ("WorktreeRemove", "worktree-drop")):
             cmd = hooks[event][0]["hooks"][0]["command"]
             self.assertIn(f"--runtime claude {what}", cmd)
-            self.assertTrue(cmd.endswith("exit 1"), "never made as the user when the platform can't")
+            with mock.patch.object(hubconf, "MAIN", self.tmp / "gone"):
+                gone = runtime_claude.worktree_command(what)
+            r = subprocess.run(["/bin/sh", "-c", gone], capture_output=True, text=True, timeout=60)
+            self.assertEqual((r.returncode, r.stdout), (1, ""), "never made as the user when the platform can't")
+            self.assertIn("entry point is missing", r.stderr)
             self.assertNotIn("|| true", cmd)
             self.assertTrue(runtime_claude.MANAGED.search(cmd), "the platform's own: replaced, never kept as the user's")
 

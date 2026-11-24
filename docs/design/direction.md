@@ -192,6 +192,9 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
    memory in the coding agent's folder until A2 lands. It needs a measurement and a port of the agent's folder naming
    first.
 3. **Session-level gaps:**
+   - **A project's own settings files** (`capabilities.md` 11-25): built 11-25. What a project's committed settings can't turn
+     on, what the owner is told of them, repos inside its folder, the environment of the platform's hooks. Hostile committed
+     files are not contained, and the docs say so. Open: the 15 minutes until a render finds a new repo, Linux with the real tool.
    - The Keychain is blocked for services and capability runs, not for sessions. Loosening work mode's per-command
      prompts waits on that.
    - The git-filter protection in `mailbox-session-first.md` step 3 rests on one tool's environment variable.

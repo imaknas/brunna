@@ -30,6 +30,8 @@ wires its native hooks to this.
                               or removed, as the project, never as the user; what the tool reads back (the path) on
                               stdout. Unlike every other event it exits 1 with the reason on stderr when it can't, so the
                               tool's worktree fails instead of being made as the user
+  hub-event [--runtime <name>] config-changed
+                              a live session's settings file changed: exits 2 when it is not to be taken in
   hub-event as-project <event> <workspace> <command>
                               inside a sandboxed project's sandbox: its handlers that touch its repo (AS_PROJECT),
                               JSON out (called by hub-event itself)
@@ -736,6 +738,19 @@ def worktree_maker(what: str, raw: str, name: str | None) -> int:
     return 0
 
 
+def config_changed() -> int:
+    """`hub-event config-changed`: 2, with why on stderr, when a live session of a sandboxed project is not to take in the
+    settings file that changed (render-project-settings.config_changed); can't tell: 2 too, it keeps what it has."""
+    try:
+        why = _load("render_project_settings", BIN / "render-project-settings.py").config_changed(sys.stdin.read())
+    except Exception as e:
+        why = f"{type(e).__name__}: {e}"
+    if why:
+        _log("config-changed", None, [], ["config-changed"])
+        print(why, file=sys.stderr)
+    return 2 if why else 0
+
+
 def install(ws: pathlib.Path) -> int:
     """The hooks of every installed runtime with session events (runtime_ports.installed). None has them: say why,
     exit code 3 for "unsupported"."""
@@ -773,6 +788,8 @@ def main(argv) -> int:
             _log(argv[0], None, [], [f"hub-event:{type(e).__name__}"])
             print(f"{names.current('cli')}: {type(e).__name__}: {e}", file=sys.stderr)
             return 1
+    if argv == ["config-changed"]:
+        return config_changed()
     if argv[:1] == ["worktree-scope"] and len(argv) == 3:
         try:
             return worktree_scope(argv[1], argv[2], _read_stdin(), name)

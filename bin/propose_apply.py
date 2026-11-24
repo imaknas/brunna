@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import datetime
 import fnmatch
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -80,6 +81,20 @@ def changed(project: str, repo: pathlib.Path, base: str, sigs: dict) -> list[tup
         if isinstance(rows, list) else []
 
 
+def note_sigs(folder: pathlib.Path, base: str) -> dict[str, str]:
+    """{path in folder: signature, as project-git-job.py's _sig gives it} of its plain files, none under a hidden name (base: a
+    commit id of the repo, whose hash it is)."""
+    out = {}
+    for f in sorted(folder.rglob("*")):
+        rel = f.relative_to(folder)
+        if f.is_symlink() or not f.is_file() or any(p.startswith(".") for p in rel.parts):
+            continue
+        raw = f.read_bytes()
+        h = hashlib.new("sha256" if len(base) == 64 else "sha1", b"blob %d\0" % len(raw) + raw).hexdigest()
+        out[str(rel)] = f"f:{h}:{'x' if f.stat().st_mode & 0o100 else '-'}"
+    return out
+
+
 def unsupported(project: str) -> str | None:
     """Why this project can't have a propose run, or None. The agent runs as the user in the copy, and a sandboxed project's own job
     has to make that copy, so it is in a folder the project can write: it can then swap it for a link wherever that folder is, and the
@@ -102,7 +117,8 @@ def run(project: str, ws: pathlib.Path, point: str, prompt: str, allow: list[str
     follow what they say).
     All or nothing: a run that failed (or that the runtime cancelled or left incomplete, or that ended without the
     structured answer the platform acts on) gets nothing copied back and hands back no output (no replies, no
-    closes); the mailbox caller then holds the letters and asks the owner (hold_and_ask)."""
+    closes); the mailbox caller then holds the letters and asks the owner (hold_and_ask). So does a run that
+    changed a file someone else has changed meanwhile (a session's note): that file stays as it is, and is named."""
     def failed(why: str) -> dict:
         return {"ok": False, "output": None, "text": None, "applied": [], "refused": [], "error": why}
     if (why := unsupported(project)):
@@ -113,16 +129,30 @@ def run(project: str, ws: pathlib.Path, point: str, prompt: str, allow: list[str
         return failed(_("could not make the throwaway copy: {e}", e=e))
     tmp, mem = wt.parent, ws / ".agent-memory"
     added, bases, sigs = [], {}, {}
+    seeded: dict[str, str] = {}   # what the copy is given of a notes folder that is in no repo of its own
     try:
         try:
             bases[wt] = add_worktree(project, ws, wt)   # what the agent started from
             added.append((ws, wt))
             if (mem / ".git").exists():
+                # the copy is the last commit: notes a session has written and nobody committed yet go in first, or the
+                # agent wouldn't see them (and what it then writes of the same day couldn't be put over them). One that
+                # can't be synced now leaves them out: copy-back refuses to write over them
+                if (why := project_git.sync_memory_of(project, ws)):
+                    print(why, file=sys.stderr)
                 bases[wt / ".agent-memory"] = add_worktree(project, mem, wt / ".agent-memory")
                 added.append((mem, wt / ".agent-memory"))
+            elif mem.is_dir() and not mem.is_symlink() and (mem / "memory").is_dir() and not (mem / "memory").is_symlink():
+                notes = wt / ".agent-memory" / "memory"
+                for rel in note_sigs(mem / "memory", bases[wt]):
+                    (notes / rel).parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(mem / "memory" / rel, notes / rel, follow_symlinks=False)
+                if notes.is_dir():
+                    seeded = {f".agent-memory/memory/{r}": s for r, s in note_sigs(notes, bases[wt]).items()}
             for repo, base in bases.items():   # before the agent touches anything
                 sigs[repo] = checkout_sigs(project, repo, base)
-        except RuntimeError as e:
+            sigs[wt] = {**sigs[wt], **seeded}
+        except (RuntimeError, OSError) as e:
             return failed(_("could not make the throwaway copy: {e}", e=e))
         # the agent itself may not send letters or close them (hubbus honours this variable and the parent process; the
         # platform decides sender and recipients from the output). HUB_THROWAWAY_COPY tells a runtime that runs only in
@@ -165,23 +195,34 @@ def run(project: str, ws: pathlib.Path, point: str, prompt: str, allow: list[str
                     continue
                 take.append(path)
             if plain is not None and plain.is_dir() and not plain.is_symlink():
+                now = note_sigs(plain, bases[wt])
                 for f in sorted(plain.rglob("*")):
                     rel = str(f.relative_to(wt))
                     hidden = any(part.startswith(".") for part in rel.removeprefix(".agent-memory/").split("/"))
                     if f.is_dir() and not f.is_symlink():
                         continue
+                    if rel in seeded and seeded[rel] == now.get(rel.removeprefix(".agent-memory/memory/")):
+                        continue   # as it was given
                     if not ok or hidden or not any(fnmatch.fnmatch(rel, g) for g in allow):
                         refused.append(rel)
                     else:
                         take.append(rel)
+            if plain is not None:   # given, and gone: the agent deleted it
+                take += [r for r in seeded if ok and not os.path.lexists(wt / r) and any(fnmatch.fnmatch(r, g) for g in allow)]
             if take:
                 try:
-                    done = project_git.data(project, ws, "copy-back", repo, ws / prefix, *take)
+                    done = project_git.data(project, ws, "copy-back", repo, ws / prefix, bases[repo], *take,
+                                            input=json.dumps(sigs[repo]), timeout=project_git.BUNDLE_TIMEOUT_S)
                 except project_git.Unavailable as e:   # say what is already in place
                     return {**failed(_("could not copy back: {e}", e=e)), "applied": applied, "refused": refused}
                 done = done if isinstance(done, dict) else {}
                 applied += [prefix + p for p in project_git.strs(done.get("copied"))]
                 refused += [prefix + p for p in project_git.strs(done.get("refused"))]
+                if (clash := [prefix + p for p in project_git.strs(done.get("conflicts"))]):   # a session's work stays
+                    return {**failed(_("what the project has is not what the agent was given (a session wrote it meanwhile, or it "
+                                       "wasn't committed), so the agent's version was not written over it: {paths}",
+                                       paths=", ".join(clash))),
+                            "applied": applied, "refused": refused + clash}
         return {"ok": ok, "output": res.get("structured_output") if ok else None, "text": res.get("result"),
                 "applied": applied, "refused": refused, "error": error}
     finally:

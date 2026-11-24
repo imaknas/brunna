@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
 # Hook sessions in a git worktree up to memory tracking too.
 #
 # The problem: a Claude Code session opened in a worktree (e.g. `<project>/.claude/worktrees/<name>`, started by an
@@ -33,13 +33,44 @@
 # main checkout. Deleting the worktree only deletes the symlink, never the main checkout's memory.
 set -uo pipefail
 
+# The session's environment is the project's to set (its settings files' `env`), and this runs as the user: on an install
+# (its settings are found from its own folder; a tree under test has none there) it starts again with what the platform's
+# other hooks take of it (runtime_claude.HOOK_PASSES, the one list), before anything is run or read. Whether this is the
+# run inside a sandboxed project's sandbox is an argument, which only this script gives; HUB_AS_PROJECT is never read
+# from outside.
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"; unset HUB_AS_PROJECT
+_self="${BASH_SOURCE[0]}"; case "$_self" in /*) ;; *) _self="$PWD/$_self" ;; esac; _hub="${_self%/*/*}"
+if [ "${1:-}" != --as-project ] && [ "${1:-}" != --clean ] && { [ -e "$_hub/.hub-home" ] || [ -e "$_hub/brunna.json" ] || [ -e "$_hub/hub.json" ]; }; then
+  _user="$(/usr/bin/id -un)"; _home="${HOME:-}"; _env=()
+  for _n in brunna agent-hub; do   # the account's own home, where the platform's Python is in it
+    eval "_h=~$_user"; [ -x "$_h/.local/share/$_n/python/bin/python3" ] && _home="$_h" && break
+  done
+  for _n in $(sed -n '/^HOOK_PASSES = (/,/)$/p' "$_hub/bin/runtime_claude.py" | grep -o '"[A-Za-z_]*"' | tr -d '"') \
+      $(sed -n '/^HOOK_PASSES_PLATFORM = (/,/)/p' "$_hub/bin/runtime_claude.py" | grep -o '"[A-Z_]*"' | tr -d '"' | sed 's/.*/AGENT_HUB_& BRUNNA_&/'); do
+    [ -n "${!_n+x}" ] && _env+=("$_n=${!_n}")
+  done
+  exec /usr/bin/env -i "HOME=$_home" "PATH=$PATH" "USER=$_user" "LANG=${LANG:-C}" ${_env[@]+"${_env[@]}"} /bin/bash -p "$_self" --clean "$@"
+fi
+case "${1:-}" in --as-project) export HUB_AS_PROJECT=1; shift ;; --clean) shift ;; esac
+
 HUB="${AGENT_HUB_ROOT:-${BRUNNA_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}}"
 source "$(dirname "${BASH_SOURCE[0]}")/hubpaths.sh"
 event="${1:-}"
 
 # where the repo is, from the .git pointer files (bin/gitdirs.py), not from git: this part runs as the user before it
 # knows whose repo it is, and the repo's config can hang even rev-parse
-IFS=$'\t' read -r top git_dir common < <("$HUB/bin/py" "$HUB/bin/gitdirs.py" "$PWD" 2>/dev/null) || exit 0
+_found="$("$HUB/bin/py" "$HUB/bin/gitdirs.py" "$PWD" 2>/dev/null)"; _rc=$?
+if [ "$_rc" = 127 ]; then   # seen, as a hook's failure is, and no exit code the tool takes for a refusal: no session is stopped
+  # only in a linked worktree of an onboarded project, found with the shell alone: its .git file says where the main checkout is
+  _d="$PWD"; while [ -n "$_d" ] && [ ! -e "$_d/.git" ]; do _d="${_d%/*}"; done
+  _g=""; [ -n "$_d" ] && [ -f "$_d/.git" ] && IFS= read -r _g <"$_d/.git"
+  _g="${_g#gitdir: }"; case "$_g" in */.git/worktrees/*) ;; *) exit 0 ;; esac
+  [ -d "${_g%/.git/worktrees/*}/.agent-memory" ] || exit 0
+  hub_say "brunna: the platform's Python was not found, so this session gets no memory or mail here; run bin/setup-python once on this machine" | tee /dev/stderr
+  exit 127
+fi
+IFS=$'\t' read -r top git_dir common <<<"$_found" || exit 0
+[ "$_rc" = 0 ] && [ -n "$common" ] || exit 0
 [ "$git_dir" = "$common" ] && exit 0          # main checkout: the project's own hooks handle it
 main=$(dirname "$common")                      # <main checkout>/.git → <main checkout>
 [ -d "$main/.agent-memory" ] || exit 0         # not an onboarded project
@@ -75,7 +106,7 @@ if [ -z "${HUB_AS_PROJECT:-}" ]; then
        case "$top/" in "$owner/"*) ;; *) exit 0 ;; esac
        "$HUB/bin/py" "$HUB/bin/render-project-settings.py" --worktree "$top" 2>/dev/null
        AGENT_HUB_OFFLINE=1 "$HUB/bin/py" "$HUB/bin/project_git.py" run-as "$project" "$top" -- \
-         bash "$HUB/bin/worktree-memory.sh" "$event" </dev/null
+         /bin/bash -p "$HUB/bin/worktree-memory.sh" --as-project "$event" </dev/null
        exit 0 ;;
     3) ;;
     4) [ "$event" = start ] && hub_say "(this folder's .git says it is a worktree of {main}, but {main} doesn't list it, so this session gets no mail or memory here. If it was moved by hand, run git worktree repair in {main}.)" main="$main"

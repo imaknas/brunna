@@ -146,6 +146,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fcntl
 import hashlib
 import inspect
 import json
@@ -3732,30 +3733,98 @@ def prune_wake_addresses(live=None) -> list[str]:
     return gone
 
 
+BROKEN_FILE = (sqlite3.SQLITE_CORRUPT, sqlite3.SQLITE_NOTADB)   # what SQLite says when it's the file that is broken
+PAGE_ERROR = re.compile(r"error code=(\d+)")   # quick_check's row for a page it couldn't read, whatever the reason
+
+
 def check_integrity() -> bool:
-    """If it's broken, move it aside and start a new one (letters not yet received are lost; no backup, accepted by
-    the owner)."""
-    if not DB.exists():
+    """If the file is broken, move it aside, start a new one and tell the owner (letters not yet received are lost; no
+    backup, accepted by the owner). Only then: an error that isn't the file's (a full disk, a lock, one that can't be
+    opened) is raised, and the bus stays as it is."""
+    try:
+        c, why, checked = None, None, DB.stat().st_ino
+    except FileNotFoundError:
         return True
     try:
-        ok = sqlite3.connect(DB, timeout=30).execute("PRAGMA quick_check").fetchone()[0] == "ok"
+        c = sqlite3.connect(DB, timeout=30)
+        rows = [str(r[0]) for r in c.execute("PRAGMA quick_check").fetchall()]
+        codes = [int(n) for r in rows for n in PAGE_ERROR.findall(r)]
+        if any(n & 0xFF not in BROKEN_FILE for n in codes):
+            raise sqlite3.OperationalError("; ".join(rows)[:300])
+        if rows != ["ok"]:
+            why = _("quick_check is not ok")
     except sqlite3.DatabaseError as e:
-        ok, why = False, str(e)
-    else:
-        why = _("quick_check is not ok")
-    if ok:
+        if (getattr(e, "sqlite_errorcode", None) or 0) & 0xFF not in BROKEN_FILE:   # extended codes: the low byte is the kind
+            log_if_it_can(_("bus.db could not be checked ({why}); it is left as it is", why=e))
+            raise
+        why = str(e)
+    finally:
+        if c is not None:
+            c.close()
+    if why is None:
         return True
-    dest = DB.with_name(f"bus.db.corrupt-{now():%Y%m%d-%H%M}")
-    for suffix in ("", "-wal", "-shm"):
-        src = pathlib.Path(str(DB) + suffix)
-        if src.exists():
-            src.rename(pathlib.Path(str(dest) + suffix))
-    log(_("bus.db is broken ({why}); moved it to {name} and started a new one", why=why, name=dest.name))
+    with open(DB.with_name("bus-move.lock"), "a") as held:   # dispatch and the bridge can find it broken at the same time
+        fcntl.flock(held, fcntl.LOCK_EX)
+        if not DB.exists() or DB.stat().st_ino != checked:   # the other one has moved it: what is there now is the new bus
+            return True
+        stem = dest = DB.with_name(f"bus.db.corrupt-{now():%Y%m%d-%H%M}")
+        n = 1
+        while any(os.path.lexists(f"{dest}{suffix}") for suffix in ("", "-wal", "-shm")):   # never over an earlier one
+            n += 1
+            dest = stem.with_name(f"{stem.name}-{n}")
+        # the mark first, whole or not at all: nothing is moved that couldn't be told (no room for it is no room for a new
+        # bus either)
+        hubconf.write_atomic(moved_mark(dest), json.dumps({"why": why, "at": iso()}, ensure_ascii=False))
+        for suffix in ("", "-wal", "-shm"):
+            src = pathlib.Path(str(DB) + suffix)
+            if src.exists():
+                src.rename(pathlib.Path(str(dest) + suffix))
+    log_if_it_can(_("bus.db is broken ({why}); moved it to {name} and started a new one", why=why, name=dest.name))
+    tell_moved()
     return False
 
 
+def log_if_it_can(msg: str) -> None:
+    try:
+        log(msg)
+    except OSError:   # a full disk: what comes after the line matters more
+        pass
+
+
+def moved_mark(dest: pathlib.Path) -> pathlib.Path:
+    """What says that this file was moved aside and the owner isn't told yet: gone once the alert has been sent."""
+    return dest.with_name(f"moved-{dest.name}.json")
+
+
+def tell_moved() -> None:
+    """Straight to the owner (alert.route's default): what watches the mailbox never goes through it
+    (docs/design/alert-routing.md). Every file moved and not told; tried again by the bridge until it has gone. A mark
+    whose file isn't there yet is a move under way, or one that stopped: that one goes after a day."""
+    try:
+        problems, ids, marks = [], [], []
+        for f in sorted(DB.parent.glob("moved-bus.db.corrupt-*.json"), key=lambda f: f.stem):
+            rec, dest = json.loads(f.read_text()), f.with_name(f.name.removeprefix("moved-").removesuffix(".json"))
+            if dest.exists():
+                problems.append(_(
+                    "The mailbox's database was broken ({why}): it was moved to {file} and a new, empty one started at {at}. Letters "
+                    "nobody had received yet are no longer in the mailbox.", why=rec["why"], file=dest, at=rec["at"][:16]))
+                ids.append(dest.name)
+                marks.append(f)
+            elif time.time() - f.stat().st_mtime > 86400:
+                f.unlink()
+        if not problems:
+            return
+        import alert
+        if alert.once("mailbox-bus-moved", problems, "", ids=ids):
+            for f in marks:
+                f.unlink(missing_ok=True)
+    except Exception as e:   # noqa: BLE001 (telling it must not stop the new bus)
+        log_if_it_can(_("the owner could not be told that bus.db was moved aside: {e!r}", e=e))
+
+
 def cmd_bridge() -> None:
-    check_integrity()
+    if check_integrity():   # (a file moved aside now is told already)
+        tell_moved()
     c = db()
     for step in (import_handoffs, forward, dispatch_locked, prune):
         try:

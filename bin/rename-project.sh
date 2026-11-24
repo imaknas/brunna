@@ -139,6 +139,8 @@ mv ~/.memory-copies/$OLD ~/.memory-copies/$NEW
 git -C ~/.memory-copies/$NEW remote set-url origin ~/git-origin/$NEW-memory.git
 git -C ~/.memory-copies/$NEW fetch -q origin
 [ -f $ckpt/$OLD.sha ] && mv $ckpt/$OLD.sha $ckpt/$NEW.sha || true
+# what was written of its sandbox settings, and what of the user was kept; what stays behind is never put back elsewhere
+$hubdir/bin/py $hubdir/bin/render-project-settings.py --renamed $OLD $NEW $(printf %q "$NEW_PATH") || true
 # the platform credentials and their statuses (bin/credentials.py rename: nothing moves unless every place is free)
 $hubdir/bin/py $hubdir/bin/credentials.py rename $OLD $NEW --apply
 '

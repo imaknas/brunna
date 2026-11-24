@@ -42,6 +42,7 @@ import stat
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import gitdirs  # noqa: E402
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import nofollow  # noqa: E402
@@ -125,10 +126,26 @@ def _undo(project: str, ws: pathlib.Path, rec: dict) -> None:
                     timeout=UNDO_TIMEOUT_S)
 
 
+def other_repo(cwd, ws) -> pathlib.Path | None:
+    """The repo this folder is in when that isn't the project (nor a worktree at the tool's place): found by path."""
+    ws = pathlib.Path(ws).resolve()
+    here = pathlib.Path(cwd).resolve()
+    top = next((d for d in (here, *here.parents) if os.path.lexists(d / ".git")), None)
+    if top is None or top == ws or not top.is_relative_to(ws):
+        return None
+    try:
+        return None if gitdirs.dirs(top).common == gitdirs.dirs(ws).common else top
+    except (OSError, RuntimeError, AttributeError):   # a .git that is no repo
+        return top
+
+
 def make(cwd, name: str, rt) -> tuple[pathlib.Path, list[str]]:
     project, _doc, ws = _project(cwd)
     if not valid_name(name):
         raise Refused(_("not a worktree name the platform makes: {name}", name=name))
+    if (repo := other_repo(cwd, ws)):
+        raise Refused(_("{folder} is a repo of its own in {project}'s folder: the platform makes worktrees of the project only; "
+                        "make this one with git worktree", folder=repo, project=project))
     path, branch = rt.worktree_location(ws, name)
     path = pathlib.Path(path)
     if not path.is_relative_to(ws) or path == ws:
@@ -184,21 +201,38 @@ def make(cwd, name: str, rt) -> tuple[pathlib.Path, list[str]]:
     return path, project_git.strs(got.get("skipped"))
 
 
+def clear_nested(project: str, doc: dict, ws: pathlib.Path, path: pathlib.Path) -> None:
+    """The settings file the platform wrote in each repo inside this worktree (a submodule, a clone): the project can't
+    remove it either. Only a file it wrote; nothing followed."""
+    rps = _renderer()
+    for rel in rps.known(project, doc)["nested"]:
+        at = pathlib.PurePosixPath(rel)
+        if (ws / at).is_relative_to(path) and ws / at != path:
+            try:
+                rps.clear_nested(doc, at)
+            except (OSError, ValueError) as e:
+                raise Refused(_("couldn't clear what the platform wrote in {path} ({why}); nothing more was removed", path=ws / at, why=e)) from None
+
+
 def render_settings(project: str, path: pathlib.Path) -> pathlib.Path:
     """The platform's session settings for the project written into the worktree it just made
     (render-project-settings.render_worktree: the same file every session folder of a sandboxed project gets). The file
     written; raises when it can't be."""
+    return _renderer().render_worktree(project, path)
+
+
+def _renderer():
     import importlib.machinery
     import importlib.util
     loader = importlib.machinery.SourceFileLoader("render_project_settings_sw",
                                                   str(hubconf.ROOT / "bin" / "render-project-settings.py"))
     mod = importlib.util.module_from_spec(importlib.util.spec_from_loader(loader.name, loader))
     loader.exec_module(mod)
-    return mod.render_worktree(project, path)
+    return mod
 
 
 def drop(cwd, path, rt) -> None:
-    project, _doc, ws = _project(cwd)
+    project, doc, ws = _project(cwd)
     p = pathlib.Path(path)
     if not p.is_absolute():
         p = pathlib.Path(cwd) / p
@@ -210,6 +244,7 @@ def drop(cwd, path, rt) -> None:
         pointer = None
     if ".." in p.parts or not pointer or not pointer.startswith(b"gitdir: "):
         raise Refused(_("{path} isn't a worktree in {project}'s workspace", path=path, project=project))
+    clear_nested(project, {**doc, "name": project}, ws, p)
     clear_platform_entries(ws, p)
     r = project_git.job(project, ws, "session-worktree-remove", ws, p, timeout=UNDO_TIMEOUT_S)
     if r.returncode != 0:

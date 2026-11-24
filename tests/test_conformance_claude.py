@@ -63,6 +63,13 @@ if mode != "plugins-none" and ("--restricted" not in a or mode == "plugins-leak"
                 subprocess.run(x["command"], shell=True)
         for mod in doc.get("modules") or []:
             pathlib.Path(re.search(r'write\(("[^"]+")', (d / "hooks" / mod).read_text())[1].strip('"')).write_text("ran")
+f = pathlib.Path.cwd() / ".claude" / "settings.local.json"   # settings-taken: nothing of a file with a value it doesn't take
+st = json.loads(f.read_text()) if f.is_file() else {}
+if (isinstance(st.get("model", ""), str) or mode == "lenient") and not (mode == "picky" and st["permissions"].get("defaultMode") == "auto") and mode != "deaf":
+    for e in (st.get("hooks") or {}).get("SessionStart") or []:
+        for x in e["hooks"]:
+            if x["command"].startswith("touch "):
+                subprocess.run(x["command"], shell=True)
 prompt = sys.stdin.read()
 token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")
 if "automated test of a sandbox" in prompt:   # control / confine-sandbox: one canary write per run
@@ -187,7 +194,7 @@ class Through(unittest.TestCase):
 
     def test_the_checks_a_stand_in_can_satisfy_pass(self):
         for name in ("agent-result", "completion-no-tools", "instructions-reach", "sessions-read", "stream-exchange",
-                     "tool-servers-listed", "auth-login-error", "control", "confine-sandbox"):
+                     "tool-servers-listed", "auth-login-error", "control", "confine-sandbox", "settings-taken"):
             with self.subTest(check=name):
                 got = self.one(name)
                 self.assertEqual(got.state, "pass", got)
@@ -224,6 +231,15 @@ class Through(unittest.TestCase):
                             str(self.exe)], capture_output=True, text=True, env={**world.env(), "STAND_IN_MODE": mode},
                            timeout=300)
         return json.loads(r.stdout.strip().splitlines()[-1]), world
+
+    def test_settings_the_tool_drops_fail_it(self):
+        got, _world = self.child("settings-taken", "picky")
+        self.assertEqual(got["state"], "fail", got)
+        self.assertIn("auto", str(got))
+        self.assertEqual(self.child("settings-taken", "deaf")[0]["state"], "fail", "no hook ever runs: not taken")
+        self.assertEqual(self.child("settings-taken", "lenient")[0]["state"], "fail", "the control tells nothing")
+        self.assertEqual(self.child("settings-taken", "unconfined")[0]["state"], "fail", "taken, and not held to")
+        self.assertEqual(self.child("settings-taken", "good")[0]["state"], "pass")
 
     def test_the_session_checks_hold_on_a_tool_that_honours_the_settings(self):
         for name in ("control", "confine-sandbox"):
@@ -336,6 +352,74 @@ class Through(unittest.TestCase):
     def test_no_token_is_a_refusal_not_a_fail(self):
         with mock.patch.object(runtime_claude, "_token_file", lambda: self.tmp / "none"), self.assertRaises(RuntimeError):
             self.one("agent-result")
+
+
+class SessionNeutral(unittest.TestCase):
+    """session-neutral and nested-settings: a committed value that holds fails; one that does nothing even without the
+    platform's is an error, never a pass; no result is an error. The tool itself is a function here."""
+
+    def run_it(self, fn, tool):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        root = pathlib.Path(tmp.name).resolve()
+        (root / "p" / ".claude").mkdir(parents=True)
+        world = mock.Mock(root=root, home=root)
+        api = mock.Mock(keys=set(), run=lambda cwd, commands, key=True: tool(pathlib.Path(cwd), commands, key, api))
+        with mock.patch.object(conformance_claude, "_rendered", lambda w: (root / "p", root, {"sandbox": {"enabled": True, "network": {}, "filesystem": {}}})), \
+                mock.patch.object(conformance_claude, "_StandIn", lambda: api):
+            return fn(world)
+
+    def neutral(self, held):
+        """held(is the platform's value there) → whether the committed file's value shows."""
+        def cases(root, sb, mark, sock):
+            return [("x", {}, {"ours": 1}, {"ours": 0}, "true", lambda out: out == "held")]
+
+        def tool(cwd, commands, key, api):
+            api.keys.add(("Bearer sk-ant-oat01-nobodys", None))
+            doc = json.loads((cwd / ".claude" / "settings.local.json").read_text())
+            return None if held is None else "held" if "ours" in doc and held(bool(doc["ours"])) else ""
+        with mock.patch.object(conformance_claude, "_neutral_cases", cases):
+            return self.run_it(conformance_claude.session_neutral, tool).state
+
+    def test_neutral(self):
+        self.assertEqual(self.neutral(lambda ours: not ours), "pass")
+        self.assertEqual(self.neutral(lambda ours: True), "fail")
+        for platform, state in (("darwin", "error"), ("linux", "pass")):   # measured on macOS: elsewhere said, never an error
+            with mock.patch.object(sys, "platform", platform):
+                self.assertEqual(self.neutral(lambda ours: False), state)
+        self.assertEqual(self.neutral(None), "error")
+
+    def test_a_key_helper_that_takes_a_logins_place(self):
+        def tool(cwd, commands, key, api):
+            api.keys.add(("Bearer sk-x", "sk-x"))
+            return ""
+        with mock.patch.object(conformance_claude, "_neutral_cases", lambda *a: []):
+            self.assertEqual(self.run_it(conformance_claude.session_neutral, tool).state, "fail")
+
+    def nested(self, reads, refuses):
+        def tool(cwd, commands, key, api):
+            doc = json.loads((cwd / ".claude" / "settings.local.json").read_text())
+            boxed = "sandbox" in doc and reads
+            if "hooks" in doc and not (refuses and "ConfigChange" in doc["hooks"]):
+                boxed = False
+            if not boxed:
+                pathlib.Path(commands[-1].split("> ")[1]).write_text("x")
+            return ""
+        return self.run_it(conformance_claude.nested_settings, tool).state
+
+    def test_nested(self):
+        self.assertEqual(self.nested(True, True), "pass")
+        self.assertEqual(self.nested(False, True), "fail")
+        self.assertEqual(self.nested(True, False), "fail")
+
+    def test_each_case_has_a_control_of_its_own(self):
+        with tempfile.TemporaryDirectory() as d:
+            cases = conformance_claude._neutral_cases(pathlib.Path(d), {"enabled": True, "network": {"allowAllUnixSockets": False}, "filesystem": {},
+                                                                        "autoAllowBashIfSandboxed": False}, pathlib.Path(d) / "m", "/tmp/x")
+        self.assertEqual(len(cases), 8)
+        for what, theirs, mine, control, _command, _held in cases:
+            self.assertTrue(theirs, what)
+            self.assertNotEqual(mine, control, what)
 
 
 class FolderGitStates(unittest.TestCase):

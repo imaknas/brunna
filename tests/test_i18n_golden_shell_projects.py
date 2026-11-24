@@ -345,7 +345,20 @@ class Golden(unittest.TestCase):
         # (here not under HOME at all)
         (self.hub / ".state").mkdir(exist_ok=True)
         (self.hub / ".state" / "alpha.sha").write_text("abc\n")
+        # so do the record of its sandbox settings and what was the user's, kept while they are on; what an earlier
+        # project of the new name left stays too
+        rendered = self.hub / ".state" / "rendered-settings"
+        for d, text in (("alpha", "mine\n"), ("beta", "an earlier beta's\n")):
+            (rendered / "saved" / d).mkdir(parents=True)
+            (rendered / "saved" / d / "before.json").write_text(json.dumps({"what": text, "workspace": str(alpha)}))
+        (rendered / "alpha.json").write_text(json.dumps({"deny": ["x"], "workspace": str(alpha)}))
         self.call("renamed", s, ["alpha", "beta", "--apply"])
+        moved = str(self.ws / "beta")
+        self.assertEqual([p.name for p in rendered.glob("*.json")], ["beta.json"])
+        self.assertEqual(json.loads((rendered / "beta.json").read_text()), {"deny": ["x"], "workspace": moved})
+        self.assertEqual(json.loads((rendered / "saved" / "beta" / "before.json").read_text()), {"what": "mine\n", "workspace": moved})
+        self.assertEqual(sorted(json.loads(p.read_text())["what"] for p in (rendered / "saved").glob("*/before.json")),
+                         ["an earlier beta's\n", "mine\n"])
         self.assertEqual(sorted(p.name for p in (self.hub / ".state").glob("*.sha")), ["beta.sha"])
         self.out.append("=== legacy-paths.tsv\n" + (self.hub / "legacy-paths.tsv").read_text())
         self.check("shell-rename-project.txt")

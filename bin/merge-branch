@@ -217,8 +217,8 @@ def main() -> int:
         if (info.get("enforce") or {}).get("sandbox") is True:
             import policy
             fork = git(wt, "merge-base", base, head0).stdout.strip()
-            moved = {"main": git(wt, "diff", "--name-only", f"{base}...{head0}").stdout.split(),
-                     "worktree": git(wt, "diff", "--name-only", f"{fork}..{base}").stdout.split() if fork else []}
+            moved = {"main": git(wt, "diff", "-z", "--name-only", f"{base}...{head0}").stdout.split("\0"),
+                     "worktree": git(wt, "diff", "-z", "--name-only", f"{fork}..{base}").stdout.split("\0") if fork else []}
             held = {where: found for where, paths in moved.items() if (found := policy.protected_changes(paths))}
             if held:
                 return fail("tool-folder", _("this merge would change files in the coding agent's folder, which the "
