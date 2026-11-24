@@ -43,6 +43,15 @@ def tree(*roots) -> dict:
             st = p.lstat()
             out[str(p)] = (st.st_size if p.is_file() else None, st.st_mtime_ns)
     return out
+
+
+def mine(files: dict) -> dict:
+    """Without what other test modules, run at the same time on this same tree, write into its .logs and .state: the
+    memory sync's log (test_agent_folder_git) and a test run's own throwaway platform."""
+    theirs = (str(ROOT / ".logs" / "sync-all-memory-"), str(ROOT / ".state" / "run-tests-guard-"))
+    return {p: v for p, v in files.items() if not p.startswith(theirs)}
+
+
 SESSION = "11111111-2222-3333-4444-555555555555"
 OTHER = "99999999-2222-3333-4444-555555555555"
 
@@ -206,9 +215,9 @@ class Surface(unittest.TestCase):
         self.assertEqual(out["lines"], [], "nothing needs the owner: the band stays empty")
         self.tell(first)
         before = self.bus_state()   # the test's own read is before the snapshot and after the second one
-        files = tree(self.tmp, ROOT / ".logs", ROOT / ".state")
+        files = mine(tree(self.tmp, ROOT / ".logs", ROOT / ".state"))
         out = self.surface()
-        after = tree(self.tmp, ROOT / ".logs", ROOT / ".state")
+        after = mine(tree(self.tmp, ROOT / ".logs", ROOT / ".state"))
         self.assertEqual(self.bus_state(), before, "read-only: no event, no presence")
         # a reader of a WAL database (glance's too) may leave SQLite's companion files -wal and -shm beside it, which
         # the platform's own connections keep there anyway; the database and everything else stay as they were
