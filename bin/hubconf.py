@@ -1077,7 +1077,7 @@ def code_rev() -> str | None:
 
 try:   # the code this process started with: every platform process imports hubconf first (service-code.md D2)
     LOADED_REV = code_rev()
-except (OSError, ValueError):
+except Exception:   # advisory: never the reason a platform process (the watchdog included) fails to start
     LOADED_REV = None
 
 

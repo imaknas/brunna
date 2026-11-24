@@ -64,6 +64,11 @@ a linked worktree never marks. A checkout moved some other way (a manual `git
 pull`, a land that failed) is followed after `LAND_GRACE_S` (10 minutes) with no land. HEAD itself stays the test for D2:
 old code must not write even before the land is done.
 
+Every commit the checkout moves to counts, also one that changes no code: on the old layout (no instance directory),
+`commit-hub-files.sh` commits config into the hub checkout itself, and then the services restart after the grace, and
+a process that committed and refreshes in the same run leaves the index to the next one (the scheduler's tick). The
+instance directory's config repo is another repo and moves nothing here.
+
 Not a git checkout (an exported test tree) or a HEAD it can't read (a reftable repo): `code_rev()` is None; the services
 fall back to `code_stamp()` with the 60-second settle as before, and the index guard (D2) is off.
 
