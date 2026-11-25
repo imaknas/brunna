@@ -80,5 +80,12 @@
  "an empty key helper changes what a login sends": "空的金鑰程式改變了登入送出的東西",
  "the settings file of a repo in the project's folder isn't read ({what})": "專案資料夾裡的 repo 的設定檔沒被讀取({what})",
  "a live session takes in a settings file its check refuses": "進行中的 session 載入了檢查拒絕的設定檔",
- "tests nothing: a settings file replaced under a live session changed nothing": "沒測到東西:session 進行中換掉設定檔沒有任何改變"
+ "tests nothing: a settings file replaced under a live session changed nothing": "沒測到東西:session 進行中換掉設定檔沒有任何改變",
+ "the control run gave no result": "對照組沒有結果",
+ "tests nothing: without the deny a call read nothing either": "什麼都沒測到:沒有禁止時也有呼叫讀不到東西",
+ "a settings file": "設定檔",
+ "the command line": "命令列",
+ "the run with the deny in {how} gave no result": "禁止寫在{how}的那次沒有結果",
+ "denied in {how}, but read: {files}": "禁止寫在{how},還是讀到了:{files}",
+ "denied in {how}, and not readable though ordinary: {files}": "禁止寫在{how},一般檔案也讀不到了:{files}"
 }

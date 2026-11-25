@@ -32,7 +32,9 @@
   "tests/fixtures/i18n-golden/agenthub-modules.txt": 1,
   "tests/fixtures/i18n-golden/en/agenthub-modules.txt": 1
  },
- "secrets-path": {},
+ "secrets-path": {
+  "bin/policy.py": 1
+ },
  "public-docs": {
   "README.md": 7,
   "README.zh-Hant.md": 6

@@ -104,7 +104,8 @@ Muninn, which vendors the schema, is told.
   run" and turn `run_refusal` off). On a dry run it prints the reason and exits 2, as the `tool_servers` branch does;
   `fail()` only on a real run.
 - `prompt_source: untrusted`: the prompt is text anyone who can write the bus wrote (M6). Named apart from the existing
-  `prompts:` key.
+  `prompts:` key. Since 11-25 such a run also reads no file that holds credentials by convention, and `mailbox-propose` is
+  marked too (`project-agent-calls.md` C, "credentials nobody declared").
 
 `llm.py lint` gets the cross-field rules: `mail:` is required on every `settings: platform` point and refused on any
 other; `mail_from_env` and `letters_env` only with `mail: tools`; every `mail: tools` point declares

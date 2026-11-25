@@ -290,6 +290,7 @@ points:
     # the prompt comes from a letter any project can send, and a settings file the run loads can grant it reads past its folder
     # (real runs: docs/design/mailbox-session-first.md, step 3's record). A runtime that can't be told is held to the throwaway copy
     restricted: true
+    prompt_source: untrusted
     extra_args: ["--strict-mcp-config"]
     output: {format: json, schema: llm/mailbox-propose.schema.json}
     timeout_s: 1800

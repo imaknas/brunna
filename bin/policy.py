@@ -161,6 +161,23 @@ def secret_names(project: str, doc: dict) -> list[tuple[pathlib.Path, str]]:
     return out
 
 
+# Files that hold credentials by convention, whether or not anybody declared them: what no run whose prompt others can
+# write reads (credential_names). Few and certain, since a deny can't be narrowed: names a project's source or notes would
+# have (token, credential, password) aren't here, though check-secrets reminds the owner of those too. A name at any depth,
+# and what is in a folder of that name; a path with a slash likewise. TOP: under the project's own folder only, since
+# a source folder deeper down is called that. For runs with no shell: in a sandbox git itself couldn't read .git/config,
+# nor a program its certificates (*.pem).
+CREDENTIAL_NAMES = (".env*", "*.env", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_dsa*", "id_ecdsa*", "id_ed25519*", ".netrc",
+                    ".npmrc", ".pypirc", ".git-credentials", ".secrets", ".git/config", ".git/config.worktree", ".git/credentials",
+                    ".git/modules/**/config", ".git/worktrees/**/config.worktree")
+CREDENTIAL_TOP = ("secrets", "data/secrets")
+
+
+def credential_names() -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """(at any depth, at the top of a folder the run works in): the neutral list; a runtime writes it in its own rules."""
+    return CREDENTIAL_NAMES, CREDENTIAL_TOP
+
+
 def _secret_text(raw: str) -> bool:
     """A secret's path holds nothing a deny rule would read as syntax (registry.SECRET_PATH, also checked there)."""
     import registry

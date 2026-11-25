@@ -469,6 +469,7 @@ def platform_settings(project: str, spec: dict, run_dir, keep: pathlib.Path | No
     deny += [r for r in run_write_denied(project, [*(cwd and [cwd] or []), *folders]) if r not in deny]
     if spec.get("prompt_source") == "untrusted":
         deny += [r for r in instructions_denied(project, [*(cwd and [cwd] or []), *folders]) if r not in deny]
+        deny += [r for r in credentials_denied([*project_roots(project), *(cwd and [cwd] or []), *folders]) if r not in deny]
     # no allow list: the run's own rules are its whole boundary, and its mail is the platform's tools, never a command
     out = {"permissions": {"deny": deny}}
     # the registry's enforce.sandbox, as render-project-settings decides it (not the services-only exemption)
@@ -481,6 +482,17 @@ def platform_settings(project: str, spec: dict, run_dir, keep: pathlib.Path | No
     with os.fdopen(fd, "w") as f:
         f.write(json.dumps(out, ensure_ascii=False))
     return p
+
+
+def credentials_denied(folders) -> list[str]:
+    """What a run whose prompt others can write neither reads nor edits under any of these folders: the files that hold
+    credentials by convention (policy.credential_names), declared or not. Each folder as configured and where it resolves.
+    Read, Grep and Glob are all held, however the name is capitalised and through a link (conformance `run-credentials`)."""
+    import policy
+    deep, top = policy.credential_names()
+    places = list(dict.fromkeys(s for f in folders if f for s in _spellings(os.path.abspath(f))))
+    return [f"{t}({_rule_path(f)}{at}{n}{tail})" for f in places for at, names_ in (("/**/", deep), ("/", top)) for n in names_
+            for tail in ("", "/**") for t in ("Read", "Edit")]
 
 
 def _folds(name: str) -> list[str]:
@@ -1450,11 +1462,17 @@ def _flags(task, exe: str | None = None) -> list:
         if (bad := [r for r in allowed if not RULE.fullmatch(r)]):
             raise ValueError(f"judgment point {task.point}: not a permission rule: {', '.join(map(repr, bad[:3]))}")
         cmd += ["--allowedTools", *allowed]
+    off = []
+    if spec.get("restricted") and spec.get("settings") != "platform" and spec.get("prompt_source") == "untrusted":
+        # it loads no settings file that could say so (mailbox-propose: what its throwaway copy holds)
+        off += credentials_denied([task.cwd or os.getcwd()])
     if task.deny_servers:
         # a whole server: `mcp__<id>` with no tool matches every tool it has (deny wins over any allow), and a tool
         # denied this way isn't even offered to the model (live probe 11-01). The built-in resource tools reach any
         # connected server's resources by name, past those rules: off too
-        cmd += ["--disallowedTools", *(f"mcp__{s}" for s in task.deny_servers), *MCP_RESOURCE_TOOLS]
+        off += [*(f"mcp__{s}" for s in task.deny_servers), *MCP_RESOURCE_TOOLS]
+    if off:
+        cmd += ["--disallowedTools", *off]
     extra = list(spec.get("extra_args") or []) + list(task.extra or [])
     if spec.get("tool_servers") == "none" and SEAL not in extra:
         extra.append(SEAL)   # loads none of the environment's servers (the point's tool_servers: none)

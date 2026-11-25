@@ -288,6 +288,20 @@ Before it lands, `registry.py check --secrets-report` lists the sandboxed projec
 runs. In an unsandboxed project a `Bash(...)` rule's script runs as the user and can still open them; the rules file and
 this design say so.
 
+### 11-25: credentials nobody declared
+
+A run whose prompt others can write (`prompt_source: untrusted`: triage and its branch, an event agent job, `mailbox-propose`)
+also reads and edits none of the files that hold credentials by convention (`policy.CREDENTIAL_NAMES`, at any depth under
+every folder it works in, the folder as configured and where it resolves; `CREDENTIAL_TOP`, at the top of one). The first three
+have it in their settings file, `mailbox-propose`, which loads none, on its command line. The conformance check
+`run-credentials` holds it with the real tool: Read, Grep, Glob, other letters, links, each with a control, and ordinary files
+readable. A deny can't be narrowed, so the names are few, `.env.example` goes with them, and an event job whose `allow:` names one
+no longer reads it. check-secrets reminds the owner of more names (token, oauth, password), which source files have too.
+
+Not covered: a credential in a file with an ordinary name; a branch whose session already had one in its context; what a letter
+says (letters aren't scanned); a project's own clock jobs and agent calls, which no letter starts; a runtime without confined
+runs on `mailbox-propose` (doctor says so), which reads what its own settings allow.
+
 ## D. Services and jobs find `brunna` by name
 
 A platform-owned folder `<shared>/cli/` holds only a `brunna` wrapper:

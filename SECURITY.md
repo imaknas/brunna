@@ -35,6 +35,17 @@ folder's files only, and has no sandbox of the platform's); and, where you insta
 user-level worktree hooks, the line of shell in your own settings that starts them, which the agent runs with the
 session's environment. Details: "A project's own settings files" in [docs/design/capabilities.md](docs/design/capabilities.md).
 
+**What a letter can have an unattended run read.** A run the platform starts for a letter or an event reads the project's files,
+but not the credentials its entry declares, nor files that hold credentials by convention (`.env*`, `*.pem`, `*.key`, SSH keys,
+`.npmrc`, `.git/config`, `secrets/`, and the like). A credential in a file with an ordinary name is readable: declare it. Not
+held to this: a branch of a session that already had a credential in its context, and, with `mailbox.handler: propose`, an
+agent that can't be told what not to read (doctor names it).
+
+**The status page** is on 127.0.0.1 under an address with a key in it. Whoever has the address can open it, and what it is
+made from are files on disk, which your folders' permissions protect. While its server isn't running, another program on the
+machine can take the port and be given the key by your bookmark; doctor says so while it lasts. Delete the key then (a new
+one is made when the service restarts).
+
 Out of scope: a session the owner opens by hand. There the coding agent's own protections apply, and the platform
 advises but does not enforce (see "Tool neutrality" in [AGENTS.md](AGENTS.md)).
 

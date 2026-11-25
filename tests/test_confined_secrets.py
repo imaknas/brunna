@@ -111,6 +111,69 @@ class Settings(Scratch):
         self.assertFalse([r for r in self.settings(bare)["permissions"]["deny"] if any(m in r for m in mine)])
 
 
+class Undeclared(Scratch):
+    """Credentials by convention (policy.credential_names), in the runs whose prompt others can write."""
+
+    def deny(self, spec, folders=(), roots=None):
+        doc = {"name": "p", "paths": {"workspace": str(self.ws)}}
+        pol = {"other_projects": [], "deny_write": [], "deny_read": [], "platform_commands": [], "platform_cli": [],
+               "write": [str(self.ws)], "network": [], "credential_files": [], "credentials": [], "workspace": str(self.ws)}
+        run_dir = pathlib.Path(tempfile.mkdtemp(dir=self.tmp))
+        with mock.patch("policy.policy", lambda name, d, i: pol), mock.patch("registry.refresh", lambda: {"projects": {"p": doc}}), \
+                mock.patch.object(runtime_claude, "project_roots", lambda p: roots or [self.ws]):
+            f = runtime_claude.platform_settings("p", spec, run_dir, None, self.ws, folders=folders)
+        return json.loads(f.read_text())["permissions"]["deny"]
+
+    def test_denied_where_the_prompt_is_others(self):
+        extra = self.tmp / "elsewhere"
+        extra.mkdir()
+        deny = self.deny({"prompt_source": "untrusted"}, folders=[extra], roots=[self.ws, self.rt])
+        for base in (self.ws, self.rt, extra):
+            rule = runtime_claude._rule_path(base)
+            for n in (".env*", "*.env", "*.pem", "*.key", "id_rsa*", ".npmrc", ".git-credentials", ".secrets", ".git/config", ".git/credentials", ".git/worktrees/**/config.worktree"):
+                for want in (f"Read({rule}/**/{n})", f"Read({rule}/**/{n}/**)", f"Edit({rule}/**/{n})"):
+                    self.assertIn(want, deny)
+            for n in ("secrets", "data/secrets"):
+                self.assertIn(f"Read({rule}/{n}/**)", deny)
+                self.assertNotIn(f"Read({rule}/**/{n}/**)", deny, "a source folder deeper down is called that")
+
+    def test_a_folder_that_is_a_link_is_denied_both_ways(self):
+        link = self.tmp / "link"
+        link.symlink_to(self.ws)
+        got = runtime_claude.credentials_denied([link])
+        for base in (link, self.ws):
+            self.assertIn(f"Read({runtime_claude._rule_path(base)}/**/.env*)", got)
+
+    def test_not_for_the_owners_own_prompts(self):
+        self.assertFalse([r for r in self.deny({}) if "/.env*" in r])
+
+    def test_source_is_not_named_like_a_credential(self):
+        import fnmatch
+        deep, _top = policy.credential_names()
+        for n in ("tokens.py", "secret.py", "credentials.md", "keys.ts", "environment.md", "password_reset.html", "README.md", "STATE.md", "2026-11-25.md"):
+            self.assertFalse([g for g in deep if fnmatch.fnmatch(n, g)], n)
+
+    def test_every_point_that_takes_others_text_says_so(self):
+        """A point that reads files and is started by a letter or an event."""
+        import yaml
+        points = yaml.safe_load((ROOT / "contracts" / "llm-points.yaml").read_text())["points"]
+        self.assertEqual(sorted(n for n, s in points.items() if s.get("prompt_source") == "untrusted"),
+                         ["agent-job-event", "mailbox-conversation", "mailbox-escalation", "mailbox-propose"])
+        self.assertTrue(points["mailbox-propose"]["restricted"])
+
+    def test_the_throwaway_copys_run_has_them_on_its_command_line(self):
+        import runtime_ports
+        import yaml
+        points = yaml.safe_load((ROOT / "contracts" / "llm-points.yaml").read_text())["points"]
+
+        def off(point, **kw):
+            spec = {**points[point], **kw}
+            cmd = runtime_claude._flags(runtime_ports.Task(point=point, prompt="x", spec=spec, cwd=str(self.ws), env={}))
+            return cmd[cmd.index("--disallowedTools") + 1:] if "--disallowedTools" in cmd else []
+        self.assertIn(f"Read({runtime_claude._rule_path(self.ws)}/**/.env*)", off("mailbox-propose"))
+        self.assertEqual(off("mailbox-propose", prompt_source=None), [])
+
+
 class Report(Scratch):
     def test_it_lists_the_jobs_whose_commands_still_read_them(self):
         jobs = [{"name": "j", "kind": "agent", "allow": ["Read", "Bash(.venv/bin/python tools/x.py)"]},
