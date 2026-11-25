@@ -232,7 +232,8 @@ class Catalogs(unittest.TestCase):
             doc = yaml.safe_load(f.read_text()) or {}
             # what check-secrets shows: the description (`agenthub modules`) and each secret's rotate text
             for what, text in [("description", doc.get("description"))] + \
-                    [(f"secret {s.get('name')} rotate", s.get("rotate")) for s in doc.get("secrets") or []]:
+                    [(f"secret {s.get('name')} rotate", s.get("rotate")) for s in doc.get("secrets") or []] + \
+                    [("runtime_preset.login_use", (doc.get("runtime_preset") or {}).get("login_use"))]:
                 if not text:
                     continue
                 used.add(text)

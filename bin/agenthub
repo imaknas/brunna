@@ -407,6 +407,7 @@ def llm_modules_warning(names: list[str]) -> str | None:
 
 def cmd_modules(argv: list[str]) -> int:
     import registry
+    import runtime_ports
     import yaml
     on = set(registry.enabled_modules())
     if not argv:
@@ -427,6 +428,8 @@ def cmd_modules(argv: list[str]) -> int:
         return 1
     d = read_hub_json()
     d.setdefault("modules", {})[name] = argv[0] == "enable"
+    if argv[0] == "disable" and name in runtime_ports.RUNTIMES:
+        end_logins(d, only=name)
     write_hub_json(d)
     print(f"{hubconf.config_path().name}:modules.{name} = {str(argv[0] == 'enable').lower()}")
     if argv[0] == "enable" and name in llm_modules() and (warning := llm_modules_warning([name])):
@@ -575,6 +578,8 @@ def agent_presets() -> dict[str, dict]:
         if isinstance(doc.get("runtime_preset"), dict):
             info = dict(doc["runtime_preset"])
             info["gives"] = i18n.translate("modules", doc.get("description") or "", {})
+            if info.get("login_use"):
+                info["login_use"] = i18n.translate("modules", info["login_use"], {})
             out[f.stem] = info
     return out
 
@@ -699,7 +704,7 @@ def store_install(choice: str) -> bool:
                 "that isn't there yet ({label}). Later: brunna runtimes install {runtime}", runtime=choice,
                 label=missing[0].label))
         return False
-    print(_("brunna runs its own checked copy of {runtime}, separate from yours: it downloads it now (about 300 MB) and "
+    print(_("brunna runs its own checked copy of {runtime}, separate from yours: it downloads it now (300 to 400 MB) and "
             "runs its checks on it, which take some minutes", runtime=choice))
     rc = subprocess.run([*hubconf.launch(BIN / "runtimes.py"), "install", choice]).returncode
     if rc != 0 or runtime_ports.no_checked_copy(choice):
@@ -818,6 +823,7 @@ def set_agent(choice: str, args: dict) -> int:
     presets = agent_presets()
     d = read_hub_json()
     apply_agent(d, choice, presets)
+    end_logins(d, keep=choice)
     write_hub_json(d)
     hubconf._cfg = None
     print(_("✓ the platform's agent: {name}", name=presets[choice]["label"] if choice in presets else choice))
@@ -1169,7 +1175,8 @@ def answers_problem(a) -> str | None:
         if v.startswith("-"):   # it becomes the value of init's option: never an option itself
             return _("the answer to {id} can't start with -", id=k)
     choices = {"language": [*hubconf.LANGUAGES, "split"], "language_ui": list(hubconf.LANGUAGES),
-               "language_content": list(hubconf.LANGUAGES), "agent": [*agent_presets(), "none"], "llm": list(LLM_CHOICES)}
+               "language_content": list(hubconf.LANGUAGES), "agent": [*agent_presets(), "none"],
+               "llm": [*LLM_CHOICES, *(n for n, i in agent_presets().items() if i.get("login_use"))]}
     for k, allowed in choices.items():
         if k in a and a[k] not in allowed:
             return _("{id} takes {choices}", id=k, choices=", ".join(allowed))
@@ -1211,6 +1218,7 @@ def init_questions(args: dict) -> list[dict]:
                 d = new_hub_json(args)
                 choice = args["_agent"]
                 args["_runtime"] = (d.get("runtime") or {}).get("default")   # hub.json isn't written: llm_setup asks
+                args["_installed"] = (d.get("runtime") or {}).get("installed") or [args["_runtime"]]
             if choice is not None:
                 agent_credential(choice, presets)
                 offer_mcp_registration(presets)
@@ -1295,6 +1303,10 @@ def cmd_init(argv: list[str], transport=None) -> int:
     if args.get("lang") and not parse_lang(args["lang"]):
         print(_("brunna init: --lang takes {languages}, or two of them as <interface>,<notes> (nothing was done)",
                 languages=", ".join(hubconf.LANGUAGES)), file=sys.stderr)
+        return 2
+    if dry and hubconf.config_path().exists() and (args.get("lang") or args.get("agent") or "--register-mcp" in flags):
+        print(_("brunna init: --dry-run doesn't go with --lang, --agent or --register-mcp on an instance that is there (nothing was done)"),
+              file=sys.stderr)
         return 2
     if args.get("lang") and hubconf.config_path().exists():
         return set_language(*parse_lang(args["lang"]))   # an existing instance: only the language
@@ -1883,10 +1895,14 @@ def cmd_doctor(argv: list[str]) -> int:
         add("warn", _("the platform starts no AI agent (runtime.default: none): mailbox dispatch is off, so a letter nobody "
                       "picks up waits for a session's hook or for you; sessions of {names} are served by their hooks",
                       names=", ".join(others)),
-            _("set one up: brunna init --agent {names}", names="|".join(agent_presets())))
+            _("set one up: brunna init --agent {names}", names="|".join(
+                n for n, i in agent_presets().items() if ((i.get("settings") or {}).get("runtime") or {}).get("default") != "none")))
         for n in others:
             notes = runtime_ports.feature_notes(n)
+            needs = dict(runtime_ports.features())
             for feat, ok, miss in runtime_ports.feature_table(n):
+                if {"agent", "stream", "completion"} & set(needs[feat]):
+                    continue   # the platform's own runs: it starts none (the line above)
                 if ok:
                     add("ok", _("{runtime}: {feature}: available ({note})", runtime=n, feature=feat, note=notes[feat])
                         if feat in notes else _("{runtime}: {feature}: available", runtime=n, feature=feat))
@@ -1964,6 +1980,8 @@ def cmd_doctor(argv: list[str]) -> int:
                 _("no AI model for brunna's decisions, so the nightly tidy-up doesn't happen (no digest, and STATE.md "
                   "and todo.md are not updated): the runtime {runtime} has no completion interface and {settings} "
                   "has no llm.providers", runtime=rt),
+                _("brunna llm setup (pick one: an API key, a local Ollama, or {agents} with your own login)",
+                  agents=", ".join(i["label"] for i in logins.values())) if (logins := llm_logins(rt)) else
                 _("brunna llm setup (pick one: an API key or a local Ollama)"))
     doctor_project_calls(add)
 
@@ -2355,6 +2373,97 @@ def report(results) -> int:
 LLM_CHOICES = ("runtime", "anthropic", "openai", "ollama", "none")
 
 
+def llm_logins(rt: str, installed=None) -> dict[str, dict]:
+    """Where the agent the platform starts (rt) can't make brunna's decisions: the coding agents the owner's sessions are in
+    whose own login can (a completion interface), by a yes of the owner's own (the preset's login_use): name → preset."""
+    import runtime_ports
+    if "completion" in runtime_ports.capabilities(rt):
+        return {}
+    presets = agent_presets()
+    return {n: presets[n] for n in (runtime_ports.installed() if installed is None else installed)
+            if n != rt and (presets.get(n) or {}).get("login_use") and "completion" in runtime_ports.capabilities(n)}
+
+
+def llm_login(name: str, info: dict) -> int:
+    """brunna's decisions on another agent's own login (a provider whose impl is that runtime): what it uses is asked of the
+    owner, never answered by --yes, an answers file or an agent; then its checked copy is installed."""
+    import completion
+    import runtime_ports
+    if not UI().acts:
+        UI().consent("llm_login", info["login_use"])
+        return 0
+    creds = runtime_ports.load(name, ports=("auth",), platform_runs=False).credentials()
+    had = read_hub_json().get("llm") or {}
+    provider = (had.get("providers") or {}).get(name)
+    if isinstance(provider, dict) and provider.get("impl") == name and all((had.get("use") or {}).get(g) == name for g in completion.GROUPS):
+        print(_("brunna's decisions already go to {label} with your login", label=info["label"]))
+        return 0
+    if provider is not None and (not isinstance(provider, dict) or provider.get("impl") != name):
+        print(_("⚠️ {settings} llm.providers.{name} is something else of yours: rename it first (nothing was changed)", name=name))
+        return 1
+    why = install_blocker(name) or next((c.note for c in creds if c.note), None)
+    if why is None and not agent_found(info):
+        why = _("{label} is not installed", label=info["label"])
+    d = read_hub_json()
+    llm = d.setdefault("llm", {})
+    llm.setdefault("providers", {}).setdefault(name, {"impl": name})
+    llm["use"] = {g: name for g in completion.GROUPS}
+    drop_unused_logins(llm)
+    errs = completion.config_errors(llm)   # before the owner is asked for nothing
+    if errs:
+        print(_("invalid settings; {settings} unchanged:\n  {errors}", errors="\n  ".join(errs)), file=sys.stderr)
+        return 1
+    if why is None and (llm.get("budget") or {}).get("daily_usd") is not None and completion.login_metered({"impl": name}):
+        why = _("its login is billed per use, what a call costs can't be told, and {settings} llm.budget is set")
+    if why:
+        print(_("⚠️ {label} can't make brunna's decisions here: {reason} (nothing was changed)", label=info["label"], reason=why))
+        return 1
+    if not UI().consent("llm_login", info["login_use"], enter=False, later="brunna llm setup"):
+        print(_("brunna's decisions don't go to {label} (nothing was changed): that needs your own yes, in a terminal: brunna llm setup",
+                label=info["label"]))
+        return 1
+    write_hub_json(d)
+    hubconf._cfg = None
+    print(_("brunna's decisions go to {label} with your login (the model for each: schedulectl models; to stop: brunna llm setup)",
+            label=info["label"]))
+    status = (info.get("credential") or {}).get("status")
+    if not any(c.present for c in creds) or (status and subprocess.run(status, env=agent_env(), capture_output=True).returncode != 0):
+        print(_("⚠️ {label} is not logged in yet: run `{command}` in a terminal, then brunna runtimes install {name}", label=info["label"],
+                command=" ".join(info["credential"]["command"]), name=name))
+        return 1
+    return 0 if store_install(name) else 1
+
+
+def end_logins(d: dict, keep: str | None = None, only: str | None = None) -> list[str]:
+    """hub.json d without the agents' own logins that make brunna's decisions (llm_login), keep's apart (or only only's): the
+    owner said yes to that for the setup they are leaving. A point they pinned to one keeps it. → what was taken out."""
+    llm = d.get("llm") or {}
+    asked = {n for n, i in agent_presets().items() if i.get("login_use")}   # what llm_login makes; another runtime's provider is the owner's own
+    logins = {n for n, p in (llm.get("providers") or {}).items() if isinstance(p, dict) and p.get("impl") in asked
+              and p["impl"] != keep and (only is None or p["impl"] == only)}
+    out = sorted(logins & set((llm.get("use") or {}).values()))
+    if out:
+        llm["use"] = {g: n for g, n in llm["use"].items() if n not in logins}
+        drop_unused_logins(llm)
+        for k in ("use", "providers"):
+            if not llm.get(k):
+                llm.pop(k, None)
+        if not llm:
+            d.pop("llm")
+        print(_("brunna's decisions don't go to {names} any more (brunna llm setup picks who makes them)", names=", ".join(out)))
+    return out
+
+
+def drop_unused_logins(llm: dict) -> None:
+    """A provider llm_login makes (an agent's own login) that nothing names any more goes: while it is there, the platform keeps
+    and checks a copy of that agent with the owner's login (runtime_ports.platform_work)."""
+    asked = {n for n, i in agent_presets().items() if i.get("login_use")}
+    named = {*(llm.get("use") or {}).values(), *(p.get("provider") for p in (llm.get("points") or {}).values() if isinstance(p, dict))}
+    for n, p in list((llm.get("providers") or {}).items()):
+        if n not in named and isinstance(p, dict) and p.get("impl") in asked:
+            del llm["providers"][n]
+
+
 def write_secret(name: str, value: str) -> pathlib.Path:
     """Write the value into the platform's secrets directory (600, temp file first, then rename); the value isn't
     printed."""
@@ -2407,11 +2516,16 @@ def llm_setup(args: dict) -> int:
                           "updated)"))]
     if "completion" in runtime_ports.capabilities(rt):   # else nothing to offer as runtime: no coding agent, or no such interface
         options.insert(0, ("runtime", _("runtime: through your AI agent's own login ({runtime})", runtime=rt)))
+    logins = llm_logins(rt, args.get("_installed"))
+    for n, info in logins.items():
+        options.insert(len(options) - 1, (n, _("{name}: {label}, with your own login for it", name=n, label=info["label"])))
     choice = args.get("llm") or UI().menu(
         "llm", _("Which AI model makes brunna's decisions (nightly notes, weekly report)?"), options, default_llm_choice(rt))
-    if choice not in LLM_CHOICES:
-        print(_("no option {choice} (choices: {choices})", choice=choice, choices=', '.join(LLM_CHOICES)), file=sys.stderr)
+    if choice not in (*LLM_CHOICES, *logins):
+        print(_("no option {choice} (choices: {choices})", choice=choice, choices=', '.join([*LLM_CHOICES, *logins])), file=sys.stderr)
         return 2
+    if choice in logins:
+        return llm_login(choice, logins[choice])
     if not UI().acts:   # init --questions: what an agent relays for a provider, then nothing is written
         if choice not in ("runtime", "none"):
             UI().ask("llm_base_url", _("address (change it for a compatible service)"), "")
@@ -2504,6 +2618,7 @@ def llm_setup(args: dict) -> int:
     llm = d.setdefault("llm", {})
     llm.setdefault("providers", {})[choice] = conf
     llm["use"] = {g: choice for g in completion.GROUPS}
+    drop_unused_logins(llm)
     errs = completion.config_errors(llm)
     if errs:
         print(_("invalid settings; {settings} unchanged:\n  {errors}", errors="\n  ".join(errs)), file=sys.stderr)

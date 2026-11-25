@@ -99,11 +99,10 @@ def _age_days(when: str | None, now: datetime.datetime) -> float:
 def runtimes() -> list[str]:
     """The runtimes the user opens sessions with that have versions (the distribution port), and whose session copies serve
     something: a runtime whose sessions in a sandboxed project can't be confined whatever their version gates nothing by
-    version, so nothing is installed or checked for it unless the platform runs its own work on it
-    (runtime_ports.platform_work; docs/design/runtime-codex.md, Step 1 r2, S6 and D11)."""
-    work = runtime_ports.platform_work()
+    version, so nothing is installed or checked for it, whether or not the platform runs its own work on it (that has its
+    own checked copy; docs/design/runtime-codex.md, Step 1 r2, S6, and Step 6)."""
     return [n for n in runtime_ports.installed() if "distribution" in runtime_ports.capabilities(n)
-            and (n in work or runtime_ports.unconfined_reason(n) is None)]
+            and runtime_ports.unconfined_reason(n) is None]
 
 
 # ---------- 1. what is seen ----------

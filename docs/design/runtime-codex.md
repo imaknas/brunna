@@ -1,15 +1,15 @@
 # The Codex runtime adapter (`bin/runtime_codex.py`)
 
 Status (11-14): step 0 (fail closed) built 11-08; **Step 2 built 11-14** (`bin/runtime_codex.py`, lifecycle + sessions;
-"Step 2: progress (11-14)" below); steps 1, 3, 4 not built. Step 4 layer 1 is planned ("Step 4 layer 1: plan (11-14)"),
+"Step 2: progress (11-14)" below); steps 3, 4 not built. Step 4 layer 1 is planned ("Step 4 layer 1: plan (11-14)"),
 on measurements with the owner's login ("Measured 11-14 (with the owner's login)"), and revised after a cold review
 ("r2 (11-14), after the blind review"). **It can't ship as "confined"**: Codex runs git as the user in the session's
 folder, and a repo filter ran from it (B1). r2's steps 1–2 are built (11-14): `.codex` and `.agents` protected in every
-sandbox, and a per-version probe whose B1 check fails on 0.167. The path to "confined" is the owner's (D9). **Step 1
-is built** on its branch through r2's order step 5 ("Step 1 as built (11-14)"); step 6, the login list and a first
-promoted copy, waits for the owner. D11–D14 are provisional as recommended, the owner's. Step 1 follows `runtime-versions.md`
-steps 1–4 (it is that doc's step 5). The Codex preset now leaves
-`runtime.default` at `none`, not `command` as "Where it stands" below says.
+sandbox, and a per-version probe whose B1 check fails on 0.167 and can't be told on 0.172 ("Step 6, as done"). The path to
+"confined" is the owner's (D9). **Step 1 is built and has run** ("Step 1 as built (11-14)", "Step 6, as done (11-25)"): a copy was
+promoted and a weekly review ran on it. D12–D14 are provisional as recommended, the owner's. Step 1 follows
+`runtime-versions.md` steps 1–4 (it is that doc's step 5). The Codex preset leaves
+`runtime.default` at `none`, not `command` as "Where it stands" below says; `brunna llm setup` makes it a provider on the owner's yes.
 Design, 11-08. Owner, 11-01: the adapter is designed, cold-reviewed, then built port by port, each port that
 isn't there said to be off (`Unsupported`, doctor). Owner, 11-08: "start the Codex enhancements" after the sandbox gaps.
 
@@ -1614,15 +1614,36 @@ The module is off on this machine.
   file);
 - the runner's login order, the promotion rules and the store's `also` in their own tests.
 
-**Left for the owner (step 6) and later:**
-- the login list (r2 (9), B1's and S5's items), after which:
-  - the login checks become real checks;
-  - `--output-schema` per schema;
-  - `REFRESH_INTERVAL_S` from Codex's source;
-- a first `update-runtimes --runtime codex` from main once D11 brings Codex into platform work;
-- D14's measurement.
+**Step 6, as done (11-25, codex-cli 0.172.0).** The owner ran the login checks (all pass) and said yes to a first copy for a
+test: `llm.providers.codex` (`impl: codex`, `models.standard: gpt-5.6-terra`) and `llm.points.reflect-week.provider: codex`.
+- The first install was held back by three checks that tested nothing, as was `agent-profile` before it; no copy could have
+  been promoted. `agent-profile`: its control counted on a base profile that writes where the world is, and none does.
+  `control-globs`: 0.172's own `:workspace` keeps the top `.codex` and `.agents` unwritten. `completion-no-tools`: the control's
+  model decides whether to call a tool. `session-folder-git`: below. The controls were fixed, never the runs' own profile.
+- 0.172.0 was then promoted (11 pass, `updater-off` not checkable, `session-folder-git` a fail that holds sessions only) and the
+  owner's npm copy raised from 0.167.0. A week's review ran on it (104 s, 18,187 tokens in, 3,803 out, subscription), was
+  compared with the other runtime's and put back; the point went back too.
+- **B1 on 0.172.0.** At its start Codex runs `rev-parse` and `config` in the folder, with `safe.bareRepository=explicit`,
+  `core.hooksPath=/dev/null` and `core.fsmonitor=false`, beside the rest (it can end before they do, about one start in three), and no
+  `git status` in five. What its git runs later in a session isn't measured: the check says "not shown" and fails, so its
+  sessions stay held. D9 should start from that measurement.
+- **How an instance turns it on.** `brunna llm setup` offers Codex where its sessions are served and the agent the platform starts
+  can't make the decisions itself (`runtime_preset.login_use`):
+  a provider whose `impl` is the runtime, for all three groups, as in the test. What it uses is asked on its own (the login and how it is
+  paid for, what is sent, the download, about 20 small calls a day for the daily checks, the owner's copy raised), and only the owner's
+  own yes writes it: `--yes`, an answers file and an agent's answer can't. `runtime.default` stays `none`: a first version set it to
+  `codex`, and a review showed that it also starts mailbox triage (which then fails on every letter) and the agent-shaped
+  librarian. `brunna llm setup` again is the way back; a runtime's provider that nothing names any more is taken out, so its
+  copy and daily checks end too, and so does it with `init --agent <another>`, `--agent none` or `modules disable codex`.
+  Session copies aren't kept for it (session_versions): its sessions are held whatever their version. Run on it: the librarian's answer-only version, first look, the weekly review, projects' model calls.
+  Not: consolidation (agent-shaped), the mailbox, agent jobs.
+- **An API-key login is pay-per-use everywhere now**: `completion.metered` asks a runtime's adapter how its login is paid for, so a
+  project's own calls need `metered_models` and the usage rows say metered. What such a call costs isn't known (Codex reports none),
+  so with `llm.budget.daily_usd` set it isn't made.
 
-Nothing points a judgment point at Codex yet.
+**Left for later:**
+- `--output-schema` per schema; `REFRESH_INTERVAL_S` from Codex's source; D14's measurement;
+- what Codex's git runs after a session's start (B1 on 0.172).
 
 #### Step 1 after its two cold code reviews (11-14)
 

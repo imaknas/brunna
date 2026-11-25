@@ -729,10 +729,10 @@ class Job(Instance):
         self.run_job()
         self.assertIn(("session-versions-claude", []), self.alerts)
 
-    def test_a_runtime_whose_sessions_cant_be_confined_gets_no_session_copies_unless_it_runs_platform_work(self):
-        """runtime-codex.md, Step 1 r2, S6: nothing installed or checked for it."""
+    def test_a_runtime_whose_sessions_cant_be_confined_gets_no_session_copies(self):
+        """runtime-codex.md, Step 6: nothing installed or checked for it, whether or not the platform runs its own work on it"""
         why = {"codex": "Codex runs git in the folder (B1)"}
-        for work, want in ((["claude"], ["claude"]), (["claude", "codex"], ["claude", "codex"])):
+        for work, want in ((["claude"], ["claude"]), (["claude", "codex"], ["claude"])):
             with mock.patch.object(runtime_ports, "installed", lambda: ["claude", "codex"]), \
                     mock.patch.object(runtime_ports, "capabilities", lambda n: {"distribution"}), \
                     mock.patch.object(runtime_ports, "unconfined_reason", lambda n: why.get(n)), \

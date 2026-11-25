@@ -378,9 +378,9 @@ def unconfined() -> str:
             newest = doc
     state = (((newest or {}).get("checks") or {}).get(FOLDER_GIT_CHECK) or {}).get("state")
     if state == "fail":
-        return _("Codex {version} runs git in the session's folder outside its own sandbox, and a filter in the repo's "
-                 "config ran from it as you (the {check} check; runtime-codex.md, B1)", version=newest.get("version"),
-                 check=FOLDER_GIT_CHECK)
+        return _("Codex {version} runs git in the session's folder outside its own sandbox ({check}: {reason})",
+                 version=newest.get("version"), check=FOLDER_GIT_CHECK,
+                 reason=(((newest or {}).get("checks") or {}).get(FOLDER_GIT_CHECK) or {}).get("reason") or "B1")
     if state == "pass":
         return _("Codex {version}'s own git ran none of the folder's filters (the {check} check), but its sessions get "
                  "no profile from the platform yet (runtime-codex.md, Step 4 steps 3-5)", version=newest.get("version"),

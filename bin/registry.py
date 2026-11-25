@@ -1431,6 +1431,8 @@ def validate_module(doc, stem: str) -> list[str]:
                 or not all(isinstance(x, str) for x in rp.get("mcp_unregister") or [])):
             errs.append(_("runtime_preset needs label, find, settings.runtime and install as a list of lines "
                           "(docs/design/newcomer-path.md B4)"))
+        elif "login_use" in rp and not (isinstance(rp["login_use"], str) and rp["login_use"].strip()):
+            errs.append(_("runtime_preset.login_use is the text asked of the owner"))
     if doc.get("v") != 1:
         errs.append(_("v must be 1"))
     if doc.get("name") != stem:

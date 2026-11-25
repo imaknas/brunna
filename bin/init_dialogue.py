@@ -75,12 +75,12 @@ class Terminal:
             print(_("{answer}: not one of the choices. Type a number from 1 to {n}, or one of: {values}", answer=a,
                     n=len(values), values=", ".join(values)))
 
-    def consent(self, qid: str, question: str) -> bool:
-        """A yes asked on the terminal (Enter = yes); no terminal = no, and --yes = no as well: init never installs or
-        changes a user-level setting on its own."""
+    def consent(self, qid: str, question: str, enter: bool = True, later: str | None = None) -> bool:
+        """A yes asked on the terminal (Enter = yes, unless enter is False); no terminal = no, and --yes = no as well: init
+        never installs or changes a user-level setting on its own. later: what asks it again, where nobody could answer."""
         if not self.can_ask:
             return False
-        return input(f"{question} [Y/n] ").strip().lower() in ("", "y", "yes")
+        return input(f"{question} {'[Y/n]' if enter else '[y/N]'} ").strip().lower() in (("", "y", "yes") if enter else ("y", "yes"))
 
     def secret(self, qid: str, prompt: str) -> str | None:
         """A value typed without being shown; None when nothing can be typed here."""
@@ -125,7 +125,7 @@ class Recorder(Terminal):
         self._add(qid, "chat", question, default, [{"value": v, "label": label} for v, label in options])
         return self.answers.get(qid, default)
 
-    def consent(self, qid: str, question: str) -> bool:
+    def consent(self, qid: str, question: str, enter: bool = True, later: str | None = None) -> bool:
         self._add(qid, "dialog", question)
         return False
 
@@ -263,7 +263,7 @@ class Agent(Terminal):
         print(what)
         self.needs.append({"id": qid, "needs_user": what})
 
-    def consent(self, qid: str, question: str) -> bool:
+    def consent(self, qid: str, question: str, enter: bool = True, later: str | None = None) -> bool:
         """The owner's own yes, in the desktop's dialog: never the answers file's, never the agent's."""
         if has_screen():
             print(_("Asking in a dialog on this machine's screen: {question}", question=question), flush=True)
@@ -271,8 +271,8 @@ class Agent(Terminal):
             if answer is not None:
                 print(_("Answered: {answer}", answer=_("yes") if answer else _("no")))
                 return answer
-        self.needs_user(qid, _("Run brunna init in a terminal on this machine to answer: {question}",
-                               question=question))
+        self.needs_user(qid, _("Run {command} in a terminal on this machine to answer: {question}",
+                               command=later or "brunna init", question=question))
         return False
 
     def secret(self, qid: str, prompt: str) -> str | None:

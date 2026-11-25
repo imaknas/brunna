@@ -244,7 +244,6 @@
  "the runtime {runtime} is unversioned: the platform can't install or check a fixed version of it, so its runs use whichever copy is on PATH": "runtime {runtime} 沒有版本管理:平台沒辦法安裝或檢查它的固定版本,所以它的執行用的是 PATH 上找到的那一份",
  "the runtime {runtime}: checked copy {version} in the store": "runtime {runtime}:store 裡有檢查過的 {version}",
  "the runtime {runtime}: {version} held back since {since} (brunna runtimes shows why)": "runtime {runtime}:{version} 從 {since} 起被擋下(brunna runtimes 看原因)",
- "brunna runs its own checked copy of {runtime}, separate from yours: it downloads it now (about 300 MB) and runs its checks on it, which take some minutes": "brunna 用自己一份檢查過的 {runtime},跟你的分開:現在下載(約 300 MB),再對它跑檢查,要幾分鐘",
  "✓ a checked copy of {runtime} is in the store": "✓ store 裡有一份檢查過的 {runtime} 了",
  "⚠️ {reason}": "⚠️ {reason}",
  "The platform's own copy of {runtime} is installed and checked with its login for unattended runs, and that isn't there yet ({label}). Later: brunna runtimes install {runtime}": "平台自己那份 {runtime} 要用無人值守執行的登入來安裝和檢查,這個登入還沒有({label})。之後:brunna runtimes install {runtime}",
@@ -352,5 +351,18 @@
  "the status page's key ({path}) can't be read or isn't one: no address opens the page": "狀態頁的金鑰({path})讀不到或不是金鑰:哪個網址都打不開狀態頁",
  "delete that file and restart the service local.status-page (or bin/py bin/status-server.py)": "刪掉那個檔,重新啟動 local.status-page 服務(或 bin/py bin/status-server.py)",
  "the status page's key is gone: no address opens the page": "狀態頁的金鑰不見了:哪個網址都打不開狀態頁",
- "restart the service local.status-page (or bin/py bin/status-server.py): it makes a new one": "重新啟動 local.status-page 服務(或 bin/py bin/status-server.py):它會做一個新的"
+ "restart the service local.status-page (or bin/py bin/status-server.py): it makes a new one": "重新啟動 local.status-page 服務(或 bin/py bin/status-server.py):它會做一個新的",
+ "brunna runs its own checked copy of {runtime}, separate from yours: it downloads it now (300 to 400 MB) and runs its checks on it, which take some minutes": "brunna 跑的是自己檢查過的 {runtime},跟你自己的分開:現在下載(300 到 400 MB)並跑檢查,要幾分鐘",
+ "{label} is not installed": "{label} 沒有安裝",
+ "⚠️ {label} can't make brunna's decisions here: {reason} (nothing was changed)": "⚠️ {label} 在這裡不能做 brunna 的判斷:{reason}(什麼都沒改)",
+ "brunna's decisions don't go to {label} (nothing was changed): that needs your own yes, in a terminal: brunna llm setup": "brunna 的判斷不會交給 {label}(什麼都沒改):要你本人在終端機答應:brunna llm setup",
+ "brunna's decisions go to {label} with your login (the model for each: schedulectl models; to stop: brunna llm setup)": "brunna 的判斷交給 {label},用你的登入(各用哪個模型:schedulectl models;要停:brunna llm setup)",
+ "⚠️ {label} is not logged in yet: run `{command}` in a terminal, then brunna runtimes install {name}": "⚠️ {label} 還沒登入:在終端機執行 `{command}`,再執行 brunna runtimes install {name}",
+ "{name}: {label}, with your own login for it": "{name}:{label},用你自己的登入",
+ "brunna llm setup (pick one: an API key, a local Ollama, or {agents} with your own login)": "brunna llm setup(選一個:API 金鑰、本機 Ollama,或用你自己登入的 {agents})",
+ "brunna init: --dry-run doesn't go with --lang, --agent or --register-mcp on an instance that is there (nothing was done)": "brunna init:已經有實例時,--dry-run 不能和 --lang、--agent 或 --register-mcp 一起用(什麼都沒做)",
+ "brunna's decisions already go to {label} with your login": "brunna 的判斷已經交給 {label},用你的登入",
+ "⚠️ {settings} llm.providers.{name} is something else of yours: rename it first (nothing was changed)": "⚠️ {settings} 的 llm.providers.{name} 是你另外設的東西:先改名(什麼都沒改)",
+ "brunna's decisions don't go to {names} any more (brunna llm setup picks who makes them)": "brunna 的判斷不再交給 {names}(brunna llm setup 可以選由誰做)",
+ "its login is billed per use, what a call costs can't be told, and {settings} llm.budget is set": "它的登入按用量計費、每次花多少無從得知,而 {settings} 設了 llm.budget"
 }

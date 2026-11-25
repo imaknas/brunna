@@ -6,11 +6,11 @@
  "It goes straight to brunna on this machine, not to your AI chat. This page works once.": "這會直接交給這台電腦上的 brunna,不會經過你的 AI 對話。這個頁面只能用一次。",
  "Nothing was entered.": "沒有輸入任何東西。",
  "Received (not shown).": "收到了(不顯示內容)。",
- "Run brunna init in a terminal on this machine to answer: {question}": "在這台電腦的終端機執行 brunna init 來回答:{question}",
  "Run brunna init in a terminal on this machine to enter it: {prompt}": "在這台電腦的終端機執行 brunna init 來輸入:{prompt}",
  "Save": "儲存",
  "Saved. You can close this page and go back to your chat.": "已儲存。可以關掉這個頁面,回到你的對話。",
  "no": "否",
  "yes": "是",
- "{answer}: not one of the choices. Type a number from 1 to {n}, or one of: {values}": "{answer}:沒有這個選項。請打 1 到 {n} 的數字,或其中一個:{values}"
+ "{answer}: not one of the choices. Type a number from 1 to {n}, or one of: {values}": "{answer}:沒有這個選項。請打 1 到 {n} 的數字,或其中一個:{values}",
+ "Run {command} in a terminal on this machine to answer: {question}": "在這台機器的終端機執行 {command} 來回答:{question}"
 }

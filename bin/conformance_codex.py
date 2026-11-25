@@ -28,6 +28,7 @@ from runtime_ports import Check, Outcome  # noqa: E402
 _ = i18n.domain(__file__)
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUN_S = 120
+NO_TOOLS_TRIES = 3
 START_TRIES = 5   # session-folder-git: how many starts it looks at for a git status
 # the folder-git canary's drivers, one per config source git reads in a repo's folder: the repo's config, a file it
 # includes, the worktree's own config (extensions.worktreeConfig) and a long-running process driver; each file a driver
@@ -577,17 +578,17 @@ def completion_no_tools(world) -> Outcome:
     server sent it) and calls no tool. Positive control: the same with the shell on calls one."""
     if not _logged_in(world):
         return Outcome("error", _("no login to link into the world"))
-    got, calls = _completion(world, ASK_COMMAND)
-    if got.get("refused"):
-        return Outcome("fail", got["error"])
-    if not got.get("ok"):
-        return Outcome("error", _("the run failed: {error}", error=got.get("error")))
-    if calls:
-        return Outcome("fail", _("a completion called {tools}", tools=", ".join(calls)))
-    # the model decides whether to: asked up to three times
-    if not any(_completion(world, ASK_COMMAND, shell=True)[1] for _n in range(3)):
-        return Outcome("error", _("tests nothing: with the shell on the run called no tool either"))
-    return Outcome("pass", "")
+    for _n in range(NO_TOOLS_TRIES):   # the model decides whether to: each time the same is asked without and with the shell
+        got, calls = _completion(world, ASK_COMMAND)
+        if got.get("refused"):
+            return Outcome("fail", got["error"])
+        if not got.get("ok"):
+            return Outcome("error", _("the run failed: {error}", error=got.get("error")))
+        if calls:
+            return Outcome("fail", _("a completion called {tools}", tools=", ".join(calls)))
+        if _completion(world, ASK_COMMAND, shell=True)[1]:
+            return Outcome("pass", "")
+    return Outcome("error", _("tests nothing: with the shell on the run called no tool either"))
 
 
 def completion_schemas(world) -> Outcome:
@@ -696,7 +697,7 @@ CHECKS = [
     Check("agent-profile", "agent", "safety", agent_profile, timeout_s=2 * len(PROFILE_PROBES) * RUN_S + 60),
     Check("auth-link-write", "auth", "safety", auth_link_write, timeout_s=4 * RUN_S + 60),
     Check("auth-login-error", "auth", "function", auth_login_error, timeout_s=2 * RUN_S + 60),
-    Check("completion-no-tools", "completion", "safety", completion_no_tools, timeout_s=4 * RUN_S + 60, login=True),
+    Check("completion-no-tools", "completion", "safety", completion_no_tools, timeout_s=2 * 2 * NO_TOOLS_TRIES * RUN_S + 60, login=True),
     Check("completion-schemas", "completion", "function", completion_schemas, timeout_s=12 * 2 * RUN_S + 60, login=True),
     Check("agent-result", "agent", "function", agent_result, timeout_s=4 * RUN_S + 60, login=True),
     Check("agent-models", "agent", "function", agent_models, timeout_s=4 * 2 * RUN_S + 60, login=True),

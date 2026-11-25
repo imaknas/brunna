@@ -83,9 +83,11 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      the platform's own runs on a checked Codex copy in the store, a fresh Codex home per run (updater, hooks, plugins
      and the shell snapshot off; the run's own `HOME`), the tool list checked before and after every run; completions
      and the judgment points that work in a memory copy; nothing starts in a project's folder (B1); no `confine` port.
-     The model-free checks pass on 0.169 (B1's probe fails, which holds only sessions). Left: the login list with the
-     owner, then a first promoted copy. With Codex only in `runtime.installed` nothing new happens (tested). D11–D14
-     are provisional as recommended, the owner's.
+     **Step 6 done 11-25:** the login checks pass on 0.172.0, a copy was promoted and a weekly review ran on it; four checks
+     whose controls tested nothing were fixed. `brunna llm setup` offers Codex's own login for the platform's decisions (a
+     provider, on the owner's own yes; `runtime.default` stays as it was). With Codex only in `runtime.installed` nothing
+     new happens (tested). Left: what 0.172's git runs after a session's start (B1 may have changed: D9 starts there).
+     D12–D14 are provisional as recommended, the owner's.
    - **Step 3:** wake, status, resume and fork. Wake also waits on M11 (is a client attached), under D4.
    - **Step 4 layer 1** (Codex's own sandbox, rendered by the platform): planned and revised after a cold review (r2,
      11-14, on measurements with the owner's login). **It can't ship as "confined"**: Codex runs `git status` as the user

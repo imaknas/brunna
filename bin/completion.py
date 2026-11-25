@@ -169,6 +169,13 @@ def nowhere(runtime: str, spec: dict | None = None) -> str:
              "setup)", name=runtime)
 
 
+def models_of(conf: dict) -> dict:
+    """A provider's group → model: its own models, else, for a runtime, the adapter's (which follow the adapter's version)."""
+    import runtime_ports
+    impl = conf.get("impl")
+    return conf.get("models") or (runtime_ports.models(impl) if impl in runtime_ports.RUNTIMES else {})
+
+
 def resolve(point: str, spec: dict) -> dict:
     """Which provider and model this judgment point goes to: llm.points' choice > models[model_group] of the provider
     llm.use[model_group] names. A pinned model the provider lists in its models keeps that entry's context and price."""
@@ -184,7 +191,7 @@ def resolve(point: str, spec: dict) -> dict:
     conf = providers.get(name)
     if not isinstance(conf, dict):
         raise Refused(_("llm.providers has no {name}", name=name))
-    models = conf.get("models") or {}
+    models = models_of(conf)
     entry = pin.get("model") or models.get(group)
     if not entry:
         raise Refused(_("llm.providers.{name}.models has no {group}", name=name, group=group))
@@ -239,9 +246,21 @@ def today_cost() -> float:
 
 
 def metered(target: dict) -> bool:
-    """Pay-per-use: a cloud provider reached with an API key. A runtime's own login (subscription / headless token) and
-    local providers are not. The one rule the project opt-in (registry metered_models) is checked against."""
-    return target.get("location", "cloud") == "cloud" and bool((target.get("conf") or {}).get("key"))
+    """Pay-per-use: a cloud provider reached with an API key, or a runtime whose own login is one (its adapter's billing). A subscription's login and local providers are not. The one rule the project opt-in
+    (registry metered_models) is checked against."""
+    if target.get("location", "cloud") != "cloud":
+        return False
+    return bool((target.get("conf") or {}).get("key")) or login_metered(target)
+
+
+def login_metered(target: dict) -> bool:
+    """A runtime whose own login is an API key: pay-per-use, and what a call cost isn't known."""
+    import runtime_ports
+    impl = target.get("impl")
+    if impl not in runtime_ports.RUNTIMES or "auth" not in runtime_ports.capabilities(impl):
+        return False
+    rt = runtime_ports.load(impl, ports=("auth",), platform_runs=False)
+    return rt.billing((target.get("conf") or {}).get("auth") or "token", {}, True) == "metered"   # {}: the login itself
 
 
 def billing(target: dict) -> str:
@@ -260,6 +279,8 @@ def record(point: str, target: dict, res, project: str | None = None) -> float |
     row = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"), "point": point,
            "provider": target["provider"], "model": target["model"], "input_tokens": res.input_tokens,
            "output_tokens": res.output_tokens, "cost_usd": cost, "stop": res.stop, "billing": billing(target)}
+    if cost is None and login_metered(target):
+        row["cost_unknown"] = True
     _append(row, project)
     return cost
 
@@ -359,6 +380,9 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
     if budget is not None and today_cost() >= float(budget):
         raise Refused(_("today's model spending has reached the budget (llm.budget.daily_usd ${budget}); not sending this "
                         "one", budget=budget))
+    if budget is not None and not target.get("price") and login_metered(target):
+        raise Refused(_("{provider}'s login is billed per use and what a call costs can't be told, so it can't be kept within "
+                        "llm.budget.daily_usd; not sending this one", provider=target["provider"]))
     prompt = redact(prompt)
     max_tokens = int(spec.get("max_tokens") or 8192)
     try:
@@ -538,7 +562,7 @@ def config_errors(llm: dict, projects: dict | None = None, runtime: str | None =
             errs.append(_("use.{group}: the group can only be {groups}", group=g, groups=" / ".join(GROUPS)))
         elif name not in providers:
             errs.append(_("use.{group}: no provider {name}", group=g, name=name))
-        elif g not in ((providers[name] or {}).get("models") or {}):
+        elif g not in models_of(providers[name] or {}):
             errs.append(_("use.{group} → {name}, but providers.{name}.models has no {group}", group=g, name=name))
     try:
         import yaml

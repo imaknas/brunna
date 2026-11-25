@@ -3,14 +3,15 @@
 # mailbox through brunna's MCP server (docs/mcp.md, registered by init); the weekly statistics read its session files. The
 # platform's own runs (Step 1) use a copy of Codex in the platform's store, checked and promoted by brunna/update-runtimes,
 # never your own: the judgment points that only answer (completions), then those that work in a copy of a memory branch;
-# the rest stay on another runtime or an LLM provider, and doctor says which. Built, but no copy is promoted yet. A sandboxed project's Codex sessions get
-# nothing from the platform until Codex's own git is fenced (Step 4, git-config-fence.md). The first copy is promoted only
-# after the checks that need your login have run (with you: runtime-codex.md, Step 1 r2, the login list).
+# the rest stay on another runtime or an LLM provider, and doctor says which. They start only once the owner picks Codex in
+# `agenthub llm setup` and says yes to login_use (they use the login), or pins a point. The first copy was promoted and
+# ran a review on 11-25 (runtime-codex.md, Step 6). A sandboxed project's Codex sessions get nothing from the platform
+# until Codex's own git is fenced (Step 4, git-config-fence.md).
 # `agenthub init` offers it in its agent step and turns this module on when it is picked.
 v: 1
 name: codex
 type: module
-description: "your Codex chats get letters and notes reminders from the platform; brunna's own decisions still need another agent or an LLM provider (its runs on a checked copy of Codex wait for a first check with your login)"
+description: "your Codex chats get letters and notes reminders from the platform; brunna llm setup can have brunna's own decisions (nightly notes, weekly review) made with your Codex login; mailbox requests and agent jobs need another agent"
 runtime_preset:
   label: Codex
   find: codex
@@ -21,15 +22,17 @@ runtime_preset:
     kind: tool-login
     command: [codex, login]
     status: [codex, login, status]
+  # asked by agenthub llm setup before the platform's decisions are made with this agent's own login (the owner's own yes:
+  # never --yes, an answers file or an agent)
+  login_use: "Let Codex make brunna's own decisions with your Codex login? The nightly notes, the first look at a project, the weekly review and your projects' own model calls then run on it and send what they read (notes, README, commit titles) to OpenAI, on your ChatGPT plan, or billed per use if you signed in with an API key (brunna can't tell the cost, so with llm.budget set it makes no decisions). brunna downloads its own checked copy (about 380 MB), checks it every day with about 20 small calls, and raises your own codex to the version it checked. To stop: brunna llm setup"
   # global in ~/.codex/config.toml, shared with the Codex (ChatGPT) desktop app
   mcp_register: [codex, mcp, add, "{server}", --, "{cli}", mcp]
   # agenthub uninstall
   mcp_unregister: [codex, mcp, remove, "{server}"]
   settings:
     runtime:
-      # no default yet: no copy of Codex can be promoted before the checks that need your login have run (runtime-codex.md,
-      # Step 1 r2's step 6), so the platform's own work goes to an LLM provider meanwhile (init offers brunna llm setup).
-      # Its sessions are served: installed joins what the instance has (apply_agent keeps the others)
+      # its sessions are served: installed joins what the instance has (apply_agent keeps the others). Not the default: it
+      # can't handle the mailbox or agent jobs. brunna's own decisions on it are llm setup's question (login_use)
       default: none
       installed: [codex]
     modules:
