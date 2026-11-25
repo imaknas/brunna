@@ -342,8 +342,11 @@ def one(scenario: str, arm: str, i: int, run_dir: pathlib.Path, env: dict) -> di
             (out / "prompt.txt").write_text(d["scenarios"][scenario]["prompt"])
         before = snapshot(proj)
         t0 = datetime.datetime.now()
-        r = subprocess.run(llm_cmd(out / "prompt.txt", point=point, agent=agent), cwd=proj, env=renv, capture_output=True,
-                           text=True, timeout=3600)
+        try:
+            r = subprocess.run(llm_cmd(out / "prompt.txt", point=point, agent=agent), cwd=proj, env=renv, capture_output=True,
+                               text=True, timeout=3600)
+        finally:
+            e2.keep_usage(renv)
         secs = (datetime.datetime.now() - t0).total_seconds()
         after = snapshot(proj)
         log = subprocess.run(["git", "-C", str(proj), "log", "--format=%s"], capture_output=True, text=True).stdout

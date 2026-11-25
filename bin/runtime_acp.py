@@ -435,10 +435,10 @@ def run(task) -> TaskResult:
     try:
         conf = _conf()
     except RuntimeError as e:
-        return TaskResult(False, error=str(e))
+        return TaskResult(False, error=str(e), started=False)
     cwd, why = _in_copy(task)
     if cwd is None:
-        return TaskResult(False, error=why)
+        return TaskResult(False, error=why, started=False)
     return _run(task, conf, cwd)
 
 
@@ -450,9 +450,9 @@ def _run(task, conf: dict, cwd: str) -> TaskResult:
     try:
         c = _Client(argv, cwd, env, deadline)
     except FileNotFoundError:
-        return TaskResult(False, error=_("{exe} not found", exe=argv[0]))
+        return TaskResult(False, error=_("{exe} not found", exe=argv[0]), started=False)
     except OSError as e:
-        return TaskResult(False, error=_("cannot start {exe}: {e}", exe=argv[0], e=e))
+        return TaskResult(False, error=_("cannot start {exe}: {e}", exe=argv[0], e=e), started=False)
     turn, sid, methods = _Turn(cwd), None, []
     c.on_update = turn.update
     c.on_request = lambda m, p: ((turn.permission(p), None) if m == "session/request_permission"

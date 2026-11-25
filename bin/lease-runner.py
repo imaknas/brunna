@@ -184,6 +184,16 @@ def handovers_logged(lease_id: str) -> int:
         return 0
 
 
+class Meter:
+    """What one process of a lease has used, turn by turn (bin/usage_log.py). run: the turn's open row; spent: the session's
+    total cost at the end of the last turn, None when it couldn't be told. It is the process's own, so a process stopped in
+    the middle of a turn settles that turn when its output ends, whatever has started since."""
+
+    def __init__(self, spent: float | None):
+        self.run: str | None = None
+        self.spent = spent
+
+
 class Lease:
     def __init__(self, d: dict):
         self.id = d["lease_id"]
@@ -399,10 +409,12 @@ def start_proc(lease: Lease, resume: bool) -> None:
         # the version that wrote it: a fresh conversation's, or one the copy now has been checked resuming. A resume of a
         # pair not checked yet keeps the older version, which lease-resume then asks about
         lease.version = run_version() or lease.version
+    spent = total_before(lease, bool(can_resume))
     lease.dir.mkdir(parents=True, exist_ok=True)
     err = open(lease.dir / "stderr.log", "a")
     lease.proc = subprocess.Popen(cmd, cwd=lease.cwd, env=env_for(lease), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                                   stderr=err, text=True, bufsize=1)
+    lease.proc.meter = Meter(spent)
     # started_once is set only once the first turn really finishes (reader gets a result with num_turns > 0)
     lease.intent_stop = False
     if wanted and not can_resume:  # wanted to resume but can't (no record): say so rather than silently start a new one
@@ -423,6 +435,57 @@ def run_version() -> str | None:
     except (OSError, ValueError):
         return None
     return cur.version if cur else None
+
+
+def turn_used(lease: Lease, meter, data: dict | None) -> None:
+    """The open turn of a lease's process as a row of the usage log: what its total cost rose by. data None: the process ended
+    in the middle of it, so what it used can't be told. With none open (a second message queued in a turn, a turn the session
+    began itself, an open row that couldn't be written) a real turn's row is written whole; a process that failed at start has none."""
+    if not isinstance(meter, Meter):
+        return
+    total = (data or {}).get("cost")
+    total = total if isinstance(total, (int, float)) and not isinstance(total, bool) else None
+    cost = max(total - meter.spent, 0.0) if total is not None and meter.spent is not None else None
+    if data is not None:
+        meter.spent = total
+    run, meter.run = meter.run, None
+    if not run and not ((data or {}).get("num_turns") or cost):
+        return
+    try:   # counting never stands in the conversation's way
+        import completion
+        completion.record_run(turn_point(lease), runtime_ports.default_name(), None, turn_billing(), cost,
+                              "end" if data is not None else "no-answer", lease.project, None, None, run, gated=False)
+    except Exception as e:
+        log(_("{id}: a turn's usage could not be recorded: {e!r}", id=lease.id, e=e))
+
+
+def turn_open(lease: Lease) -> None:
+    meter = getattr(lease.proc, "meter", None)
+    if not isinstance(meter, Meter) or meter.run:
+        return
+    try:
+        import completion
+        import usage_log
+        meter.run = usage_log.begin(completion.USAGE, turn_point(lease), runtime_ports.default_name(), None, turn_billing(), lease.project)
+    except Exception as e:
+        log(_("{id}: a turn's usage could not be recorded: {e!r}", id=lease.id, e=e))
+
+
+def turn_point(lease: Lease) -> str:
+    return "lease-work" if lease.mode == "work" else "lease-session"
+
+
+def turn_billing() -> str:
+    runtime = rt()
+    return runtime.billing("token", {}, False) if callable(getattr(runtime, "billing", None)) else "unknown"
+
+
+def total_before(lease: Lease, resuming: bool) -> float | None:
+    """What the session had cost when this process starts: a resumed one's total goes on from what its record says."""
+    if not resuming:
+        return 0.0
+    read = getattr(rt(), "session_cost", None)
+    return read(lease.id) if callable(read) else None
 
 
 def stop_proc(lease: Lease, new_state: str) -> None:
@@ -447,7 +510,7 @@ def stop_proc(lease: Lease, new_state: str) -> None:
 def reader(lease: Lease, proc: subprocess.Popen) -> None:
     """The runtime's native output → neutral conversation events (rt().parse_stream) → sent; updates the lease's state
     when a turn ends."""
-    runtime = rt()
+    runtime, meter = rt(), getattr(proc, "meter", None)
     for line in proc.stdout:
         events = runtime.parse_stream(line)
         done = [e for e in events if e.type == "turn_end" and "num_turns" in e.data]
@@ -455,6 +518,7 @@ def reader(lease: Lease, proc: subprocess.Popen) -> None:
         # detach it asks for is counted, or a runner leaving for new code could exit in between (service-code.md D3)
         with _lock if done else contextlib.nullcontext():
             if done:
+                turn_used(lease, meter, done[0].data)
                 lease.in_turn = False
                 # a process that fails at start also emits a result with is_error and num_turns=0 before exiting: that
                 # isn't a success and mustn't reset crashes to zero (or it never reaches 2, is never reclaimed
@@ -471,6 +535,7 @@ def reader(lease: Lease, proc: subprocess.Popen) -> None:
                 if e.data.get("_detach"):
                     spawn_detach(lease, e.data["_detach"])
     proc.wait()
+    turn_used(lease, meter, None)   # ended in the middle of a turn
     with _lock:
         if lease.proc is not proc or lease.intent_stop:
             return
@@ -544,6 +609,7 @@ def send_message(lease: Lease, text: str, attachments: list | None = None) -> No
             start_proc(lease, resume=True)
         lease.touch()
         lease.in_turn = True
+        turn_open(lease)
         msg = json.dumps({"type": "user", "message": {"role": "user", "content": content}}, ensure_ascii=False)
         lease.proc.stdin.write(msg + "\n")
         lease.proc.stdin.flush()
@@ -799,7 +865,8 @@ def idle_loop() -> None:
 # platform modules this file imports inside functions: imported at start (code_watch.preload), so a runner draining on
 # old code never mixes in a module from the new (lease 9af483fb's handover failed that way on 10-25). main also loads the
 # runtime adapter (rt()) and registrar.py (registrar()), which are loaded by path or by name
-PRELOAD = ("lease_files", "memory_paths", "policy", "project_git", "prompts", "registry", "runtime_claude", "runtime_store")
+PRELOAD = ("completion", "lease_files", "memory_paths", "policy", "project_git", "prompts", "registry", "runtime_claude",
+           "runtime_store", "usage_log")
 CODE_POLL_S = 2
 WATCH = None   # code_watch.Watch, set by main
 ACTIVE = 0     # POST requests being handled and handovers running (in_flight, spawn_detach)

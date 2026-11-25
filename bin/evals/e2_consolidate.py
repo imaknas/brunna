@@ -177,19 +177,22 @@ def cmd_run(a) -> int:
     jobs = [(c, arm, i) for i in range(a.k) for c in cs]
     print(f"e2: {POINT} arm={arm} k={a.k} cases={len(cs)} → {run_dir}", flush=True)
     stop = False
-    with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
-        futs = {pool.submit(one, c, arm, i, run_dir, env): (c, i) for c, arm, i in jobs}
-        for f in concurrent.futures.as_completed(futs):
-            if f.cancelled():
-                continue
-            m = f.result()
-            print(f"  {m['case']} {m['arm']}-{m['i']}: exit {m['exit']} {m['secs']}s turns={m['turns']} "
-                  f"denials={m['denials']} {m['error'] or ''}", flush=True)
-            if m["rate_limited"] and not stop:
-                stop = True
-                print("e2: rate limited, cancelling the rest (rerun the same command to continue)", flush=True)
-                for g in futs:
-                    g.cancel()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
+            futs = {pool.submit(one, c, arm, i, run_dir, env): (c, i) for c, arm, i in jobs}
+            for f in concurrent.futures.as_completed(futs):
+                if f.cancelled():
+                    continue
+                m = f.result()
+                print(f"  {m['case']} {m['arm']}-{m['i']}: exit {m['exit']} {m['secs']}s turns={m['turns']} "
+                      f"denials={m['denials']} {m['error'] or ''}", flush=True)
+                if m["rate_limited"] and not stop:
+                    stop = True
+                    print("e2: rate limited, cancelling the rest (rerun the same command to continue)", flush=True)
+                    for g in futs:
+                        g.cancel()
+    finally:
+        e2.keep_usage(env)
     print(run_id)
     return 1 if stop else 0
 

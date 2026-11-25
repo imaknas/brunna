@@ -271,7 +271,8 @@ def call(data: dict) -> None:
 
 def timed_out(where) -> None:
     """A usage row for a call ended at CALL_TIMEOUT_S, before the runtime returned and its own row was written: stop
-    "timeout", tokens and cost unknown, so the call still counts where usage is counted (billed time included)."""
+    "timeout", tokens and cost unknown, so the call still counts where usage is counted (billed time included). It settles
+    the request the call has open."""
     if not where:
         return
     try:

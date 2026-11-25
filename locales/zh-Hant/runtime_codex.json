@@ -107,5 +107,6 @@
  "{folder} is neither under the memory copies nor in the platform's private temp folder: Codex runs only there (B1)": "{folder} 既不在記憶副本底下,也不在平台的私有暫存資料夾裡:Codex 只在那裡跑(B1)",
  "{point} has rules for writing but no tool that writes: Codex would give it the shell for nothing": "{point} 有寫入規則卻沒有會寫入的工具:Codex 會白白給它 shell",
  "its sessions in sandboxed projects aren't served yet (runtime-codex.md, Step 4), so they can't ask the platform to push: push requests are not supported for Codex sessions": "它在沙盒專案裡的 session 還沒納入服務(runtime-codex.md, Step 4),所以不能請平台推送:Codex session 不支援推送請求",
- "Codex {version} runs git in the session's folder outside its own sandbox ({check}: {reason})": "Codex {version} 會在 session 的資料夾、在自己的沙箱外跑 git({check}:{reason})"
+ "Codex {version} runs git in the session's folder outside its own sandbox ({check}: {reason})": "Codex {version} 會在 session 的資料夾、在自己的沙箱外跑 git({check}:{reason})",
+ "the run's output could not be read: {error}": "執行的輸出讀不出來:{error}"
 }

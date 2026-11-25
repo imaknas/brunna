@@ -64,6 +64,9 @@ config:
   brunna llm set-key <provider>   write the API key of hub.json llm.providers.<provider> from stdin into the platform's
                         secrets directory (chmod 600; not read from arguments, so it stays out of the shell history)
   brunna llm health        whether each provider works (= bin/llm.py health)
+  brunna llm usage [--days <n>]
+                        what every model run the platform started used in the last n days (30): by kind of work, with what the
+                        pay-per-use ones cost and what the others would cost
   brunna modules [enable|disable <name>]
                         which optional features exist and which are on; switching changes hub.json and applies it (remember
                         to commit hub.json)

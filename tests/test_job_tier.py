@@ -202,12 +202,12 @@ class Gate(unittest.TestCase):
         self.assertEqual((row["point"], row["billing"], row["model"], row["project"]),
                          (POINT, "subscription", self.fake._ran[-1].model, "p"))
 
-    def test_no_tier_no_gate_no_row(self):
+    def test_no_tier_no_gate_but_a_row(self):
         self.fake.set_billing("unknown")
         rc, out = self.run_job({"AGENT_JOB_TIER": ""})
         self.assertEqual(rc, 0, out)
         self.assertEqual(self.fake._ran[-1].model, self.llm.model_for(POINT, self.spec))
-        self.assertEqual(self.rows(), [])
+        self.assertEqual([(r["point"], r["billing"], r["project"]) for r in self.rows()], [(POINT, "unknown", "p")])
 
     def test_a_refused_tier_starts_nothing(self):
         self.fake.set_billing("unknown")

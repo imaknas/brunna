@@ -47,6 +47,7 @@ import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import names  # noqa: E402
 import runtime_ports  # noqa: E402
+import usage_log  # noqa: E402
 from runtime_ports import Check, Outcome  # noqa: E402
 
 _ = i18n.domain(__file__)
@@ -199,7 +200,10 @@ def run_one(runtime: str, check: Check, exe: str | None, top: pathlib.Path, pair
         except (ValueError, IndexError, KeyError, AttributeError, TypeError):
             return Outcome("error", _("the check's process ended without an answer (exit {code})", code=p.returncode))
     finally:
-        shutil.rmtree(world.root, ignore_errors=True)
+        try:   # the runs were real: what its world recorded is kept in the live usage log before the world goes
+            usage_log.adopt(hubconf.STATE / "llm-usage.jsonl", world.state / "llm-usage.jsonl", f"conformance/{check.name}", over=True)
+        finally:
+            shutil.rmtree(world.root, ignore_errors=True)
 
 
 def _kill_group(p) -> None:

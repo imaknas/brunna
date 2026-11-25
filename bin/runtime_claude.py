@@ -1641,37 +1641,109 @@ def describe(task) -> list:
     return _command(task)
 
 
+def session_cost(sid: str) -> float | None:
+    """What a session's record says it had cost: the total Claude Code goes on from when the session is resumed or forked
+    (measured 11-25 on 2.1.331: total_cost_usd of a resumed run, and of a fork, includes it; conformance_claude's
+    session-cost check). 0.0 when the record has none; None when there is no record to read."""
+    f = transcript(sid)
+    if f is None:
+        return None
+    total = 0.0
+    try:
+        with f.open(errors="replace") as fh:
+            for line in fh:
+                if '"totalCostUSD"' not in line:
+                    continue
+                try:
+                    d = json.loads(line)
+                except ValueError:
+                    continue
+                v = _num(d.get("totalCostUSD")) if isinstance(d, dict) else None
+                if v is not None:
+                    total = float(v)
+    except OSError:
+        return None
+    return total
+
+
+def _resumed(args) -> str | None:
+    """The session a run's arguments resume ("" when they resume one without naming it), None when they resume none."""
+    args = [str(a) for a in args]
+    for i, a in enumerate(args):
+        if a in ("--resume", "-r"):
+            return args[i + 1] if i + 1 < len(args) else ""
+        if a.startswith("--resume="):
+            return a.split("=", 1)[1]
+        if a in ("--continue", "-c"):
+            return ""
+    return None
+
+
+def _num(x):
+    import math
+    try:
+        return x if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) else None
+    except OverflowError:
+        return None
+
+
+def _used(out, resumed: str | None, before: float | None) -> dict:
+    """A result's own cost and tokens, as TaskResult's fields. A fresh run's: the tool's totals, every model's (subagents and
+    all). A resumed one's totals are the whole conversation's: the cost less what it stood at before (unknown when that
+    couldn't be read), the tokens its own turns' (usage)."""
+    out = out if isinstance(out, dict) else {}
+    cost = _num(out.get("total_cost_usd"))
+    if resumed is not None and cost is not None:
+        cost = None if before is None else max(cost - before, 0.0)
+    models = out.get("modelUsage")
+    if resumed is None and isinstance(models, dict) and models:
+        rows = [m for m in models.values() if isinstance(m, dict)]
+        got = [sum(int(_num(m.get(k)) or 0) for m in rows for k in ks)
+               for ks in (("inputTokens", "cacheReadInputTokens", "cacheCreationInputTokens"), ("outputTokens",))]
+    else:
+        u = out.get("usage")
+        if not isinstance(u, dict):
+            return {"cost_usd": cost}
+        got = [sum(int(_num(u.get(k)) or 0) for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")),
+               int(_num(u.get("output_tokens")) or 0)]
+    return {"cost_usd": cost, "input_tokens": got[0], "output_tokens": got[1]}
+
+
 def run(task) -> TaskResult:
     import runtime_ports
     try:
         exe, copy = _run_copy()
         env = _env(task, entry=copy)
     except (runtime_ports.Unsupported, ValueError) as e:   # no checked copy (or it changed after its check), no stub: not run, said
-        return TaskResult(False, error=str(e))
+        return TaskResult(False, error=str(e), started=False)
     version = copy.version if copy else None
     cmd = _command(task, exe)
     if (why := unrestricted_refusal(cmd, task.cwd)):   # never started (the owner's decision of 11-18)
-        return TaskResult(False, error=why, runtime_version=version)
+        return TaskResult(False, error=why, runtime_version=version, started=False)
+    resumed = _resumed(cmd)
+    before = session_cost(resumed) if resumed else None
     try:
-        r = subprocess.run(cmd, cwd=task.cwd or None, capture_output=True, text=True, timeout=task.timeout_s,
+        r = subprocess.run(cmd, cwd=task.cwd or None, capture_output=True, text=True, errors="replace", timeout=task.timeout_s,
                            env=env, input=task.prompt)
     except subprocess.TimeoutExpired:
         return TaskResult(False, error=_("over {minutes} {minutes:minute|minutes}", minutes=task.timeout_s // 60),
                           runtime_version=version)
     except FileNotFoundError:
-        return TaskResult(False, error=_(NOT_FOUND), runtime_version=version)
+        return TaskResult(False, error=_(NOT_FOUND), runtime_version=version, started=False)
+    except OSError as e:   # e.g. the folder is gone, or the copy can't be executed
+        return TaskResult(False, error=_("the run could not start: {error}", error=type(e).__name__), runtime_version=version,
+                          started=False)
     import sys
     sys.stderr.write(r.stderr)
     if r.returncode != 0 or not r.stdout.strip():
         # claude -p errors (e.g. Login expired) are often only in the JSON on stdout, with what the run cost
         try:
-            cost = json.loads(r.stdout).get("total_cost_usd")
-        except (ValueError, AttributeError):
-            cost = None
+            got = json.loads(r.stdout)
+        except ValueError:
+            got = None
         return TaskResult(False, error=_("exit {code}: {detail}", code=r.returncode,
                                                  detail=(r.stderr.strip() or r.stdout.strip())[-300:]),
-                          cost_usd=cost if isinstance(cost, (int, float)) and not isinstance(cost, bool) else None,
-                          runtime_version=version)
+                          runtime_version=version, **_used(got, resumed, before))
     try:
         out = json.loads(r.stdout)
     except ValueError:
@@ -1681,7 +1753,7 @@ def run(task) -> TaskResult:
     # become a failure
     return TaskResult(
         ok=True, incomplete=bool(out.get("is_error")), text=str(out.get("result") or ""),
-        structured_output=out.get("structured_output"), cost_usd=out.get("total_cost_usd"),
+        structured_output=out.get("structured_output"), **_used(out, resumed, before),
         session_id=out.get("session_id"), turns=out.get("num_turns"), stop=str(out.get("subtype") or ""),
         denials=tuple(out.get("permission_denials") or ()), runtime_version=version)
 
@@ -3595,26 +3667,26 @@ def complete(req, conf) -> CompletionResult:
     import runtime_ports
     env, why = auth_env(conf.get("auth") or "token", os.environ)
     if env is None:
-        return CompletionResult(False, stop="error", error=why)
+        return CompletionResult(False, stop="error", error=why, started=False)
     env["HUB_LLM_POINT"] = req.point   # the process started (hooks included) knows it's a platform headless call
     try:
         exe, copy = _run_copy()
         cmd = completion_command(req, exe)
         env = _env(type("T", (), {"env": env})(), own=True, entry=copy)
     except (runtime_ports.Unsupported, ValueError) as e:   # no checked copy, or no stub: not run, said
-        return CompletionResult(False, stop="error", error=str(e))
+        return CompletionResult(False, stop="error", error=str(e), started=False)
     version = copy.version if copy else None
     import hubconf
     try:
         tmp = tempfile.TemporaryDirectory(prefix="hub-completion-", dir=hubconf.private_tmp(), ignore_cleanup_errors=True)
     except OSError as e:   # the secrets folder read-only, the disk full: no folder for it, not a crash
-        return CompletionResult(False, stop="error", error=_("could not make a folder for the run: {e}", e=e))
+        return CompletionResult(False, stop="error", error=_("could not make a folder for the run: {e}", e=e), started=False)
     with tmp as cwd:
         try:
             proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                     text=True, env=env)
         except FileNotFoundError:
-            return CompletionResult(False, stop="error", error=_(NOT_FOUND), runtime_version=version)
+            return CompletionResult(False, stop="error", error=_(NOT_FOUND), runtime_version=version, started=False)
         errs: list = []
 
         def feed():

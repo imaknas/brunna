@@ -183,6 +183,11 @@ vendors):
 
 - APIs only return token counts: `llm.py` accounts by token (a price table in the provider settings, optional; without
   it only tokens are recorded), shown on the status page.
+- **Every run is counted, not only the pay-per-use ones** (11-25, `bin/usage_log.py`): completions, agent runs of every point
+  and login, leases by turn, the checks of a tool's new version, evals. A run is opened before it starts and settled after,
+  so one that was killed still counts. A resumed or forked session's total includes what it had cost before (measured on
+  Claude Code 2.1.331), so a run's own cost is what it rose by. `brunna llm usage` and the status page show them. The owner's
+  own sessions aren't counted, woken ones included.
 - `budget.nightly_usd`: when exceeded, the remaining judgment points stop (`on_failure` as declared) and an alert is
   sent; unlimited if not set.
 - 429 / 529 retried with backoff (capped), not counted towards the "retry once on non-compliance".

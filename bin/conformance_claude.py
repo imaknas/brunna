@@ -22,9 +22,11 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import completion  # noqa: E402
 import i18n  # noqa: E402
 import names  # noqa: E402
 import runtime_claude as rc  # noqa: E402
+import usage_log  # noqa: E402
 from runtime_ports import Check, CompletionRequest, Outcome  # noqa: E402
 
 _ = i18n.domain(__file__)
@@ -67,9 +69,33 @@ def enter(world) -> None:
 
 
 def _claude(args, *, cwd, stdin="", timeout=300, env=None, exe=None) -> subprocess.CompletedProcess:
-    """A run of the binary under check (exe: another one, in the same world: the copy a check pairs it with)."""
-    return subprocess.run([exe or rc.binary(), *args], input=stdin, cwd=cwd, capture_output=True, text=True,
-                          timeout=timeout, env=rc._env(type("T", (), {"env": dict(os.environ if env is None else env)})()))
+    """A run of the binary under check (exe: another one, in the same world: the copy a check pairs it with). A run of a
+    model is a usage row of the world's (conformance.py keeps it); one whose API is a stand-in on this machine used nothing."""
+    e = rc._env(type("T", (), {"env": dict(os.environ if env is None else env)})())
+    return _counted([exe or rc.binary(), *args], stdin=stdin, cwd=cwd, timeout=timeout, env=e)
+
+
+def _counted(argv, *, stdin, cwd, timeout, env) -> subprocess.CompletedProcess:
+    args, e = argv[1:], env
+    model = "-p" in args and not e.get("ANTHROPIC_BASE_URL")
+    run = usage_log.begin(completion.USAGE, "run", rc.NAME, None, rc.billing("token", e, True)) if model else None
+    r = subprocess.run(argv, input=stdin, cwd=cwd, capture_output=True, text=True, timeout=timeout, env=e)
+    if model:
+        got = next((o for o in reversed(_events(r)) if o.get("type") == "result"), None)
+        used = rc._used(got, rc._resumed(args), None)
+        completion.record_run("run", rc.NAME, None, rc.billing("token", e, True), used.get("cost_usd"),
+                              str((got or {}).get("subtype") or ""), None, used.get("input_tokens"), used.get("output_tokens"), run,
+                              gated=False)
+    return r
+
+
+def _complete(req):
+    """rc.complete, as a usage row of the world's."""
+    target = completion.runtime_target(rc.NAME, req.model, "token")
+    completion.begin(req.point, target)
+    got = rc.complete(req, {"auth": "token"})
+    completion.record(req.point, target, got)
+    return got
 
 
 def _result(r) -> dict | None:
@@ -166,9 +192,9 @@ def completion_schemas(world) -> Outcome:
     bad, answered = [], 0
     for f in sorted((ROOT / "contracts" / "llm").glob("*.schema.json")):
         schema = json.loads(f.read_text())
-        got = rc.complete(CompletionRequest(point="login-check", model=FAST, timeout_s=240, schema=schema, prompt=(
+        got = _complete(CompletionRequest(point="login-check", model=FAST, timeout_s=240, schema=schema, prompt=(
             "This is a test of structured output. Return a small example that is valid for the schema you were given; "
-            "make up short placeholder values.")), {"auth": "token"})
+            "make up short placeholder values.")))
         answered += bool(got.ok)
         try:
             ok = got.ok and not minischema.errors(schema, json.loads(got.text))
@@ -277,7 +303,7 @@ def agent_run(repo: pathlib.Path, guarded: bool = True, exe: str | None = None, 
     for k in rc.NO_FOLDER_GIT:
         run_env.pop(k, None)
     try:
-        r = subprocess.run([exe, *argv[1:]], input=ASK, capture_output=True, text=True, timeout=180, cwd=repo, env=run_env)
+        r = _counted([exe, *argv[1:]], stdin=ASK, cwd=repo, timeout=180, env=run_env)
     except subprocess.TimeoutExpired:
         return _("no answer for 3 minutes")
     got = _result(r)
@@ -977,12 +1003,35 @@ class _StandIn:
         env |= {"ANTHROPIC_API_KEY": "sk-ant-nobodys"} if key else {rc.TOKEN_VAR: NOBODYS}
         r = _claude(["-p", "--output-format", "json", "--strict-mcp-config", *args, "--model", FAST], cwd=cwd, stdin=ASK,
                     timeout=STAND_IN_S, env=env)
-        got = _result(r)
+        got = self.result = _result(r)
         return None if got is None or got.get("is_error") else "\n".join(self.told)
 
     def close(self):
         self.server.shutdown()
         self.server.server_close()
+
+
+def session_cost(world) -> Outcome:
+    """What a resumed run's own cost is taken from (rc.session_cost, rc._used; bin/usage_log.py): the total a resumed session
+    reports goes on from what its record says it had cost. A stand-in answers; the prices are the tool's own."""
+    import uuid
+    from unittest import mock
+    api, sid, seen = _StandIn(), str(uuid.uuid4()), []
+    try:
+        with mock.patch.object(rc, "PROJECTS", pathlib.Path(world.tool) / "projects"):
+            for args in (["--session-id", sid], ["--resume", sid], ["--resume", sid, "--fork-session"]):
+                before = rc.session_cost(sid) if len(seen) else 0.0
+                if api.run(world.project, [], args=("--tools", "", *args)) is None:
+                    return Outcome("error", _("a run against the stand-in failed"))
+                seen.append((before, api.result.get("total_cost_usd")))
+    finally:
+        api.close()
+    first = seen[0][1]
+    if not first or any(b is None or not t for b, t in seen):
+        return Outcome("fail", _("a session's cost is not where the platform reads it"))
+    # each later run made one request like the first's
+    off = [t - b for b, t in seen if not 0.5 * first <= t - b <= 1.5 * first]
+    return Outcome("fail", _("a resumed session's total doesn't go on from what its record says")) if off or seen[1][1] <= seen[1][0] else Outcome("pass")
 
 
 def run_credentials(world) -> Outcome:
@@ -1395,6 +1444,7 @@ CHECKS = [
     Check("sessions-read", "sessions", "function", sessions_read, side="session"),
     # a session of this version forked by the platform's current copy (a mailbox fork); on a candidate, by itself
     Check("sessions-fork", "sessions", "function", sessions_fork, side="session"),
+    Check("session-cost", "sessions", "function", session_cost, timeout_s=3 * STAND_IN_S + 60),
     Check("stream-exchange", "stream", "function", stream_exchange),
     # a lease's --settings ask for every session command the folder's local settings allow (runtime_claude.lease_settings;
     # docs/design/platform-push.md, "After the code review"): ask must win over that allow

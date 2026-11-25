@@ -2,7 +2,7 @@ $ agenthub llm
 [exit 2]
 --- stdout
 --- stderr
-用法:brunna llm setup | set-key <provider>(key 從 stdin)| health
+用法:brunna llm setup | set-key <provider>(key 從 stdin)| health | usage [--days <n>]
 
 $ agenthub llm set-key nosuch
 [exit 2]

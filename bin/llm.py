@@ -805,14 +805,23 @@ def _launch(a, spec: dict, rt, env: dict, prompt: str, model, run_dir, how: str 
             print(e, file=sys.stderr)
             return 2
         return 0
+    # every run is a usage row, opened before it starts (bin/usage_log.py; the metered ones count toward the budget)
+    import completion
+    import usage_log
+    name, project = point_runtime(a.point, spec) or runtime_ports.default_name(), env.get(spec.get("project_env") or "") or None
+    paid = how or (rt.billing(auth_mode(spec), env, spec.get("settings") == "platform" or bool(spec.get("restricted")))
+                   if "auth" in runtime_ports.capabilities(name) else "unknown")
+    run = usage_log.begin(completion.USAGE, key, name, model, paid, project, gated=bool(how))
     try:
         res = rt.run(task)
     except (ValueError, runtime_ports.Unsupported) as e:
+        usage_log.drop(completion.USAGE, run)
         return fail(key, spec, str(e))
-    if how:   # a strength the project chose: every run is a usage row (the metered ones count toward the budget)
-        import completion
-        completion.record_run(key, point_runtime(a.point, spec) or runtime_ports.default_name(), model, how,
-                              res.cost_usd, res.stop, env.get(spec.get("project_env") or "") or None)
+    if res.started:
+        completion.record_run(key, name, model, paid, res.cost_usd, res.stop, project, res.input_tokens, res.output_tokens, run,
+                              gated=bool(how))
+    else:
+        usage_log.drop(completion.USAGE, run)
     if job_credentials(spec, env) and (why := bridge_failure(run_dir)):
         return fail(key, spec, why)
     if not res.ok:

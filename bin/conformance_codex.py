@@ -21,8 +21,10 @@ import subprocess
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+import completion  # noqa: E402
 import i18n  # noqa: E402
 import runtime_codex as rx  # noqa: E402
+import usage_log  # noqa: E402
 from runtime_ports import Check, Outcome  # noqa: E402
 
 _ = i18n.domain(__file__)
@@ -60,6 +62,31 @@ def enter(world) -> None:
     (bindir / "git").chmod(0o700)
     os.environ.update({"CODEX_HOME": str(world.tool), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull,
                        "PATH": f"{bindir}:{os.environ.get('PATH', '')}"})
+
+
+def _one_run(*args, **kw) -> dict:
+    """rx._one_run, as a usage row of the world's (its tokens; Codex says no cost)."""
+    run = usage_log.begin(completion.USAGE, "run", rx.NAME, kw.get("model"), rx.billing("token", {}, True))
+    got = rx._one_run(*args, **kw)
+    tin, tout = got.get("tokens") or (None, None)
+    if got.get("started", True):
+        completion.record_run("run", rx.NAME, kw.get("model"), rx.billing("token", {}, True), None, "end" if got.get("ok") else "error",
+                              None, tin, tout, run, gated=False)
+    else:
+        usage_log.drop(completion.USAGE, run)
+    return got
+
+
+def _agent_run(task):
+    """rx.run, as a usage row of the world's."""
+    run = usage_log.begin(completion.USAGE, "run", rx.NAME, task.model, rx.billing("token", {}, True))
+    got = rx.run(task)
+    if got.started:
+        completion.record_run("run", rx.NAME, task.model, rx.billing("token", {}, True), got.cost_usd, "end" if got.ok else "error",
+                              None, got.input_tokens, got.output_tokens, run, gated=False)
+    else:
+        usage_log.drop(completion.USAGE, run)
+    return got
 
 
 def _codex(args, *, cwd, timeout=RUN_S) -> subprocess.CompletedProcess:
@@ -320,7 +347,7 @@ def home_flags(world) -> Outcome:
                 return Outcome("fail", _("{model}: {what}", model=model, what="; ".join(bad)))
         model = rx.MODELS["fast"]
         h = fresh()
-        got = rx._one_run("conformance", exe, folder, h, rx.run_args(model, entries), "Reply with ok.", RUN_S, False,
+        got = _one_run("conformance", exe, folder, h, rx.run_args(model, entries), "Reply with ok.", RUN_S, False,
                           entries, {"LANG": os.environ.get("LANG", "C")})
         if got.get("refused"):
             return Outcome("fail", got["error"])
@@ -499,7 +526,7 @@ def auth_login_error(world) -> Outcome:
     h = rx.run_home()   # the world's user home has no login: no link
     try:
         entries = rx.profile_entries(read=[folder], exe=exe)
-        got = rx._one_run("conformance", exe, folder, h, rx.run_args(rx.MODELS["fast"], entries), "Reply with ok.",
+        got = _one_run("conformance", exe, folder, h, rx.run_args(rx.MODELS["fast"], entries), "Reply with ok.",
                           RUN_S, False, entries, {"LANG": os.environ.get("LANG", "C")})
     except subprocess.TimeoutExpired:
         return Outcome("error", _("no answer in {s} s", s=RUN_S))
@@ -561,7 +588,7 @@ def _completion(world, prompt: str, model: str | None = None, shell: bool = Fals
     home = rx.run_home()
     try:
         entries = rx.profile_entries(read=[folder], exe=exe)
-        got = rx._one_run("conformance", exe, folder, home, rx.run_args(model or rx.MODELS["fast"], entries, shell=shell),
+        got = _one_run("conformance", exe, folder, home, rx.run_args(model or rx.MODELS["fast"], entries, shell=shell),
                           prompt, RUN_S, shell, entries, {"LANG": os.environ.get("LANG", "C")},
                           model=model or rx.MODELS["fast"])
         return got, _tool_calls(home)
@@ -646,7 +673,7 @@ def agent_result(world) -> Outcome:
                 "the JSON object {\"changed\": true}.", spec=spec, cwd=str(copy), model=rx.MODELS["fast"],
                 output_schema={"type": "object", "properties": {"changed": {"type": "boolean"}}, "required": ["changed"]},
                 timeout_s=2 * RUN_S, env={"LANG": os.environ.get("LANG", "C"), "HUB_LLM_POINT": "librarian-state"})
-    res = rx.run(task)
+    res = _agent_run(task)
     if not res.ok:
         return Outcome("fail" if "refused" in (res.error or "") else "error", res.error)
     if "checked" not in (copy / "STATE.md").read_text():
@@ -675,12 +702,16 @@ def lifecycle_hooks(world) -> Outcome:
     (home / "home").mkdir(exist_ok=True)
     env = {**rx.run_env(home), "CODEX_HOME": str(home)}
     out = home / "last.txt"
+    run = usage_log.begin(completion.USAGE, "run", rx.NAME, rx.MODELS["fast"], rx.billing("token", {}, True))
     try:
         code, _o, _e, _t = rx._execute([rx.binary(), "exec", "--skip-git-repo-check", "-c", f"model={rx._toml(rx.MODELS['fast'])}",
                                         "-s", "read-only", "-o", str(out), "-"], str(folder), env,
                                        "What is the marker word in your context? Answer with just the word.", RUN_S)
     except OSError as e:
+        usage_log.drop(completion.USAGE, run)
         return Outcome("error", str(e))
+    completion.record_run("run", rx.NAME, rx.MODELS["fast"], rx.billing("token", {}, True), None, "end" if code == 0 else "error",
+                          run=run, gated=False)
     said = out.read_text() if out.exists() else ""
     if code != 0:
         return Outcome("error", _("the session failed (exit {code})", code=code))

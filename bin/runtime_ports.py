@@ -175,6 +175,9 @@ The current interfaces (the other layers get added one at a time, following the 
                                                         expire (values never read or printed)
     is_login_error(text) -> bool                         whether this error message is a login problem (a person has
                                                          to deal with it) or something else (timeout, quota…)
+    session_cost(sid) -> float | None                    optional: what a session's record says it had cost, where a run
+                                                         that resumes one reports the whole conversation's total
+                                                         (bin/usage_log.py); None: can't be told
     billing(mode, env, restricted) -> subscription | metered | unknown
                                                          how a run with this login and these environment variables
                                                          (auth_env's) is paid for; restricted: the run loads no
@@ -727,6 +730,9 @@ class TaskResult(NamedTuple):
     error: str = ""                  # the reason when ok is False
     runtime_version: str | None = None   # the version of the tool's copy the run started, when the runtime keeps a store
                                          # of checked copies (llm.py's llm_runtime_version)
+    input_tokens: int | None = None      # the run's own tokens, cached ones included, when the tool says
+    output_tokens: int | None = None
+    started: bool = True                 # False: nothing was started, so nothing was used
 
 
 class CompletionRequest(NamedTuple):
@@ -753,6 +759,7 @@ class CompletionResult(NamedTuple):
                                      # it); APIs return only tokens, and completion.py prices them from the price list
     retry_after_s: float | None = None   # when stop is rate_limited, how long the service suggests waiting
     runtime_version: str | None = None   # a runtime's completion: the version of the copy it started (as TaskResult)
+    started: bool = True             # False: no request was made (as TaskResult)
 
 
 # end = finished normally; length = truncated by length (a retry would truncate the same way, so no retry); refused =

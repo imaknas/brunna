@@ -87,5 +87,8 @@
  "the command line": "命令列",
  "the run with the deny in {how} gave no result": "禁止寫在{how}的那次沒有結果",
  "denied in {how}, but read: {files}": "禁止寫在{how},還是讀到了:{files}",
- "denied in {how}, and not readable though ordinary: {files}": "禁止寫在{how},一般檔案也讀不到了:{files}"
+ "denied in {how}, and not readable though ordinary: {files}": "禁止寫在{how},一般檔案也讀不到了:{files}",
+ "a session's cost is not where the platform reads it": "session 的花費不在平台讀的地方",
+ "a run against the stand-in failed": "對替身的執行失敗了",
+ "a resumed session's total doesn't go on from what its record says": "接續的 session 的累計花費,沒有從紀錄裡的數字接下去"
 }

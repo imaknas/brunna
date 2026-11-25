@@ -34,8 +34,9 @@ The handling is the same for every provider (an implementation only "sends it an
   5. strip a reasoning model's <think>…</think>, parse the JSON (tolerating ``` fences), validate with minischema;
      if invalid, retry once with the errors attached
      a point declaring max_attempts makes at most that many requests, retries of both kinds counted (1: none)
-  6. every call is recorded in .state/llm-usage.jsonl (tokens, cost, billing = metered | subscription | local; and the
-     project, for a project's own calls). A subscription call's cost_usd is the tool's own estimate, not a charge
+  6. every call is recorded in .state/llm-usage.jsonl, as every agent run is (bin/usage_log.py: tokens, cost, billing =
+     metered | subscription | local | unknown; and the project). A subscription call's cost_usd is the tool's own
+     estimate, not a charge
 The key is read only here (secrets_dir or an environment variable) and handed to the implementation in conf["_key"],
 never put into any subprocess's environment.
 """
@@ -53,6 +54,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
 import minischema  # noqa: E402
+import usage_log  # noqa: E402
 
 _ = i18n.domain(__file__)
 
@@ -230,19 +232,9 @@ def today_cost() -> float:
     """Today's spending: metered rows only (a row from before billing was written counts). A subscription run's cost is
     what the tool says it would have cost, not a charge, so it never uses up the budget metered calls need
     (docs/design/project-agent-calls.md A5)."""
-    today = datetime.date.today().isoformat()
-    total = 0.0
-    try:
-        for line in USAGE.read_text().splitlines():
-            try:
-                r = json.loads(line)
-            except ValueError:
-                continue
-            if str(r.get("ts", "")).startswith(today) and r.get("cost_usd") and r.get("billing", "metered") == "metered":
-                total += float(r["cost_usd"])
-    except OSError:
-        pass
-    return total
+    usage_log.sweep(USAGE)
+    return sum((usage_log.number(r.get("cost_usd")) for r in usage_log.rows(USAGE, datetime.date.today().isoformat())
+                if r.get("billing", "metered") == "metered"), 0.0)
 
 
 def metered(target: dict) -> bool:
@@ -271,59 +263,62 @@ def billing(target: dict) -> str:
     return "local" if target.get("location") == "local" else "subscription"
 
 
-def record(point: str, target: dict, res, project: str | None = None) -> float | None:
+_open: list[tuple[str, str]] = []   # (point, run): the requests this process has open
+
+
+def begin(point: str, target: dict, project: str | None = None) -> str | None:
+    """Open a completion's request in the usage log (usage_log.begin): settled by record."""
+    rid = usage_log.begin(USAGE, point, target["provider"], target["model"], billing(target), project, gated=login_metered(target))
+    if rid:
+        _open.append((point, rid))
+    return rid
+
+
+def record(point: str, target: dict, res, project: str | None = None, run: str | None = None) -> float | None:
+    """The request's row, its open run settled (run, else the point's latest: a caller about to be killed, mailbox_route, has
+    no other name for it). One that never started (res.started False) used nothing: no row."""
+    entry = next((x for x in reversed(_open) if (x[1] == run if run else x[0] == point)), None)
+    if entry:
+        _open.remove(entry)
+    rid = entry[1] if entry else run
+    if not getattr(res, "started", True):
+        usage_log.drop(USAGE, rid)
+        return None
     cost = res.cost_usd
     price = target.get("price") or {}
     if cost is None and price and res.input_tokens is not None:
         cost = ((res.input_tokens or 0) * float(price.get("in", 0)) + (res.output_tokens or 0) * float(price.get("out", 0))) / 1e6
-    row = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"), "point": point,
+    row = {"ts": usage_log.now(), "point": point,
            "provider": target["provider"], "model": target["model"], "input_tokens": res.input_tokens,
            "output_tokens": res.output_tokens, "cost_usd": cost, "stop": res.stop, "billing": billing(target)}
     if cost is None and login_metered(target):
         row["cost_unknown"] = True
-    _append(row, project)
+    if project:
+        row["project"] = project
+    usage_log.settle(USAGE, rid, row)
     return cost
 
 
 def record_run(point: str, runtime: str, model: str | None, how: str, cost: float | None, stop: str | None,
-               project: str | None = None) -> None:
-    """One row for an agent run whose model strength a project chose (llm.py's billing gate): the runtime is the
-    provider, how the adapter says it is paid for, no token counts (an agent run reports none)."""
-    row = {"ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"), "point": point,
-           "provider": runtime, "model": model, "input_tokens": None, "output_tokens": None, "cost_usd": cost,
+               project: str | None = None, input_tokens: int | None = None, output_tokens: int | None = None,
+               run: str | None = None, gated: bool = True) -> None:
+    """One row for an agent run (run: what usage_log.begin opened for it): the runtime is the provider, how the adapter says
+    it is paid for. gated: one at a strength its project chose, whose cost must be told (unknown_cost_today)."""
+    row = {"ts": usage_log.now(), "point": point,
+           "provider": runtime, "model": model, "input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": cost,
            "stop": stop, "billing": how}
-    if how == "metered" and cost is None:   # e.g. it ran to its timeout: what it spent can't be told (unknown_cost_today)
+    if how == "metered" and cost is None and gated:   # e.g. it ran to its timeout: what it spent can't be told (unknown_cost_today)
         row["cost_unknown"] = True
-    _append(row, project)
+    if project:
+        row["project"] = project
+    usage_log.settle(USAGE, run, row)
 
 
 def unknown_cost_today() -> bool:
     """Whether a pay-per-use agent run today ended without a cost (record_run's cost_unknown): the day's spending can't be
     told then, so llm.py runs no more pay-per-use runs at a strength a project chose until the next day."""
-    today = datetime.date.today().isoformat()
-    try:
-        lines = USAGE.read_text().splitlines()
-    except OSError:
-        return False
-    for line in lines:
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
-        if isinstance(r, dict) and str(r.get("ts", "")).startswith(today) and r.get("cost_unknown") is True:
-            return True
-    return False
-
-
-def _append(row: dict, project: str | None) -> None:
-    if project:
-        row["project"] = project
-    try:
-        USAGE.parent.mkdir(parents=True, exist_ok=True)
-        with USAGE.open("a") as f:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+    usage_log.sweep(USAGE)
+    return any(r.get("cost_unknown") is True for r in usage_log.rows(USAGE, datetime.date.today().isoformat()))
 
 
 def strip_think(text: str) -> str:
@@ -423,8 +418,9 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
         rate_tries = 0
         while True:
             req = req._replace(timeout_s=time_left())
+            rid = begin(point, target, project)
             res = impl.complete(req, conf)
-            cost_total += record(point, target, res, project) or 0
+            cost_total += record(point, target, res, project, rid) or 0
             left = left - 1 if left is not None else None
             if res.stop != "rate_limited" or rate_tries >= MAX_RATE_RETRIES or left == 0:
                 break

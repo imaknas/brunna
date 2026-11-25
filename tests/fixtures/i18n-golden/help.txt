@@ -57,6 +57,8 @@ config:
   brunna llm set-key <provider>   把 hub.json llm.providers.<provider> 的 API key 從 stdin 寫進平台的 secrets 目錄(chmod 600;
                         不從參數讀,不會留在 shell 歷史)
   brunna llm health        每一家 provider 能不能用(= bin/llm.py health)
+  brunna llm usage [--days <n>]
+                        平台啟動的每一次模型執行,最近 n 天(預設 30)用了多少:依工作種類,按次計費的實際花費,其他的估計花費
   brunna modules [enable|disable <名稱>]
                         有哪些可以不開的功能、開了哪些;開關會改 hub.json 再套用(hub.json 記得 commit)
   brunna move-instance --to <實例目錄> [--apply]

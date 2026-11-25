@@ -1686,16 +1686,26 @@ def _one_run(point: str, exe: str, folder, home, args: list, prompt: str, timeou
     except ValueError:
         items = None
     if not isinstance(items, list):
-        return {"ok": False, "error": _("the check before the run couldn't read what Codex would send (exit {code})",
-                                        code=pre.returncode)}
+        return {"ok": False, "started": False, "error": _("the check before the run couldn't read what Codex would send (exit {code})",
+                                                          code=pre.returncode)}
     if (why := shape_problems(items, shell)):
         refused = _("the run of {point} would get more than its pinned tools ({what}): not run", point=point,
                     what="; ".join(why)[:300])
         _tools_alert(point, refused)
-        return {"ok": False, "error": refused, "refused": True}
+        return {"ok": False, "started": False, "error": refused, "refused": True}
     out_file = pathlib.Path(home) / "last-message.txt"
     argv = [exe, "exec", "--strict-config", "--skip-git-repo-check", "--json", *args, "-o", str(out_file), "-"]
     code, stdout, stderr, timed_out = _execute(argv, folder, env, prompt, timeout_s)
+    if code is None and not timed_out:   # never started
+        return {"ok": False, "started": False, "error": _("the run could not start: {error}", error=stderr[:200])}
+    try:
+        return _after_run(point, home, out_file, code, stdout, stderr, timed_out, timeout_s, shell, entries, model)
+    except (OSError, ValueError) as e:   # it ran: what it used counts, whatever its output was
+        return {"ok": False, "error": _("the run's output could not be read: {error}", error=type(e).__name__),
+                "tokens": _usage(_events(stdout))}
+
+
+def _after_run(point, home, out_file, code, stdout, stderr, timed_out, timeout_s, shell, entries, model) -> dict:
     events = _events(stdout)
     tokens = _usage(events)
     rollout = _rollout(home)
@@ -1734,18 +1744,18 @@ def complete(req, conf):
     try:
         exe, copy = _run_copy()
     except runtime_ports.Unsupported as e:
-        return CompletionResult(False, stop="error", error=str(e))
+        return CompletionResult(False, stop="error", error=str(e), started=False)
     version = copy.version if copy else None
     if not user_auth_file().is_file():
-        return CompletionResult(False, stop="error", error=_(NOT_LOGGED_IN), runtime_version=version)
+        return CompletionResult(False, stop="error", error=_(NOT_LOGGED_IN), runtime_version=version, started=False)
     try:
         folder = pathlib.Path(tempfile.mkdtemp(prefix="hub-codex-", dir=hubconf.private_tmp()))
     except OSError as e:
-        return CompletionResult(False, stop="error", error=_("could not make a folder for the run: {e}", e=e))
+        return CompletionResult(False, stop="error", error=_("could not make a folder for the run: {e}", e=e), started=False)
     home = None
     try:
         if not _no_git_above(folder):
-            return CompletionResult(False, stop="error", error=_(FOLDER_GIT), runtime_version=version)
+            return CompletionResult(False, stop="error", error=_(FOLDER_GIT), runtime_version=version, started=False)
         home = run_home()
         entries = profile_entries(read=[folder], exe=exe)
         args = run_args(req.model, entries, system=req.system)
@@ -1753,17 +1763,17 @@ def complete(req, conf):
         got = _one_run(req.point, exe, folder, home, args, _schema_prompt(req.prompt, req.schema), req.timeout_s,
                        False, entries, base, model=req.model)
     except ValueError as e:   # the denies couldn't be computed: refused, said
-        return CompletionResult(False, stop="error", error=str(e), runtime_version=version)
+        return CompletionResult(False, stop="error", error=str(e), runtime_version=version, started=False)
     except (OSError, subprocess.SubprocessError) as e:
         return CompletionResult(False, stop="error", error=_("the run could not start: {error}", error=type(e).__name__),
-                                runtime_version=version)
+                                runtime_version=version, started=False)
     finally:
         end_run_home(home)
         shutil.rmtree(folder, ignore_errors=True)
     tin, tout = got.get("tokens") or (None, None)
     if not got["ok"]:
         return CompletionResult(False, stop="error", error=got["error"], input_tokens=tin, output_tokens=tout,
-                                runtime_version=version)
+                                runtime_version=version, started=got.get("started", True))
     return CompletionResult(True, text=got["text"], stop="end", input_tokens=tin, output_tokens=tout,
                             runtime_version=version)
 
@@ -1960,10 +1970,10 @@ def run(task):
     try:
         exe, copy = _run_copy()
     except runtime_ports.Unsupported as e:
-        return TaskResult(False, error=str(e))
+        return TaskResult(False, error=str(e), started=False)
     version = copy.version if copy else None
     if not user_auth_file().is_file():
-        return TaskResult(False, error=_(NOT_LOGGED_IN), runtime_version=version)
+        return TaskResult(False, error=_(NOT_LOGGED_IN), runtime_version=version, started=False)
     home = None
     try:
         cwd, args, entries, shell = _agent_plan(task, exe)
@@ -1971,14 +1981,16 @@ def run(task):
         got = _one_run(task.point, exe, cwd, home, args, _schema_prompt(task.prompt, task.output_schema), task.timeout_s,
                        shell, entries, task.env, model=task.model)
     except (ValueError, runtime_ports.Unsupported) as e:
-        return TaskResult(False, error=str(e), runtime_version=version)
+        return TaskResult(False, error=str(e), runtime_version=version, started=False)
     except (OSError, subprocess.SubprocessError) as e:
         return TaskResult(False, error=_("the run could not start: {error}", error=type(e).__name__),
-                          runtime_version=version)
+                          runtime_version=version, started=False)
     finally:
         end_run_home(home)
+    tin, tout = got.get("tokens") or (None, None)
     if not got["ok"]:
-        return TaskResult(False, error=got["error"], runtime_version=version)
+        return TaskResult(False, error=got["error"], runtime_version=version, input_tokens=tin, output_tokens=tout,
+                          started=got.get("started", True))
     structured = None
     if task.output_schema is not None:
         try:
@@ -1986,7 +1998,7 @@ def run(task):
         except ValueError:
             structured = None
     return TaskResult(True, text=got["text"], structured_output=structured, session_id=got.get("thread"),
-                      stop="end", runtime_version=version)
+                      stop="end", runtime_version=version, input_tokens=tin, output_tokens=tout)
 
 
 # ---------- auth (runtime_ports' auth port) ----------

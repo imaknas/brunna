@@ -141,7 +141,7 @@ class StandIn(unittest.TestCase):
         with mock.patch.object(hubconf, "secrets_dir", lambda: secrets), mock.patch.object(hubconf, "projects", lambda: {"p": {}}), \
                 mock.patch.object(hubconf, "get", lambda k, d=None: {"run": ["true"]} if k == "runtime.command" else d):
             code, _out, why = runtime_command._run("p", None, None, None, 10)   # what its run makes the folder with
-            self.assertIsNone(code)
+            self.assertEqual(code, runtime_command.NOT_STARTED)
             self.assertTrue(why)
             res = propose_apply.run("p", self.tmp, "mailbox-propose", "p", [])
             self.assertFalse(res["ok"])

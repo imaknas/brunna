@@ -42,6 +42,9 @@ config:
   brunna llm set-key <provider>   write the API key of {settings} llm.providers.<provider> from stdin into the platform's
                         secrets directory (chmod 600; not read from arguments, so it stays out of the shell history)
   brunna llm health        whether each provider works (= bin/llm.py health)
+  brunna llm usage [--days <n>]
+                        what every model run the platform started used in the last n days (30): by kind of work, with what the
+                        pay-per-use ones cost and what the others would cost
   brunna modules [enable|disable <name>]
                         which optional features exist and which are on; switching changes {settings} and applies it (remember
                         to commit {settings})
@@ -2634,6 +2637,39 @@ def llm_setup(args: dict) -> int:
     return 0 if ok else 1
 
 
+def llm_usage(argv: list[str]) -> int:
+    import completion
+    import usage_log
+    days = int(argv[1]) if len(argv) == 2 and argv[0] == "--days" and argv[1].isascii() and argv[1].isdigit() and len(argv[1]) < 5 else 30 if not argv else 0
+    if days < 1:
+        print(_("usage: brunna llm usage [--days <n>]"), file=sys.stderr)
+        return 2
+    usage_log.sweep(completion.USAGE)
+    since = (datetime.date.today() - datetime.timedelta(days=days - 1)).isoformat()
+    found = usage_log.rows(completion.USAGE, since)
+    if not found:
+        print(_("no model run in the last {days} {days:day|days}", days=days))
+        return 0
+    by = usage_log.summary(found, usage_log.work)
+    total = usage_log.summary(found, lambda r: "")[""]
+
+    def line(name: str, v: dict) -> str:
+        return (f"{name[:34]:34} {v['runs']:6} {v['input_tokens']:13,} {v['output_tokens']:11,} {money(v['charged']):>10} "
+                f"{money(v['estimate']):>10} {v['unknown'] or '':>6}")
+
+    def money(x) -> str:
+        return "-" if x is None else f"${x:.2f}"
+    print(f"{_('work'):34} {_('runs'):>6} {_('tokens in'):>13} {_('tokens out'):>11} {_('charged'):>10} {_('estimate'):>10} {_('no cost'):>6}")
+    for name, v in sorted(by.items(), key=lambda kv: -((kv[1]["charged"] or 0) + (kv[1]["estimate"] or 0))):
+        print(line(name, v))
+    print(line(_("all"), total))
+    n = len({str(r.get("ts", ""))[:10] for r in found})
+    print(_("\nOn {n} {n:day|days} with runs of the last {days}. charged: pay-per-use. estimate: what the tool says the others would cost; "
+            "they are in a plan, or how they are paid for can't be told. no cost: runs that said none. Not counted: your own sessions.",
+            n=n, days=days))
+    return 0
+
+
 def cmd_llm(argv: list[str]) -> int:
     import completion
     if argv[:1] == ["health"]:
@@ -2642,8 +2678,10 @@ def cmd_llm(argv: list[str]) -> int:
         opts = {k.lstrip("-"): argv[i + 1] for i, k in enumerate(argv[:-1]) if k in ("--llm", "--llm-model", "--llm-base-url")}
         init_dialogue.use(init_dialogue.Terminal("--yes" in argv))
         return llm_setup(opts)
+    if argv[:1] == ["usage"]:
+        return llm_usage(argv[1:])
     if argv[:1] != ["set-key"] or len(argv) != 2:
-        print(_("usage: brunna llm setup | set-key <provider> (key from stdin) | health"), file=sys.stderr)
+        print(_("usage: brunna llm setup | set-key <provider> (key from stdin) | health | usage [--days <n>]"), file=sys.stderr)
         return 2
     conf = ((completion.settings() or {}).get("providers") or {}).get(argv[1])
     if not conf:

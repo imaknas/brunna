@@ -108,5 +108,6 @@
  "{file} names programs its sessions run as you: {what}": "{file} 指定了它的 session 會以你的身分跑的程式:{what}",
  "{file} sets env for its sessions and their hooks: {what}": "{file} 替它的 session 跟 hook 設了環境變數:{what}",
  "{file} runs commands as it is read, outside the sandbox where a settings file leaves them out of it": "{file} 被讀到的時候就會跑指令,設定檔把那些指令排除在沙箱外時就在沙箱外跑",
- "{file} has entries of which it can't be told what they let its sessions reach: {what}": "{file} 有些項目看不出會讓它的 session 碰到什麼:{what}"
+ "{file} has entries of which it can't be told what they let its sessions reach: {what}": "{file} 有些項目看不出會讓它的 session 碰到什麼:{what}",
+ "the run could not start: {error}": "執行沒能開始:{error}"
 }

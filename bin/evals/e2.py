@@ -352,6 +352,13 @@ def run_env(run_dir: pathlib.Path) -> dict:
     return env
 
 
+def keep_usage(env: dict) -> None:
+    """The runs were real: what they recorded in their own state folder is kept in the live usage log."""
+    import usage_log
+    if (state := names.env("STATE", environ=env)):
+        usage_log.adopt(hubconf.STATE / "llm-usage.jsonl", pathlib.Path(state) / "llm-usage.jsonl", "eval")
+
+
 def one(point: str, case: pathlib.Path, arm: str, i: int, run_dir: pathlib.Path, env: dict) -> dict:
     if p := plugin(point):
         return p.one(case, arm, i, run_dir, env)
@@ -407,16 +414,21 @@ def cmd_run(a) -> int:
     jobs = [(c, arm, i) for i in range(a.k) for c in cs]
     print(f"e2: {a.point} arm={arm} k={a.k} cases={len(cs)} → {run_dir}")
     stop = False
-    with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
-        futs = {pool.submit(one, a.point, c, arm, i, run_dir, env): (c, i) for c, arm, i in jobs}
-        for f in concurrent.futures.as_completed(futs):
-            m = f.result()
-            print(f"  {m['case']} {m['arm']}-{m['i']}: exit {m['exit']} {m['secs']}s {m['model'] or ''} {m['error'] or ''}")
-            if m["rate_limited"] and not stop:
-                stop = True
-                print("e2: rate limited, cancelling the rest (rerun the same command to continue)")
-                for g in futs:
-                    g.cancel()
+    try:
+        with concurrent.futures.ThreadPoolExecutor(a.jobs) as pool:
+            futs = {pool.submit(one, a.point, c, arm, i, run_dir, env): (c, i) for c, arm, i in jobs}
+            for f in concurrent.futures.as_completed(futs):
+                if f.cancelled():
+                    continue
+                m = f.result()
+                print(f"  {m['case']} {m['arm']}-{m['i']}: exit {m['exit']} {m['secs']}s {m['model'] or ''} {m['error'] or ''}")
+                if m["rate_limited"] and not stop:
+                    stop = True
+                    print("e2: rate limited, cancelling the rest (rerun the same command to continue)")
+                    for g in futs:
+                        g.cancel()
+    finally:
+        keep_usage(env)
     print(run_id)
     return 1 if stop else 0
 

@@ -100,13 +100,16 @@ def _schema_note(schema: dict | None) -> str:
             + json.dumps(schema, ensure_ascii=False))
 
 
-def _run(prompt: str, model: str | None, cwd: str | None, env: dict | None, timeout_s: int) -> tuple[int | None, str, str]:
+NOT_STARTED = "not started"   # in place of an exit code
+
+
+def _run(prompt: str, model: str | None, cwd: str | None, env: dict | None, timeout_s: int) -> tuple[int | str | None, str, str]:
     conf = _conf()
     import hubconf
     try:
         tmp = tempfile.TemporaryDirectory(prefix="hub-command-", dir=hubconf.private_tmp(), ignore_cleanup_errors=True)   # its output is taken as the answer
     except OSError as e:
-        return None, "", _("could not make a folder for the run: {e}", e=e)
+        return NOT_STARTED, "", _("could not make a folder for the run: {e}", e=e)
     with tmp as d:
         pf, of = pathlib.Path(d) / "prompt.md", pathlib.Path(d) / "output.txt"
         pf.write_text(prompt)
@@ -117,7 +120,7 @@ def _run(prompt: str, model: str | None, cwd: str | None, env: dict | None, time
             p = subprocess.Popen(argv, cwd=cwd or None, env=e, stdin=subprocess.PIPE if use_stdin else subprocess.DEVNULL,
                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
         except FileNotFoundError:
-            return None, "", _("{exe} not found", exe=argv[0])
+            return NOT_STARTED, "", _("{exe} not found", exe=argv[0])
         try:
             out, err = p.communicate(prompt if use_stdin else None, timeout=timeout_s)
         except subprocess.TimeoutExpired:
@@ -153,10 +156,10 @@ def _in_copy(task) -> str:
 def run(task) -> TaskResult:
     why = _in_copy(task)
     if why:
-        return TaskResult(False, error=why)
+        return TaskResult(False, error=why, started=False)
     code, out, err = _run(task.prompt + _schema_note(task.output_schema), task.model, task.cwd, task.env, task.timeout_s)
-    if code is None:
-        return TaskResult(False, error=err)
+    if code is None or code == NOT_STARTED:
+        return TaskResult(False, error=err, started=code is None)
     if code != 0:
         return TaskResult(False, error=_("exit {code}: {detail}", code=code, detail=(err.strip() or out.strip())[-300:]))
     if not out.strip():

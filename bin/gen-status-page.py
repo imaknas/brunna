@@ -352,44 +352,35 @@ def letter_paths(letters: list) -> str:
 
 
 def model_usage_html(now: datetime.datetime) -> str:
-    """Projects' own model calls (agenthub complete) in the last 7 days, from completion's usage log: calls, tokens,
-    cost (only what the provider reports or the model's price gives; a subscription login shows none)."""
+    """Every model run the platform started in the last 7 days (bin/usage_log.py), by kind of work and by project: runs,
+    tokens, cost (only what the tool or provider reports or the model's price gives; one that isn't pay-per-use is marked)."""
     import completion
-    since = (now - datetime.timedelta(days=7)).isoformat()
-    today = now.date().isoformat()
-    per: dict[str, dict] = {}
-    try:
-        lines = completion.USAGE.read_text().splitlines()
-    except OSError:
-        lines = []
-    for line in lines:
-        try:
-            r = json.loads(line)
-        except ValueError:
-            continue
-        if not r.get("project") or str(r.get("ts", "")) < since:
-            continue
-        v = per.setdefault(r["project"], {"calls": 0, "today": 0, "tokens": 0, "billed": None, "estimate": None})
-        v["calls"] += 1
-        v["today"] += str(r.get("ts", "")).startswith(today)
-        v["tokens"] += (r.get("input_tokens") or 0) + (r.get("output_tokens") or 0)
-        if r.get("cost_usd") is not None:
-            # rows from before billing was recorded are all subscription (no metered provider was set up then)
-            k = "billed" if r.get("billing") == "metered" else "estimate"
-            v[k] = (v[k] or 0.0) + float(r["cost_usd"])
-    if not per:
+    import usage_log
+    usage_log.sweep(completion.USAGE)
+    found = usage_log.rows(completion.USAGE, (now - datetime.timedelta(days=7)).isoformat())
+    if not found:
         return ""
+    today = usage_log.summary([r for r in found if str(r.get("ts", "")).startswith(now.date().isoformat())], usage_log.work)
+    mine = [r for r in found if r.get("project")]
+    today_by = usage_log.summary([r for r in mine if str(r.get("ts", "")).startswith(now.date().isoformat())], lambda r: r["project"])
 
     def cost(v: dict) -> str:
-        parts = [] if v["billed"] is None else ["$%.2f" % v["billed"]]
+        parts = [] if v["charged"] is None else ["$%.2f" % v["charged"]]
         if v["estimate"] is not None:
-            parts.append(_("≈${amount} (subscription, not billed)", amount="%.2f" % v["estimate"]))
+            parts.append(_("≈${amount} (not billed per use)", amount="%.2f" % v["estimate"]))
+        if v["unknown"]:
+            parts.append(_("{n} with no cost given", n=v["unknown"]))
         return esc(" + ".join(parts)) if parts else "—"
-    rows = "".join(f"<tr><td>{proj_html(p)}</td><td>{v['calls']}</td><td>{v['today']}</td><td>{v['tokens']:,}</td>"
-                   f"<td>{cost(v)}</td></tr>" for p, v in sorted(per.items()))
-    return (f"<h2>{_('Model calls by project (7 days)')}</h2>"
-            f"<div class=tbl><table><tr><th>{_('Project')}</th><th>{_('Calls')}</th><th>{_('Today')}</th><th>{_('Tokens')}</th>"
-            f"<th>{_('Cost')}</th></tr>{rows}</table></div>")
+
+    def table(title: str, head: str, rows: dict, now_: dict, name) -> str:
+        if not rows:
+            return ""
+        body = "".join(f"<tr><td>{name(k)}</td><td>{v['runs']}</td><td>{(now_.get(k) or {}).get('runs', 0)}</td>"
+                       f"<td>{v['input_tokens'] + v['output_tokens']:,}</td><td>{cost(v)}</td></tr>" for k, v in sorted(rows.items()))
+        return (f"<h2>{title}</h2><div class=tbl><table><tr><th>{head}</th><th>{_('Runs')}</th><th>{_('Today')}</th>"
+                f"<th>{_('Tokens')}</th><th>{_('Cost')}</th></tr>{body}</table></div>")
+    return (table(_("Model runs by kind of work (7 days)"), _("Work"), usage_log.summary(found, usage_log.work), today, esc)
+            + table(_("Model runs by project (7 days)"), _("Project"), usage_log.summary(mine, lambda r: r["project"]), today_by, proj_html))
 
 
 def waiting_html() -> str:

@@ -274,8 +274,8 @@ class Provider(unittest.TestCase):
             with self.assertRaises(completion.Refused):
                 completion.run("x", {}, "p", None, target=completion.runtime_target("codex", "m", "token"))
         rows = []
-        with mock.patch.object(completion, "_append", lambda row, p: rows.append(row)):
-            res = mock.Mock(cost_usd=None, input_tokens=1, output_tokens=1, stop="end")
+        with mock.patch.object(completion.usage_log, "append", lambda log, row: rows.append(row)):
+            res = mock.Mock(cost_usd=None, input_tokens=1, output_tokens=1, stop="end", started=True)
             for mode in ("apikey", "chatgpt"):
                 with mock.patch.object(runtime_codex, "_auth_fields", lambda m=mode: {"auth_mode": m}):
                     completion.record("x", completion.runtime_target("codex", "m", "token"), res)
