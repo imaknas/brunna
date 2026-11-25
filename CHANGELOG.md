@@ -3,6 +3,13 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.22.1 (2026-11-25)
+
+### Security
+
+- **status:** The status page opens only under an address with a key in it
+- **mailbox:** A run started by a letter or an event reads no file that holds credentials by convention
+
 ## v0.22.0 (2026-11-25)
 
 ### Security
