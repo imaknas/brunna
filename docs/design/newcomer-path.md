@@ -236,7 +236,7 @@ and a key typed into the chat reaches the model provider. Both break platform ru
 outside version control and are never shown, and user-level settings change only on the owner's direct confirmation.
 Answers and keys travel separately:
 - `--questions` marks each question `"via": "chat"`, `"via": "page"` or `"via": "dialog"`. API keys are `page`.
-  The Claude setup token is neither: agent-hub never receives it (B4, "Credential"). Consent is `dialog`: the yes to user-level registration (B5), installing system
+  The Claude setup token is neither: agent-hub never asks for it (B4, "Credential"). Consent is `dialog`: the yes to user-level registration (B5), installing system
   software (B2), and the project roots (B5's allowlist).
 - For those, init starts a one-time local page on 127.0.0.1, at a random port with a random path, and **opens it in
   the user's browser itself** (`open` on macOS, `xdg-open` on Linux). It never prints the path. The agent gets only
@@ -288,7 +288,7 @@ Which AI agent should agent-hub use for its own work (nightly tidy-up, the mailb
 - If `claude` from nvm is missing, init offers the steps (install nvm, then node, then `npm i -g` the CLI) and runs them
   on yes. All are user-level, nothing needs sudo. In story 2 the agent runs them for the user.
 - **Credential.** The token from `claude setup-token` is the documented route for unattended runs, and the owner's
-  10-24 decision. **agent-hub never receives, writes or shows it** (decided 11-02): Claude Code's legal and compliance
+  10-24 decision. **agent-hub never asks for, writes or shows it** (decided 11-02; it reads the saved file, below): Claude Code's legal and compliance
   page says developers "may not collect, store, or intermediate Claude.ai credentials or session tokens". init tells
   the owner to run `claude setup-token` and save the token themselves with one line in their own shell
   (`(umask 077; read -rs t && printf '%s\n' "$t" > ~/.claude/headless-oauth-token)`), then checks with one real

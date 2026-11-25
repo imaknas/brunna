@@ -727,7 +727,7 @@ def agent_login_check() -> str | None:
 
 
 def agent_credential(choice: str, presets: dict[str, dict]) -> None:
-    """The chosen agent's credential for unattended runs. agent-hub never receives, writes or shows one: a token the
+    """The chosen agent's credential for unattended runs. agent-hub never asks for, writes or shows one (it reads the saved file to start the tool): a token the
     tool prints is made and saved by the owner, in their own shell, where the tool's terms want it; a tool's own login
     runs in the terminal. init then checks the agent answers, with one real request."""
     if choice == "none":
@@ -744,7 +744,7 @@ def agent_credential(choice: str, presets: dict[str, dict]) -> None:
         if not f.exists():
             UI().needs_user("agent_token", _(
                 "{label} runs brunna's background work with a one-year token that you make and save yourself; "
-                "brunna never sees it (needs {needs}). In a terminal on this computer (an AI app's own terminal "
+                "brunna reads that file only to hand the token to the official {label} it starts (needs {needs}). In a terminal on this computer (an AI app's own terminal "
                 "works too):\n  1. {command}\n     sign in when it asks; it prints the token\n  2. {store}\n     paste "
                 "the token, then Enter (nothing shows while you paste)\nThen: brunna init --agent {name}",
                 label=info["label"], needs=cred.get("needs", ""), command=" ".join(cred["command"]),

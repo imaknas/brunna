@@ -133,7 +133,7 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
 - 一切都留在你的電腦上：設定、筆記和金鑰放在 `~/.brunna`,不在 repo 裡。
 - 模型呼叫只送到你選的 provider。每週回顧送的是統計數字，從不送對話內容;開了助理模組時，
   還會送你電腦上的模型寫的 session 摘要。
-- brunna 不經手你的 Claude 登入:token 由你自己產生、自己存,brunna 只檢查它能不能用。
+- brunna 沒有自己的 Claude 登入:token 由你自己產生、自己存。brunna 讀那個檔,只為了交給它啟動的官方 Claude Code,從不顯示。
 - 回報漏洞:[SECURITY.md](SECURITY.md)。
 
 ## 交給你的 AI App 安裝

@@ -3112,8 +3112,9 @@ def install_info() -> dict:
             "install": ['[ -s "$HOME/.nvm/nvm.sh" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash',
                         '. "$HOME/.nvm/nvm.sh" && nvm install --lts && nvm alias default "lts/*" '
                         '&& npm install -g @anthropic-ai/claude-code'],
-            # made and saved by the owner in their own shell: agent-hub never receives or writes the token (Claude
-            # Code's terms: a third-party tool may not collect, store or intermediate Claude.ai credentials)
+            # made and saved by the owner in their own shell: agent-hub never asks for or writes the token; it reads the file
+            # to hand it to the claude it starts (Claude Code's terms: a third-party tool may not collect, store or
+            # intermediate Claude.ai credentials; whether reading a file the owner made counts isn't said)
             "credential": {"kind": "own-token", "command": ["claude", "setup-token"], "file": str(_token_file()),
                            "store": "(umask 077; read -rs t && printf '%s\\n' \"$t\" > ~/.claude/headless-oauth-token)",
                            "needs": _("a Claude Pro, Max, Ultra, Team or Enterprise plan")},

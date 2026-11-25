@@ -142,8 +142,8 @@ to you there instead, so you answer from your phone. [How people use brunna](doc
 - Everything stays on your computer: your settings, notes and keys are in `~/.brunna`, never in the repo.
 - Model calls go only to the provider you chose. The weekly reflection sends statistics, never conversation
   text; with the assistant module on, also the session summaries a model on your computer wrote.
-- brunna never receives your Claude login: you make and save the token yourself, and brunna only checks that
-  it works.
+- brunna has no sign-in for Claude: you make and save the token yourself. brunna reads that file to hand the token to
+  the official Claude Code it starts, and never prints it.
 - Vulnerabilities: [SECURITY.md](SECURITY.md).
 
 ## Set up through your agent

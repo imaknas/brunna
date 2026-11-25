@@ -36,8 +36,9 @@ the status page and `brunna run brunna/librarian` say so, with the reason, until
 ## Claude Code's token
 
 brunna runs Claude Code for its background work (the nightly tidy-up, agents sent to letters) with a one-year token
-that you make and keep yourself: Claude Code's terms don't let another program collect or store it, so brunna never
-sees it. `brunna init` shows these two steps when the token isn't there yet. In a terminal on the computer that runs
+that you make and keep yourself; brunna has no sign-in of its own. It reads that file to hand the token to the official
+Claude Code it starts (and to a throwaway folder for the checks of a new version), never prints it, and the default
+backup doesn't include it. `brunna init` shows these two steps when the token isn't there yet. In a terminal on the computer that runs
 brunna (an AI app's own terminal works too):
 
 1. `claude setup-token`: sign in when it asks; it prints the token.

@@ -205,7 +205,6 @@
  "{feature}: available ({note})": "{feature}:可以用({note})",
  "{n} {n:letter|letters} in the last {days} days woke a session that then didn't take {n:it|them} (the latest: {id} to {to}); the coding agent may have changed how it handles the wake": "最近 {days} 天有 {n} 封信叫醒了 session,那個 session 卻沒接(最近一封:{id},給 {to});coding agent 處理叫醒的方式可能變了",
  "the status page's mailbox section shows each letter's path; hub-event.log has each waiter's end": "狀態頁的信箱區列出每封信怎麼走的;hub-event.log 記著每個等待程序怎麼結束",
- "{label} runs brunna's background work with a one-year token that you make and save yourself; brunna never sees it (needs {needs}). In a terminal on this computer (an AI app's own terminal works too):\n  1. {command}\n     sign in when it asks; it prints the token\n  2. {store}\n     paste the token, then Enter (nothing shows while you paste)\nThen: brunna init --agent {name}": "{label} 用一個一年期的 token 跑 brunna 的背景工作，這個 token 由你自己產生、自己存;brunna 不會經手(需要 {needs})。在這台電腦的終端機(AI App 內建的終端機也可以):\n  1. {command}\n     照它的提示登入;它會印出 token\n  2. {store}\n     貼上 token 再按 Enter(貼上時畫面不會顯示)\n之後:brunna init --agent {name}",
  "{label}: removed (the other name's unit)": "{label}:已移除(另一個名字的 unit)",
  "(dry-run) {label}: remove (the other name's unit)": "(dry-run) {label}:移除(另一個名字的 unit)",
  "{label}: a scheduler tick is running; it is removed at the next run": "{label}:排程器正在跑;下次執行時再移除",
@@ -364,5 +363,6 @@
  "brunna's decisions already go to {label} with your login": "brunna 的判斷已經交給 {label},用你的登入",
  "⚠️ {settings} llm.providers.{name} is something else of yours: rename it first (nothing was changed)": "⚠️ {settings} 的 llm.providers.{name} 是你另外設的東西:先改名(什麼都沒改)",
  "brunna's decisions don't go to {names} any more (brunna llm setup picks who makes them)": "brunna 的判斷不再交給 {names}(brunna llm setup 可以選由誰做)",
- "its login is billed per use, what a call costs can't be told, and {settings} llm.budget is set": "它的登入按用量計費、每次花多少無從得知,而 {settings} 設了 llm.budget"
+ "its login is billed per use, what a call costs can't be told, and {settings} llm.budget is set": "它的登入按用量計費、每次花多少無從得知,而 {settings} 設了 llm.budget",
+ "{label} runs brunna's background work with a one-year token that you make and save yourself; brunna reads that file only to hand the token to the official {label} it starts (needs {needs}). In a terminal on this computer (an AI app's own terminal works too):\n  1. {command}\n     sign in when it asks; it prints the token\n  2. {store}\n     paste the token, then Enter (nothing shows while you paste)\nThen: brunna init --agent {name}": "{label} 用一個一年期的 token 跑 brunna 的背景工作，這個 token 由你自己產生、自己存;brunna 讀那個檔,只為了交給它啟動的官方 {label}(需要 {needs})。在這台電腦的終端機(AI App 內建的終端機也可以):\n  1. {command}\n     照它的提示登入;它會印出 token\n  2. {store}\n     貼上 token 再按 Enter(貼上時畫面不會顯示)\n之後:brunna init --agent {name}"
 }
