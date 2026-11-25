@@ -357,11 +357,11 @@ class Flags(Base):
     def test_the_cap_is_the_tool_s_to_hold(self):
         with mock.patch.object(rc, "_described_exe", lambda: "claude"):
             cmd = rc._flags(runtime_ports.Task(point="x", prompt="p", spec={"restricted": True, "tools": ""}, env={"PATH": "/bin"}, max_cost_usd=0.25))
-            self.assertEqual(cmd[cmd.index("--max-budget-usd") + 1], "0.2500")
+            self.assertEqual(cmd[cmd.index("--max-budget-usd") + 1], "0.250000")
             self.assertNotIn("--max-budget-usd", rc._flags(runtime_ports.Task(point="x", prompt="p", spec={"restricted": True}, env={"PATH": "/bin"})))
         req = runtime_ports.CompletionRequest(point="x", prompt="p", max_cost_usd=0.1)
         cmd = rc.completion_command(req, "claude")
-        self.assertEqual(cmd[cmd.index("--max-budget-usd") + 1], "0.1000")
+        self.assertEqual(cmd[cmd.index("--max-budget-usd") + 1], "0.100000")
         self.assertNotIn("--max-budget-usd", rc.completion_command(req._replace(max_cost_usd=None), "claude"))
 
 
@@ -500,9 +500,28 @@ class Refused(unittest.TestCase):
     def test_only_the_service_s_own_answer(self):
         for out, want in (({"is_error": True, "api_error_status": 401, "result": "x"}, "HTTP 401"),
                           ({"is_error": True, "api_error_status": 400, "result": "Credit balance is too low"}, "HTTP 400, no credit"),
+                          ({"is_error": True, "api_error_status": 400, "result": "API Error: 400 You have reached your specified API usage limits."},
+                           "HTTP 400, spend limit reached"),
+                          ({"is_error": True, "api_error_status": 429, "result": "Request rejected (429): You have reached your API usage limits."},
+                           "HTTP 429, spend limit reached"),
+                          ({"is_error": True, "api_error_status": 429, "result": "rate limited"}, ""),
                           ({"is_error": True, "api_error_status": 400, "result": "bad request"}, ""), ({"is_error": True, "api_error_status": 529}, ""),
                           ({"is_error": True, "result": "I could not open the login page: 401"}, ""), ({"is_error": False, "api_error_status": 401}, ""), (None, "")):
             self.assertEqual(rc._refused(out), want, out)
+
+
+class Said(Base):
+    def test_a_refused_login_is_said_in_words(self):
+        import store_fixture
+        store_fixture.stand_in(self)
+        out = json.dumps({"is_error": True, "api_error_status": 401, "subtype": "success", "result": "Invalid API key", "total_cost_usd": 0})
+        done = subprocess.CompletedProcess([], 1, stdout=out, stderr="")
+        with mock.patch.object(rc, "_command", lambda t, e=None: ["claude", "--restricted"]), mock.patch.object(rc, "_env", lambda t, **k: {}), \
+                mock.patch.object(rc.subprocess, "run", lambda *a, **k: done):
+            res = rc.run(runtime_ports.Task(point="x", prompt="p", spec={}, env={}))
+        self.assertEqual((res.ok, res.refused), (False, "HTTP 401"))
+        self.assertIn("HTTP 401", res.error)
+        self.assertNotIn("total_cost_usd", res.error)
 
 
 class Settling(Base):

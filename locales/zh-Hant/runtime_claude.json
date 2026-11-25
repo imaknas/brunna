@@ -125,5 +125,6 @@
  "login": "登入",
  "no login chosen for the platform's runs": "平台的執行還沒有選登入方式",
  "brunna llm set-key --agent": "brunna llm set-key --agent",
- "the API key isn't the login chosen for the platform's runs (runtime.login)": "API key 不是這裡選的登入方式(runtime.login)"
+ "the API key isn't the login chosen for the platform's runs (runtime.login)": "API key 不是這裡選的登入方式(runtime.login)",
+ "the service refused the login ({why})": "服務拒絕了登入({why})"
 }

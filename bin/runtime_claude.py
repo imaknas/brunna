@@ -1507,7 +1507,7 @@ def _flags(task, exe: str | None = None) -> list:
     elif theirs is not None:   # the last --settings replaces the first whole (measured 11-25): the platform's denies with it
         raise ValueError(f"judgment point {task.point}: a restricted run takes no settings of a caller's")
     if task.max_cost_usd is not None:
-        cmd += ["--max-budget-usd", f"{task.max_cost_usd:.4f}"]
+        cmd += ["--max-budget-usd", f"{task.max_cost_usd:.6f}"]
     if spec.get("tool_servers") == "none" and SEAL not in extra:
         extra.append(SEAL)   # loads none of the environment's servers (the point's tool_servers: none)
     return cmd + extra
@@ -1719,7 +1719,12 @@ def _refused(out) -> str:
     status = out.get("api_error_status")
     if not out.get("is_error") or not isinstance(status, int):
         return ""
-    return f"HTTP {status}" if status in (401, 402, 403) else "HTTP 400, no credit" if status == 400 and "credit balance" in str(out.get("result")).lower() else ""
+    if status in (401, 402, 403):
+        return f"HTTP {status}"
+    said = str(out.get("result")).lower()   # an error's text is the service's, not a model's
+    if status in (400, 429) and "api usage limits" in said:   # a limit set for the key's organization, or its tier's
+        return f"HTTP {status}, spend limit reached"
+    return "HTTP 400, no credit" if status == 400 and "credit balance" in said else ""
 
 
 def _num(x):
@@ -1789,8 +1794,8 @@ def run(task) -> TaskResult:
             got = json.loads(r.stdout)
         except ValueError:
             got = None
-        return TaskResult(False, error=_("exit {code}: {detail}", code=r.returncode,
-                                                 detail=(r.stderr.strip() or r.stdout.strip())[-300:]),
+        return TaskResult(False, error=_("the service refused the login ({why})", why=_refused(got)) if _refused(got) else
+                          _("exit {code}: {detail}", code=r.returncode, detail=(r.stderr.strip() or r.stdout.strip())[-300:]),
                           runtime_version=version, stop=str((got if isinstance(got, dict) else {}).get("subtype") or ""),
                           refused=_refused(got), **_used(got, resumed, before))
     try:
@@ -3867,7 +3872,7 @@ def completion_command(req, exe: str | None = None) -> list:
     if req.schema is not None:
         cmd += ["--json-schema", json.dumps(req.schema, ensure_ascii=False)]
     if req.max_cost_usd is not None:
-        cmd += ["--max-budget-usd", f"{req.max_cost_usd:.4f}"]
+        cmd += ["--max-budget-usd", f"{req.max_cost_usd:.6f}"]
     return cmd
 
 

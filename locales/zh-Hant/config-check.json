@@ -22,5 +22,5 @@
  "{settings}: runtime.login `{login}` is no login of {agent} (has: {have})": "{settings}:runtime.login `{login}` 不是 {agent} 的登入方式(有:{have})",
  "{settings}: runtime.login `key` is billed per use: set llm.budget.daily_usd": "{settings}:runtime.login `key` 按用量計費:要設 llm.budget.daily_usd",
  "{settings}: llm.budget.caps names no judgment point: {point}": "{settings}:llm.budget.caps 沒有這個判斷點:{point}",
- "{settings}: llm.budget.caps.{point} must be an amount over 0": "{settings}:llm.budget.caps.{point} 要是大於 0 的金額"
+ "{settings}: llm.budget.caps.{point} must be an amount, 0.01 or more": "{settings}:llm.budget.caps.{point} 要是金額,0.01 以上"
 }

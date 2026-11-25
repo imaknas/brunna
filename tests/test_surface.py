@@ -40,8 +40,11 @@ def tree(*roots) -> dict:
     out = {}
     for root in roots:
         for p in sorted(pathlib.Path(root).rglob("*")) if pathlib.Path(root).exists() else []:
-            st = p.lstat()
-            out[str(p)] = (st.st_size if p.is_file() else None, st.st_mtime_ns)
+            try:
+                st = p.lstat()
+                out[str(p)] = (st.st_size if p.is_file() else None, st.st_mtime_ns)
+            except FileNotFoundError:   # another test module's, gone meanwhile (mine)
+                pass
     return out
 
 

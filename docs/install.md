@@ -45,7 +45,8 @@ your own Anthropic API key. Make one in the [Claude Console](https://platform.cl
   be that organization's. Whether they cover runs another program starts isn't said there.
 - **The budget.** Each run reserves what it may cost before it starts and is stopped there; the nightly tidy-up has its share
   first; what doesn't fit waits, a letter or a job's turn with it (the weekly report's analysis is skipped that week). It counts by the tool's own estimate and stops between
-  requests, so a day can go a little over: set a spend limit in the Console too. `brunna llm usage` shows what was used.
+  requests, so a day can go a little over: set a spend limit in the Console too. Anthropic has no way to ask how much credit is
+  left, so brunna can't show it: the Console's [billing page](https://platform.claude.com/settings/billing) does. `brunna llm usage` shows what was used.
 - **What one run may cost** is set by kind of work (an agent run: $0.25 fast, $1 ordinary, $4 strong, such as folding old notes; an answer:
   $0.10, $0.50, $2); `llm.budget.caps.<point>` in `brunna.json` changes one. Work whose cap the day's budget never has room for is named by
   `brunna doctor`: folding old notes (an optional module) needs a little over $6.67 a day, or a lower cap.

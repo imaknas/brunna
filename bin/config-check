@@ -92,8 +92,8 @@ def check(root: pathlib.Path) -> list[str]:
         for point, v in (caps.items() if isinstance(caps, dict) else [("", None)]):
             if point not in known and not (isinstance(point, str) and completion.PROJECT_CALL.fullmatch(point)):
                 errs.append(_("{settings}: llm.budget.caps names no judgment point: {point}", settings=hub.name, point=point))
-            elif not isinstance(v, (int, float)) or isinstance(v, bool) or not v > 0:
-                errs.append(_("{settings}: llm.budget.caps.{point} must be an amount over 0", settings=hub.name, point=point))
+            elif not isinstance(v, (int, float)) or isinstance(v, bool) or not v >= 0.01:
+                errs.append(_("{settings}: llm.budget.caps.{point} must be an amount, 0.01 or more", settings=hub.name, point=point))
     rcfg = cfg.get("runtime") or {}
     if isinstance(rcfg, dict) and rcfg.get("login") is not None:
         agent = rdefault if rdefault in runtime_ports.RUNTIMES else runtime_ports.DEFAULT if not rdefault else None
