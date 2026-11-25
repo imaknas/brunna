@@ -400,7 +400,9 @@ def agent_profile(world) -> Outcome:
         entries = rx.profile_entries(read=[copy], write=[copy / "STATE.md", copy / "memory" / "reference"], exe=exe)
         guarded = rx.run_args(None, entries)
         opened = ["-c", "permissions.brunna-open.extends=\":workspace\"",
-                  "-c", f"permissions.brunna-open.filesystem={{{rx._toml(run_home)} = \"write\"}}",
+                  # by name: no base profile writes where the world is (the platform's private temp), nor a .git
+                  "-c", "permissions.brunna-open.filesystem={" + ", ".join(f'{rx._toml(p)} = "write"' for p in (
+                      run_home, home, pathlib.Path(world.tool).resolve(), copy / ".git")) + "}",
                   "-c", "permissions.brunna-open.network.enabled=true", "-c", "default_permissions=\"brunna-open\""]
         names = {"c": copy, "o": other, "h": home / "home-secret", "a": run_home / "auth.json", **planted}
         wrong, untested = [], []
