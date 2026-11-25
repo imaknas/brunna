@@ -137,6 +137,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class Server(http.server.ThreadingHTTPServer):
     daemon_threads = True
+    request_queue_size = 2 * MAX_OPEN   # the default, 5, resets a browser's connections on a busy machine
 
     def __init__(self, address=("127.0.0.1", status_key.PORT)):
         self.room = threading.BoundedSemaphore(MAX_OPEN)
