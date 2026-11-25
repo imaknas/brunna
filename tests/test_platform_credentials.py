@@ -92,7 +92,8 @@ class Registry(unittest.TestCase):
         self.assertEqual(registry.platform_owned_changes({**plain, "secrets": []}, plain), [], "a project's own secret")
 
     def test_the_callback_port_is_reserved(self):
-        self.assertEqual(registry.RESERVED_LOCAL_PORTS, (credentials.CALLBACK_PORT,))
+        import status_key
+        self.assertEqual(registry.RESERVED_LOCAL_PORTS, (credentials.CALLBACK_PORT, status_key.PORT))
         errs = registry.validate_runs({"services": [{"name": "s", "run": "/bin/sh", "expose": {"local_port": 47615}}]},
                                       "demo", {"runtime": None, "workspace": None})
         self.assertTrue(any("47615" in e for e in errs), errs)

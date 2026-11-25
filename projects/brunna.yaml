@@ -260,11 +260,11 @@ services:
   interval_s: 60
   # dispatch opens headless agents (claude, git); sbin kept as in the old plist
   env: {PATH: "$PLATFORM_PATH:/usr/sbin:/sbin"}
-# the schedule status page (.state/status produced by gen-status-page.py, opened to the tailnet with tailscale serve)
+# the schedule status page (.state/status produced by gen-status-page.py), under an address with a key in it (brunna glance prints it)
 - name: status-page
   label: local.status-page
   cwd: hub
-  run: bin/py -m http.server 18790 --bind 127.0.0.1 --directory .state/status
+  run: bin/py bin/status-server.py
   keepalive: true
   log: .logs/status-page.log
 # hourly catch-up commit + push of every project's .agent-memory (the safety net for the SessionEnd hook)

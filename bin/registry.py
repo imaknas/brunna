@@ -229,7 +229,7 @@ CREDENTIAL_KINDS = ("oauth", "static")
 CREDENTIAL_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")   # a file name and part of an owner to-do's key
 SERVER_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")         # runtime_ports.ToolServer.id's spelling
 HEADER_NAME = re.compile(r"[A-Za-z0-9-]{1,64}")
-RESERVED_LOCAL_PORTS = (47615,)   # credentials.CALLBACK_PORT: no service may listen there (tests check they agree)
+RESERVED_LOCAL_PORTS = (47615, 18790)   # credentials.CALLBACK_PORT, status_key.PORT: no service may listen there (tests check they agree)
 JOB = {"name", "at", "every", "trigger", "run", "kind", "prompt", "cwd", "days", "days_of_month", "months", "until",
        "between", "background", "after", "before", "max_attempts_per_day", "timeout", "legacy_name", "allow",
        "connectors", "catch_up", "mail", "tier", "credentials", "found_exit"}
@@ -1179,7 +1179,7 @@ def validate_runs(doc: dict, stem: str, d: dict) -> list[str]:
         port = svc["expose"].get("local_port") if isinstance(svc.get("expose"), dict) else None
         if port in RESERVED_LOCAL_PORTS:
             errs.append(_("service {name}: local_port {port} is the platform's (the sign-in callback of brunna "
-                          "credentials grant)", name=n, port=port))
+                          "credentials grant, or the status page)", name=n, port=port))
         cwd_key = svc.get("cwd") or default_cwd(doc)
         if cwd_key not in ("runtime", "workspace", "hub") or d.get(cwd_key) is None:
             errs.append(_("service {name}: cwd can only be runtime / workspace / hub, and one this project has", name=n))

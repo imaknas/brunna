@@ -73,7 +73,7 @@ By hand, requirements, machines that sleep and where things are kept: [docs/inst
    [nvm's node](docs/install.md#requirements)). Claude Code picks up the project's setup when the
    session starts, and writes notes as it works; Codex reaches the mailbox and the notes through brunna's tools (MCP)
    for now.
-3. `brunna doctor` says what is still missing, each with how to fix it. The status page at http://localhost:18790
+3. `brunna doctor` says what is still missing, each with how to fix it. The status page, whose address `brunna glance` prints,
    shows how everything is doing, no terminal needed
    ([from another computer](docs/install.md#the-status-page-from-another-computer),
    [in a container](docs/install.md#without-launchd-or-systemd), where nothing serves it).
@@ -156,7 +156,8 @@ say it's done, then run the same command again.
    long timeout; without a screen (SSH, a container) it doesn't wait and hands them back. The last
    line is `{"done": …, "needs_user": [...]}`; for anything in `needs_user`, tell the user, then run it again.
 5. Run `… brunna doctor` and tell the user what it says is missing. Afterwards the user sees how things are at
-   http://localhost:18790, and in any chat can ask to connect a folder or what's waiting for them.
+   the status page (`… brunna glance` prints its address; give it to them), and in any chat can ask to connect a folder or
+   what's waiting for them.
 
 </details>
 

@@ -346,5 +346,11 @@
  "where brunna keeps your settings, data and keys (an earlier install's are there: they are used as they are)": "brunna 放你的設定、資料和金鑰的地方(先前安裝的還在那裡:會直接使用,不改內容)",
  "✓ {home} holds an earlier install's settings, notes and keys: they are used as they are": "✓ {home} 有先前安裝的設定、筆記和金鑰:直接使用,不改內容",
  "✗ {path} is not brunna's (another program, or a link): left as it is. Move it away and run brunna install-cli again, or put the command in another folder: brunna install-cli --dir <folder>": "✗ {path} 不是 brunna 的(別的程式,或是連結):原樣留著。把它移開再跑一次 brunna install-cli,或把指令放到別的資料夾:brunna install-cli --dir <資料夾>",
- "{pointer} names {home}, and brunna's settings aren't there (a disk that isn't plugged in?). Bring it back, or, to use another folder, name it: brunna init --home <folder>": "{pointer} 指的是 {home},但那裡沒有 brunna 的設定(磁碟沒接上?)。把它接回來;要改用別的資料夾,就指定它:brunna init --home <資料夾>"
+ "{pointer} names {home}, and brunna's settings aren't there (a disk that isn't plugged in?). Bring it back, or, to use another folder, name it: brunna init --home <folder>": "{pointer} 指的是 {home},但那裡沒有 brunna 的設定(磁碟沒接上?)。把它接回來;要改用別的資料夾,就指定它:brunna init --home <資料夾>",
+ "what answers on 127.0.0.1:{port} is not brunna's status page server: anything on this machine may read what it serves, and the address brunna glance prints doesn't open": "127.0.0.1:{port} 上回應的不是 brunna 的狀態頁伺服器:這台機器上的任何程式都可能讀得到它給的東西,而 brunna glance 印的網址打不開",
+ "stop it (an older server left running, or one started by hand with http.server); the service local.status-page, or bin/py bin/status-server.py, then takes the port": "把它停掉(舊的伺服器還開著,或有人用 http.server 手動開的);之後 local.status-page 服務或 bin/py bin/status-server.py 就會接手這個埠",
+ "the status page's key ({path}) can't be read or isn't one: no address opens the page": "狀態頁的金鑰({path})讀不到或不是金鑰:哪個網址都打不開狀態頁",
+ "delete that file and restart the service local.status-page (or bin/py bin/status-server.py)": "刪掉那個檔,重新啟動 local.status-page 服務(或 bin/py bin/status-server.py)",
+ "the status page's key is gone: no address opens the page": "狀態頁的金鑰不見了:哪個網址都打不開狀態頁",
+ "restart the service local.status-page (or bin/py bin/status-server.py): it makes a new one": "重新啟動 local.status-page 服務(或 bin/py bin/status-server.py):它會做一個新的"
 }

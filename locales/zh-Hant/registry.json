@@ -195,7 +195,6 @@
  "{where}: a platform credential has no {key} (the platform places it and knows its expiry)": "{where}:平台憑證沒有 {key}(平台自己決定放哪裡,也知道它何時到期)",
  "{where}: server is {{id, url}} (and header, for a static credential)": "{where}:server 是 {{id, url}}(static 憑證可再加 header)",
  "{where}: server.id {id} is a duplicate": "{where}:server.id {id} 重複",
- "service {name}: local_port {port} is the platform's (the sign-in callback of brunna credentials grant)": "服務 {name}:local_port {port} 是平台的(brunna credentials grant 登入的回呼)",
  "{where}: kind (a platform credential) is for a project's registry entry, not a module": "{where}:kind(平台憑證)是給專案的登錄項目,不是模組",
  "{where}: {key} is only for an entry with kind (a platform credential)": "{where}:{key} 只給帶 kind 的項目(平台憑證)",
  "its credentials can't be given on this runtime: {why}": "在這個 runtime 上給不了它的憑證:{why}",
@@ -251,5 +250,6 @@
  "expose: unknown field {key}": "expose:未知的欄位 {key}",
  "days can only be {days}": "days 只能是 {days}",
  "mailbox must be a mapping": "mailbox 要是 mapping",
- "{key}[{i}]: {fields} must be text": "{key}[{i}]:{fields} 要是文字"
+ "{key}[{i}]: {fields} must be text": "{key}[{i}]:{fields} 要是文字",
+ "service {name}: local_port {port} is the platform's (the sign-in callback of brunna credentials grant, or the status page)": "服務 {name}:local_port {port} 是平台的(brunna credentials grant 登入的回呼,或狀態頁)"
 }

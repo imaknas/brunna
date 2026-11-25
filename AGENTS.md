@@ -301,8 +301,9 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
   (`.state/scheduler-tick.json`, `bin/tick_record.py`). It deliberately depends on neither the
   scheduler nor the platform's Python; the Discord settings are in the secrets directory (not in version control), and
   when they are missing the status page shows red
-- **The schedule status page** (service `local.status-page`, by default listening only on 127.0.0.1:18790; to view it
-  from another machine, expose it yourself with a VPN / tunnel): `bin/gen-status-page.py` regenerates it every tick:
+- **The schedule status page** (service `local.status-page`, `bin/status-server.py`: 127.0.0.1:18790 under an address with a
+  key in it, which only `brunna glance` prints, `bin/status_key.py`; to view it from another machine, expose it yourself
+  with a VPN / tunnel): `bin/gen-status-page.py` regenerates it every tick:
   which jobs failed, which reports need attention (🔔), when things run next, the full text of agent job reports
 - `bin/librarian.py`: the "librarian". Reads what is new in each project's `memory/`, decides whether and how to update
   `STATE.md`, produces the cross-project `digest/YYYY-MM-DD.md` + updates `index.md`. Models: a judgment point declares

@@ -121,14 +121,15 @@ the scheduler's tick yourself, every 15 minutes, with cron or similar: `<hub>/bi
 `brunna doctor` shows what is not running.
 
 The status page is a static page. Every scheduler tick rewrites it as `.state/status/index.html` in the hub folder, and
-the `local.status-page` service only serves that folder on `127.0.0.1:18790`. Without the service, open that file in a
-browser, or serve the folder yourself: `bin/py -m http.server 18790 --bind 127.0.0.1 --directory .state/status` in the
-hub folder. Without the scheduler, `bin/py bin/gen-status-page.py` writes it once.
+the `local.status-page` service serves it on `127.0.0.1:18790`. Its address has a key in it, which `brunna glance` prints: whoever
+has the address can open the page, so bookmark it and don't post it. Without the service, open that file in a browser, or serve
+it yourself with `bin/py bin/status-server.py` in the hub folder. Without the scheduler, `bin/py bin/gen-status-page.py` writes it once.
 
 ## The status page from another computer
 
 The status page listens only on the machine that runs brunna (`127.0.0.1:18790`). From another computer, either
-forward it over SSH and open http://localhost:18790 there:
+forward it over SSH and open there the address `brunna glance` prints on that machine (`http://127.0.0.1:18790/<key>/`; write
+`127.0.0.1`, not `localhost`, which can be another program):
 
 ```bash
 ssh -N -L 18790:127.0.0.1:18790 <the hub machine>
@@ -140,8 +141,14 @@ or, with [Tailscale](https://tailscale.com/) on both, share it on your tailnet o
 tailscale serve --bg 18790
 ```
 
-and open the HTTPS address `tailscale serve status` prints. Don't expose it to the internet: it shows your projects'
+and open the HTTPS address `tailscale serve status` prints, with the key after it (`https://<that address>/<key>/`; put that
+address, without the key, in `brunna.json` as `status_page.url`, and `brunna glance` prints the whole). Don't expose it to the internet: it shows your projects'
 names and recent activity.
+
+The key (`status-page-key` in the instance's `secrets` folder) keeps the page from other accounts on the machine and from web
+pages that reach this port; it is in the nightly backup with the rest of that folder. To change it, delete the file and restart the
+service. What the page is made from are files in the hub and the instance, which other accounts can read where your home folder
+lets them in.
 
 ## Where things live
 

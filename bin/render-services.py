@@ -146,7 +146,7 @@ overdue: list[str] = []   # the last _desired()'s labels changed although busy, 
 # flight), or None for one that runs no platform code. By service name, for the platform's entry and the modules only.
 # Hard-coded like WAIT_FOR_IDLE: a registry field would be read by the running code during the merge that adds it.
 # tests/test_service_code.py fails when a keepalive service of the platform's is missing here
-FOLLOWS_CODE = {"lease-runner": "lease-runner", "cap-runner": "cap-runner", "status-page": None}
+FOLLOWS_CODE = {"lease-runner": "lease-runner", "cap-runner": "cap-runner", "status-page": "status-page"}
 OLD_CODE = hubconf.STATE / "render-services-old-code.json"   # label → when it was first seen on old code
 
 

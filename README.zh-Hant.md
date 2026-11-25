@@ -69,7 +69,7 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
 
 2. 在專案資料夾裡打開你的 agent(`claude` 或 `codex`;brunna 用
    [nvm 的 node](docs/install.md#requirements) 跑 Claude Code)。session 開始時它會載入這個專案的設定，邊做事邊寫筆記。
-3. `brunna doctor` 會列出還缺什麼，每項都附上怎麼補。狀態頁 http://localhost:18790 讓你不開終端機也能看到
+3. `brunna doctor` 會列出還缺什麼，每項都附上怎麼補。狀態頁(網址用 `brunna glance` 看)讓你不開終端機也能看到
    一切是否正常([從別台電腦看](docs/install.md#the-status-page-from-another-computer)、
    [在容器裡](docs/install.md#without-launchd-or-systemd)沒有東西替你開這個網址)。
 

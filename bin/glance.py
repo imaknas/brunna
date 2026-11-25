@@ -8,6 +8,7 @@ It reads and takes no write lock:
   open items, up to one tick old (their time is in as_of);
 - live: the open letters per project (the bus opened read-only; every project, whatever folder this runs in), the
   scheduler's heartbeat and its failing jobs.
+It is also where the status page's address is found: that address has a key in it (bin/status_key.py).
 An instance that isn't set up gives {"v": 1, "set_up": false} and exit 0, touching nothing (opening the bus would make
 one). Exit 0 whenever it could answer; problems are in the answer, not the exit code.
 """
@@ -24,6 +25,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
 import i18n  # noqa: E402
+import status_key  # noqa: E402
 import tick_record  # noqa: E402
 import upgrade  # noqa: E402
 
@@ -33,7 +35,6 @@ SNAPSHOT = STATE_DIR / "status" / "glance.json"
 HEARTBEAT = STATE_DIR / "scheduler-heartbeat"
 FAILING = STATE_DIR / "scheduler-failing.json"
 STALE_TICK = datetime.timedelta(minutes=40)   # the status page's own threshold for a stopped scheduler
-LOCAL_PAGE = "http://127.0.0.1:18790/"
 
 
 def _hubbus():
@@ -85,8 +86,10 @@ def jobs_failed() -> list[dict]:
 
 def status_page() -> dict:
     url = hubconf.get("status_page.url")
-    # without a setting the page listens on the hub machine's localhost: a client elsewhere must not offer it as a link
-    return {"url": url, "local_to": None} if url else {"url": LOCAL_PAGE, "local_to": "hub"}
+    # without a setting the page listens on the hub machine's localhost: a client elsewhere must not offer it as a link.
+    # No key to read (no server has started; a sandboxed project's session, which reads no secret): the address without it
+    return {"url": status_key.address(url) or url, "local_to": None} if url else \
+        {"url": status_key.address() or status_key.LOCAL, "local_to": "hub"}
 
 
 def snapshot() -> dict | None:
@@ -145,6 +148,8 @@ def text(g: dict) -> str:
     lines += [f"  {'⚠️' if a['level'] == 'bad' else '🔔'} {a['text'][:140]}" for a in h["alerts"][:10]]
     if not g["scheduler"]["alive"]:
         lines.append(_("The scheduler has not ticked since {at}", at=g["scheduler"]["last_tick"] or "-"))
+    if status_key.read():
+        lines.append(_("Status page: {url}", url=g["status_page"]["url"]))
     if g.get("update"):
         # an agent may read this too
         lines.append(_("{line} (not for an agent to run)", line=upgrade.line(g["update"])))

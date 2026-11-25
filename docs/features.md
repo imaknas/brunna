@@ -42,7 +42,7 @@
   ([`contracts/session-record.v1.schema.json`](../contracts/session-record.v1.schema.json)) into
   `<data>/sessions-import/`. The page's footer names the sources it read; the memory-gap check and the waiting report
   use the same sources, and `brunna doctor` says which it found.
-- **Status page.** Failed jobs, reports that need attention, and upcoming runs, served on `127.0.0.1:18790`.
+- **Status page.** Failed jobs, reports that need attention, and upcoming runs, served on `127.0.0.1:18790` at an address with a key in it (`brunna glance` prints it).
 - **Optional modules:** encrypted cloud backup (restic), GitHub mirrors, weekly activity reflection, memory consolidation,
   a sandbox capability runner, Claude Code upkeep (update and login checks), a built-in owner inbox, an external
   personal-assistant bridge, and nightly removal of leftover test containers (testcontainers). `brunna modules` lists

@@ -79,7 +79,7 @@ is reported as such, never guessed.
 age; letters stuck past the platform's hour); `health` (`ok` or `problem`, and the alerts as `{level: bad|notify,
 text}`, with `as_of`, the tick that wrote them); `scheduler` (last tick, alive); `jobs_failed` (names and when);
 `status_page` (a URL and where it is reachable: the setting `status_page.url` in the settings file, new and optional;
-without it `http://127.0.0.1:18790/` marked `local_to: hub` so a client on another machine doesn't offer a link that
+without it `http://127.0.0.1:18790/`, each with the page's key, marked `local_to: hub` so a client on another machine doesn't offer a link that
 opens its own localhost).
 
 Alert texts are in the interface language, as the status page's are; letter and to-do texts are in the content language

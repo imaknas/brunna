@@ -30,7 +30,7 @@ a status bar can run it every minute: an iTerm2 status bar component, SwiftBar o
 The alerts and your open items are as of brunna's last scheduler tick (up to 15 minutes old, `health.as_of`); the mail
 and the scheduler are live.
 
-If you open the status page from another machine (over a VPN or tailnet), put its address in the settings file so
+If you open the status page from another machine (over a VPN or tailnet), put its address (without the key) in the settings file so
 glance reports it:
 
 ```json

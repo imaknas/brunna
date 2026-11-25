@@ -466,7 +466,7 @@ table above.
    comes back as one instruction.
 3. B5's registration: from now on, any chat in the app in any folder can say "connect this folder" or "what's waiting
    for me".
-4. The status page link (`http://localhost:18790`) is how the user sees health without a terminal.
+4. The status page link (`brunna glance` prints it) is how the user sees health without a terminal.
 
 **Story 3: terminal, existing projects.** Paste the line (or `agenthub upgrade` if already installed). Then:
 - init, or `agenthub connect ~/code`, lists what it finds under that folder: repos, a monorepo, a folder of repos;

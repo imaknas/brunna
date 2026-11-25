@@ -136,7 +136,8 @@ job taken but not started is marked lost by the next runner. Its drain is theref
 during it run with the old code's sandbox profile, as they did during the old settle. Re-adopting jobs taken but not
 started (so a draining runner could take without starting) is a follow-up.
 
-**status-page** runs `python -m http.server`: no platform code; nothing to follow.
+**status-page** (`bin/status-server.py`, 11-25; `python -m http.server` before) has nothing in flight worth waiting for: it looks
+every 30 seconds and exits.
 
 ### D4. A service on old code imports nothing new
 

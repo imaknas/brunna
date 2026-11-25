@@ -2038,6 +2038,7 @@ def cmd_doctor(argv: list[str]) -> int:
     else:   # not installed (init --no-launchd, no service manager) or not loaded: no tick is coming by itself
         add("warn", _("the scheduler has not ticked yet, and no service manager runs it here (see the scheduler line "
                       "above)"))
+    doctor_status_page(add)
     if not hubconf.get("alerts"):
         add("warn", _("no alerts set up: a stopped scheduler or a dead service only shows on the status page and in the logs"),
             _("to be notified, add an alerts section as in brunna.example.json"))
@@ -2141,6 +2142,29 @@ def doctor_memory_branches(add) -> None:
                       "holds only notes, under no rules-file name a runtime declares; that agent still reads its own settings, a rules file under a name "
                       "no runtime declares, and one above the folder",
                       runtime=runtime, points=", ".join(place)))
+
+
+def doctor_status_page(add) -> None:
+    """What answers on the status page's port is the server whose address has a key (status_key.answers: asked without
+    the key, which whatever holds the port must never be given), and its key is one. Said only where this instance has had
+    that server, or where what answers gives this instance's page."""
+    import code_watch
+    import status_key
+    key, page = status_key.read(), hubconf.STATE / "status" / "index.html"
+    if not key and os.path.lexists(status_key.path()):
+        add("bad", _("the status page's key ({path}) can't be read or isn't one: no address opens the page", path=status_key.path()),
+            _("delete that file and restart the service local.status-page (or bin/py bin/status-server.py)"))
+    if not (key or page.is_file()):
+        return
+    got = status_key.answers(page)
+    if got == "ours" and not key and not os.path.lexists(status_key.path()) and code_watch.record("status-page"):
+        add("bad", _("the status page's key is gone: no address opens the page"),
+            _("restart the service local.status-page (or bin/py bin/status-server.py): it makes a new one"))
+    if got == "page" or (key and got == "other"):
+        add("warn", _("what answers on 127.0.0.1:{port} is not brunna's status page server: anything on this machine may read what it "
+                      "serves, and the address brunna glance prints doesn't open", port=status_key.PORT),
+            _("stop it (an older server left running, or one started by hand with http.server); the service local.status-page, or "
+              "bin/py bin/status-server.py, then takes the port"))
 
 
 def doctor_propose(add) -> None:

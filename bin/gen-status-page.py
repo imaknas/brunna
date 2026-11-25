@@ -3,8 +3,8 @@
 page.
 
 Runs on the hub machine. Regenerated at the end of every scheduler.py tick and after every run-agent-job.sh run;
-zero LLM. Writes .state/status/index.html, opened only to the tailnet with `tailscale serve` (the laptop and the
-phone can open it, the internet cannot): https://<the hub machine>.<tailnet>.ts.net/
+zero LLM. Writes .state/status/index.html, which bin/status-server.py serves on 127.0.0.1 under an address with a key in
+it (`brunna glance` prints it).
 
 Contents:
   - needs attention: agent jobs whose report starts with 🔔 (within 7 days), failed jobs, the scheduler itself not
