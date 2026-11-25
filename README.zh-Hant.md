@@ -90,13 +90,7 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
 
 ## 它做什麼
 
-兩件事，需要的東西不一樣:
-
-1. **記得,專案之間能溝通。** 筆記放在每個專案旁邊，專案之間有信箱，要你決定的事收成一份清單。支援 MCP 的 agent
-   都能用(Claude Code 和 Codex 還有 hook),也不需要模型。
-2. **有些工作自己會跑。** 每晚整理筆記要一個模型。有信時叫醒開著的 session、處理沒人接的信、排程的 agent 工作，目前要 Claude Code。
-
-[各個 agent 能用到什麼](#各個-agent-能用到什麼)列出每一種的狀況。再細一點:
+**記得**,支援 MCP 的 agent 都行,不需要模型。**自己會跑**,要一個模型,目前大多要 Claude Code。
 
 - **記得自己的專案。** 筆記放在每個專案旁邊，跟程式碼分開;每個專案都有一份目前狀態，事情變了就跟著修正。
 - **早上一眼看完。** 所有專案發生了什麼的摘要，加上一份待辦：只有你能做的、要先決定的、agent 可以接手的。每週一還有一份這週怎麼過的回顧。
@@ -122,24 +116,17 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
 
 ### 各個 agent 能用到什麼
 
-| 你用 | 筆記和信箱 | 開 session 時提醒 | 有信時叫醒閒置的 session | 沒人接的信有人處理 | 每晚整理筆記 |
-|---|---|---|---|---|---|
-| Claude Code(終端機) | 有 | 有 | 有 | 有 | 有 |
-| Claude Desktop 的 Code 分頁 | 有 | 有 | 有 | 有 | 有 |
-| Codex CLI | 有 | 開 session 時有，要先執行 `brunna user-settings --install --runtime codex` | 還沒有 | 還沒有 | `brunna llm setup`:用你的 Codex 登入、API 金鑰或 Ollama |
-| Codex App | 同 CLI;在本機使用沒量過 | 同 CLI | 還沒有 | 還沒有 | 同 CLI |
-| Claude Code 加 Codex | 有，共用 | 兩邊都有 | 叫得醒 Claude Code 的 | Claude Code 處理 | 有 |
-| Copilot、Cursor 或其他支援 MCP 的 agent | 有，要自己設定([docs/mcp.md](docs/mcp.md));Copilot 沒實測 | 沒有 | 沒有 | 沒有 | 用 API 金鑰或 Ollama |
+| 你用 | 記得、專案之間能溝通 | 自己會跑 |
+|---|---|---|
+| Claude Code,或 Claude Desktop 的 Code 分頁 | 有 | 有 |
+| Codex | 有 | 每晚整理筆記,要自己選(`brunna llm setup`) |
+| Claude Code 加 Codex | 有，共用 | 有,由 Claude Code 做 |
+| Copilot、Cursor 或其他支援 MCP 的 agent | 有,要自己設定;Copilot 沒實測 | 每晚整理筆記,要自己準備模型 |
 
-大家怎麼用:
+### 有沒有個人助理
 
-- **只用 Claude Code。** 接上專案，照平常做事。開 session 時會帶出這個專案的筆記和信，邊做邊寫筆記，其餘自己會跑。
-- **只用 Claude Desktop。** Code 分頁就是 Claude Code。不用終端機也能安裝([怎麼做](#交給你的-ai-app-安裝)),只有產生並存下 token
-  要做兩個步驟。聊天分頁沒有接上專案。
-- **只用 Codex。** 開 session 時有信和寫筆記的提醒，信箱和筆記透過 brunna 的工具用。想要每晚整理筆記，跑 `brunna llm setup`。
-  開了 sandbox 的專案，Codex 還不支援。
-- **Claude Code 加 Codex。** 每個專案一個信箱、一份筆記，兩邊都用得到。在 Codex 做到一半，把做到哪記下來，換 Claude Code 接著做。
-- **只用 Copilot。** 透過 MCP 用信箱和筆記;自己會跑的部分要你另外準備模型。
+只有你能決定的事,會到狀態頁和 `brunna owner`,不用設定。有個人助理的話,可以改成送到它那裡,你在手機上就能回答。
+[大家怎麼用 brunna](docs/user-stories.md)(英文)有兩種情況,以及每個 agent 的用法。
 
 ## 隱私與安全
 
@@ -162,6 +149,7 @@ AI App 幫你安裝 brunna 的過程中，有些事會直接問你，不經過�
 |---|---|
 | 安裝、需求、會睡眠的電腦、檔案放在哪裡、移除 | [docs/install.md](docs/install.md) |
 | brunna 做的每件事 | [docs/features.md](docs/features.md) |
+| 大家怎麼用:各 agent、有沒有助理 | [docs/user-stories.md](docs/user-stories.md) |
 | 搭配 herdr 使用,以及給其他工具用的狀態摘要(`brunna glance`) | [docs/herdr.md](docs/herdr.md)(英文) |
 | 日常指令 | [docs/commands.md](docs/commands.md) |
 | 更新與退回 | [docs/upgrading.md](docs/upgrading.md) |
