@@ -3,6 +3,18 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.23.0 (2026-11-25)
+
+### New
+
+- **codex:** Brunna's own decisions can be made with your Codex login
+
+### Fixed
+
+- **conformance-codex:** The agent profile's control writes where the check's world is
+- **conformance-codex:** Checks whose controls a newer Codex, or the model, kept from landing
+- **status:** The status page's server keeps more connections waiting
+
 ## v0.22.1 (2026-11-25)
 
 ### Security
