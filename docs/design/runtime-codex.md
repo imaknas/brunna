@@ -2161,6 +2161,29 @@ What changes for Step 2, a follow-up apart from Step 4:
 - **`session_meta.cli_version`** is the version of the process that created the thread: 0.169.0 for daemon threads behind
   a 0.167.0 client. A resumed thread keeps it.
 
+### Measured 11-25 for a wake (codex-cli 0.172.0; scratch homes, a dummy key or a stand-in model, no login): M11
+
+The daemon's socket speaks WebSocket over the unix socket (`GET /`, `Upgrade: websocket`, then JSON-RPC text frames), which is
+why `app-server proxy` didn't answer plain lines. With a client of each kind:
+
+- **A thread is loaded while a connection is subscribed to it, and 60 s after the last one left it is unloaded**
+  (`thread/closed`, `thread/read` says `notLoaded`): 60.2 s twice for a client over the socket, 60 s for a TUI that quit. A second
+  viewer keeps it; attached and idle for 90 s (TUI) it stays. On 0.165 a TUI's thread was recorded as staying loaded; not
+  measured then for how long.
+- **`SessionEnd` fires at that unload** (a trusted user-level hook; TUI and socket client), so a record that ends on `SessionEnd`
+  is right within about a minute. No client has to be asked.
+- **`codex queue --thread` without `--resume`:** a client attached: a turn starts at once. Within the 60 s after it left: a turn
+  starts too, which nobody watches. After the unload: exit 0, no turn, the message stays queued and runs when the thread is next
+  loaded (with `--resume` at once, the earlier queued one included).
+- `thread/status` alone doesn't say whether a client is attached: `idle` in both the first two cases.
+
+So D4's question has an answer on 0.172: "attached" is a live record that ended on no `SessionEnd`, or the loaded list, with a
+window of at most 60 s. What a wake would still need: that window accepted or closed (asking the loaded list just before, then
+queueing, leaves a race of milliseconds and the 60 s), a letter left in the queue of an unloaded thread deleted
+(`thread/queue/delete`), versions below 0.172 left out, the session's permissions as they are (D4's other half), and **the
+Desktop app**: whether a thread it only lists, or shows in a window that isn't in front, counts as subscribed isn't measured (it
+needs the owner's app), nor over SSH, nor with remote control on. Not built.
+
 ### Measured 11-14 for Step 1 (no login)
 
 **Setup.**

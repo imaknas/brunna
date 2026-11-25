@@ -88,7 +88,9 @@ Ordered by what unblocks the most. "Owner" means the step waits for a decision o
      provider, on the owner's own yes; `runtime.default` stays as it was). With Codex only in `runtime.installed` nothing
      new happens (tested). Left: what 0.172's git runs after a session's start (B1 may have changed: D9 starts there).
      D12–D14 are provisional as recommended, the owner's.
-   - **Step 3:** wake, status, resume and fork. Wake also waits on M11 (is a client attached), under D4.
+   - **Step 3:** wake, status, resume and fork. Wake waited on M11 (is a client attached), under D4: measured 11-25 on 0.172, a
+     thread unloads 60 s after its last viewer leaves and `SessionEnd` fires then. Left: the Desktop app (with the owner), and the
+     owner's word on D4.
    - **Step 4 layer 1** (Codex's own sandbox, rendered by the platform): planned and revised after a cold review (r2,
      11-14, on measurements with the owner's login). **It can't ship as "confined"**: Codex runs `git status` as the user
      in the session's folder, and a filter in the repo's config ran from it. r2's steps 1–2 are built (11-14): `.codex`
