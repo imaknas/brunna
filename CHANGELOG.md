@@ -3,6 +3,22 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.24.0 (2026-11-25)
+
+### Security
+
+- **runtime:** A run's login isn't changed by the environment or the settings files it loads
+
+### New
+
+- **usage:** Every model run the platform starts is counted
+- **runtime:** The platform's agent runs log in with the owner's API key, held to a daily budget
+
+### Fixed
+
+- **init:** What is said of the Claude token is what brunna does
+- **runtime:** A refused login, a reached spend limit and a small cap are said right
+
 ## v0.23.0 (2026-11-25)
 
 ### New
