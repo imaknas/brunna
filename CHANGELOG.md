@@ -3,6 +3,32 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.22.0 (2026-11-25)
+
+### Security
+
+- **services:** A sandboxed project's services and jobs carry nothing out of its sandbox, and brunna touches only units it wrote
+- **sandbox:** The platform's settings hold beside a project's own, and the user's files are kept whole
+
+### New
+
+- **tests:** A stopped test run says what was running
+- **status:** A nightly tidy-up with no model says it is off
+- **upgrade:** A new release is told to the user, once a day
+
+### Fixed
+
+- **registry:** The platform's own nightly tests run only where the settings say so
+- **testguard:** A time limit ends the wait whatever the command started
+- **connect:** A first connect says what it did, and why not
+- **cli:** Init, doctor and help for someone new to it
+- **glance:** A reminder is said beside Health: ok
+- **connect:** The setup's warnings stay on the screen, and a choice with capitals can be typed
+- **connect:** --remote without an owner says so only for a folder with no remote of its own
+- **scheduler:** A scheduler that stops completing its ticks is noticed, and one broken thing stops only what it concerns
+- **install:** Installing, connecting and removing brunna keep what is the user's
+- **memory:** Notes are pushed only to the platform's memory repo, and cleanup keeps every worktree's work
+
 ## v0.21.0 (2026-11-24)
 
 ### New
