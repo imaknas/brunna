@@ -94,6 +94,15 @@ overnight (no digest, no `todo.md`, and each `STATE.md` stays a placeholder) unt
 
 ## What it does
 
+Two things, and they ask for different things of you:
+
+1. **It remembers, and your projects talk.** Notes beside each project, a mailbox between them, one list of what needs
+   you. Works with any agent that has MCP (Claude Code and Codex by hooks too), and needs no model.
+2. **Some work runs by itself.** The nightly tidy-up of those notes needs a model. Waking an open session for a letter,
+   handling a letter nobody took, and scheduled agent jobs need Claude Code today.
+
+[Which agent gets what](#what-you-get-by-agent) says where each one stands. In more detail:
+
 - **Projects that remember.** Notes live beside each project, apart from its code, and each project keeps a current
   state that is corrected as things change.
 - **One morning view.** A digest of what happened across all projects, and one to-do list: what only you can do, what
@@ -113,12 +122,36 @@ Everything it does, in detail: [docs/features.md](docs/features.md).
 
 | What | Options |
 |---|---|
-| Your AI agent | Claude Code: everything. Codex: its sessions get letters and notes reminders at their start, and reach the mailbox through brunna's tools (MCP); `brunna llm setup` can have brunna's own decisions made with your Codex login. Codex itself handles no mailbox requests or agent jobs. Any CLI agent with a headless mode, or one that speaks the [Agent Client Protocol](https://agentclientprotocol.com/), can handle mailbox requests in a throwaway copy, through an adapter, beside a default agent that knows its sessions (Claude Code today; with none, no mailbox request is sent to any agent) |
+| Your AI agent | See [below](#what-you-get-by-agent). Any CLI agent with a headless mode, or one that speaks the [Agent Client Protocol](https://agentclientprotocol.com/), can also handle mailbox requests in a throwaway copy, beside Claude Code |
 | The model behind brunna's decisions | Your agent's own login, Anthropic, any OpenAI-compatible API, or a local Ollama (`brunna llm setup`) |
 | The computer | macOS or Linux. An always-on machine is best; a laptop works |
 
 No agent and no model yet? Notes, schedules and the mailbox still work, the nightly tidy-up doesn't; `brunna doctor`
 says what is off and why.
+
+### What you get, by agent
+
+| You use | Notes and mail | A reminder when a session opens | An idle session woken by a letter | A letter nobody took gets handled | Nightly notes |
+|---|---|---|---|---|---|
+| Claude Code (terminal) | yes | yes | yes | yes | yes |
+| Claude Desktop, its Code tab | yes | yes | yes | yes | yes |
+| Codex CLI | yes | at the start, once you run `brunna user-settings --install --runtime codex` | not yet | not yet | `brunna llm setup`: your Codex login, an API key or Ollama |
+| Codex app | as the CLI; used locally, not measured | as the CLI | not yet | not yet | as the CLI |
+| Claude Code and Codex | yes, shared | both | Claude Code's sessions | by Claude Code | yes |
+| Copilot, Cursor or another agent with MCP | yes, set up by hand ([docs/mcp.md](docs/mcp.md)); Copilot not tested | no | no | no | an API key or Ollama |
+
+How people use it:
+
+- **Only Claude Code.** Connect your projects, work as usual. Sessions start with the project's notes and any mail, write
+  notes as they go, and the rest runs by itself.
+- **Only Claude Desktop.** The Code tab is Claude Code. You can set it up without a terminal
+  ([how](#set-up-through-your-agent)), except for two steps that make and save your token. The chat tabs aren't connected to a
+  project.
+- **Only Codex.** Letters and notes reminders when a session opens, and the mailbox and notes through brunna's tools. To
+  have the notes tidied each night, run `brunna llm setup`. Projects you sandbox aren't served in Codex yet.
+- **Claude Code and Codex together.** One mailbox and one set of notes per project, whichever you open. Start something in
+  Codex, note where you stopped, and carry on in Claude Code.
+- **Only Copilot.** Use the mailbox and the notes through MCP; what runs by itself needs a model of your own.
 
 ## Privacy and safety
 

@@ -90,6 +90,14 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
 
 ## 它做什麼
 
+兩件事，需要的東西不一樣:
+
+1. **記得,專案之間能溝通。** 筆記放在每個專案旁邊，專案之間有信箱，要你決定的事收成一份清單。支援 MCP 的 agent
+   都能用(Claude Code 和 Codex 還有 hook),也不需要模型。
+2. **有些工作自己會跑。** 每晚整理筆記要一個模型。有信時叫醒開著的 session、處理沒人接的信、排程的 agent 工作，目前要 Claude Code。
+
+[各個 agent 能用到什麼](#各個-agent-能用到什麼)列出每一種的狀況。再細一點:
+
 - **記得自己的專案。** 筆記放在每個專案旁邊，跟程式碼分開;每個專案都有一份目前狀態，事情變了就跟著修正。
 - **早上一眼看完。** 所有專案發生了什麼的摘要，加上一份待辦：只有你能做的、要先決定的、agent 可以接手的。每週一還有一份這週怎麼過的回顧。
 - **你來決定。** 只有你能拍板的事會交給你(或透過開放的 [Principal Handoff](https://doi.org/10.5281/zenodo.23852711)
@@ -106,11 +114,32 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
 
 | 項目 | 可以用 |
 |---|---|
-| 你的 AI agent | Claude Code:全部功能。Codex:它的 session 開始時會收到信件和寫筆記提醒,也透過 brunna 的工具(MCP)用信箱;`brunna llm setup` 可以讓 brunna 自己的判斷用你的 Codex 登入跑。Codex 本身不處理信箱交辦和 agent job。任何有 headless 模式的 CLI agent,或支援 [Agent Client Protocol](https://agentclientprotocol.com/) 的 agent,可以透過轉接層在拋棄式副本裡處理信箱的請求,旁邊要有一個認得自己 session 的預設 agent(目前是 Claude Code;沒有的話,信箱的請求不會交給任何 agent) |
+| 你的 AI agent | 見[下面](#各個-agent-能用到什麼)。任何有 headless 模式的 CLI agent,或支援 [Agent Client Protocol](https://agentclientprotocol.com/) 的 agent,也可以和 Claude Code 搭配，在拋棄式副本裡處理信箱的請求 |
 | brunna 做判斷用的模型 | 你的 agent 自己的登入、Anthropic、任何相容 OpenAI 的 API,或本機的 Ollama(`brunna llm setup`) |
 | 電腦 | macOS 或 Linux。一直開著的機器最好，筆電也可以 |
 
 還沒有 agent 或模型?筆記、排程和信箱照樣能用，每晚的整理不會跑;`brunna doctor` 會說哪些功能關著、為什麼。
+
+### 各個 agent 能用到什麼
+
+| 你用 | 筆記和信箱 | 開 session 時提醒 | 有信時叫醒閒置的 session | 沒人接的信有人處理 | 每晚整理筆記 |
+|---|---|---|---|---|---|
+| Claude Code(終端機) | 有 | 有 | 有 | 有 | 有 |
+| Claude Desktop 的 Code 分頁 | 有 | 有 | 有 | 有 | 有 |
+| Codex CLI | 有 | 開 session 時有，要先執行 `brunna user-settings --install --runtime codex` | 還沒有 | 還沒有 | `brunna llm setup`:用你的 Codex 登入、API 金鑰或 Ollama |
+| Codex App | 同 CLI;在本機使用沒量過 | 同 CLI | 還沒有 | 還沒有 | 同 CLI |
+| Claude Code 加 Codex | 有，共用 | 兩邊都有 | 叫得醒 Claude Code 的 | Claude Code 處理 | 有 |
+| Copilot、Cursor 或其他支援 MCP 的 agent | 有，要自己設定([docs/mcp.md](docs/mcp.md));Copilot 沒實測 | 沒有 | 沒有 | 沒有 | 用 API 金鑰或 Ollama |
+
+大家怎麼用:
+
+- **只用 Claude Code。** 接上專案，照平常做事。開 session 時會帶出這個專案的筆記和信，邊做邊寫筆記，其餘自己會跑。
+- **只用 Claude Desktop。** Code 分頁就是 Claude Code。不用終端機也能安裝([怎麼做](#交給你的-ai-app-安裝)),只有產生並存下 token
+  要做兩個步驟。聊天分頁沒有接上專案。
+- **只用 Codex。** 開 session 時有信和寫筆記的提醒，信箱和筆記透過 brunna 的工具用。想要每晚整理筆記，跑 `brunna llm setup`。
+  開了 sandbox 的專案，Codex 還不支援。
+- **Claude Code 加 Codex。** 每個專案一個信箱、一份筆記，兩邊都用得到。在 Codex 做到一半，把做到哪記下來，換 Claude Code 接著做。
+- **只用 Copilot。** 透過 MCP 用信箱和筆記;自己會跑的部分要你另外準備模型。
 
 ## 隱私與安全
 
