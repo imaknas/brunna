@@ -375,5 +375,6 @@
  "runs": "次數",
  "no cost": "無花費",
  "all": "全部",
- "\nOn {n} {n:day|days} with runs of the last {days}. charged: pay-per-use. estimate: what the tool says the others would cost; they are in a plan, or how they are paid for can't be told. no cost: runs that said none. Not counted: your own sessions.": "\n最近 {days} 天裡有 {n} 天有執行。實際計費:按次計費的。估計:工具說其他的要花多少;它們包含在方案裡,或看不出怎麼付費。無花費:沒有回報花費的次數。不算在內:你自己的 session。"
+ "\nOn {n} {n:day|days} with runs of the last {days}. charged: pay-per-use. estimate: what the tool says the others would cost; they are in a plan, or how they are paid for can't be told. no cost: runs that said none. Not counted: your own sessions.": "\n最近 {days} 天裡有 {n} 天有執行。實際計費:按次計費的。估計:工具說其他的要花多少;它們包含在方案裡,或看不出怎麼付費。無花費:沒有回報花費的次數。不算在內:你自己的 session。",
+ "not a key (it holds a space, a line break or other than plain text); nothing written": "不是 key(裡面有空白、換行,或不是純文字);沒有寫入"
 }

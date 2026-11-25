@@ -2590,6 +2590,9 @@ def llm_setup(args: dict) -> int:
         conf["key"] = {"secret": f"{choice}-api-key"}
         value = UI().secret("llm_key", _("{choice} API key (not shown; Enter alone = later with brunna llm set-key "
                                          "{choice}): ", choice=choice))
+        if value and not completion.is_key(value):
+            print(_("not a key (it holds a space, a line break or other than plain text); nothing written"), file=sys.stderr)
+            return 1
         if value:
             print(_("written to {path} (600)", path=write_secret(conf['key']['secret'], value)))
     probe = dict(conf)
@@ -2699,6 +2702,9 @@ def cmd_llm(argv: list[str]) -> int:
         value = sys.stdin.read()
     if not value.strip():
         print(_("no key read; nothing written"), file=sys.stderr)
+        return 1
+    if not completion.is_key(value):
+        print(_("not a key (it holds a space, a line break or other than plain text); nothing written"), file=sys.stderr)
         return 1
     print(_("written to {path} (600). Check: brunna llm health", path=write_secret(k['secret'], value)))
     return 0

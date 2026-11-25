@@ -45,5 +45,6 @@
  "providers.{name}: location local can't have a key (a provider reached with a key is billed per use, and local ones are counted as free)": "providers.{name}:location local 不能有 key(要用 key 連的 provider 是按用量計費的,local 的一律算免費)",
  "points.{point}.runtime: a project's call runs on its judgment point's runtime; pin a model (and, for a model call, a provider)": "points.{point}.runtime:專案的呼叫在它判斷點的執行環境上跑;要指定就指定模型(模型呼叫還可以指定 provider)",
  "points.{point}.provider: {point} is an agent call (registry agents:), which runs on the runtime {runtime}; a provider pin there would be ignored, so it is refused (pin only a model)": "points.{point}.provider:{point} 是 agent 呼叫(登記表 agents:),在執行環境 {runtime} 上跑;在那裡指定 provider 會被忽略,所以不接受(只能指定模型)",
- "{provider}'s login is billed per use and what a call costs can't be told, so it can't be kept within llm.budget.daily_usd; not sending this one": "{provider} 的登入按用量計費,而每次呼叫花多少無從得知,沒辦法守住 llm.budget.daily_usd;這次不送"
+ "{provider}'s login is billed per use and what a call costs can't be told, so it can't be kept within llm.budget.daily_usd; not sending this one": "{provider} 的登入按用量計費,而每次呼叫花多少無從得知,沒辦法守住 llm.budget.daily_usd;這次不送",
+ "not a key: {where} holds a space, a line break or other than plain text": "不是 key:{where} 裡有空白、換行,或不是純文字"
 }

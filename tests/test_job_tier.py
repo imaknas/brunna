@@ -278,7 +278,7 @@ class ClaudeBilling(unittest.TestCase):
         sys.path.insert(0, str(ROOT / "tests"))
         import store_fixture
         store_fixture.stand_in(self)   # the platform's checked copy
-        task = runtime_ports.Task(point="x", prompt="p", spec={}, cwd=None)
+        task = runtime_ports.Task(point="x", prompt="p", spec={}, cwd=None, env={})   # not this shell's: a route in it would be held in a file
         for stdout, want in (('{"total_cost_usd": 1.25, "is_error": true}', 1.25), ("not json", None), ("", None),
                              ('{"total_cost_usd": "lots"}', None)):
             done = subprocess.CompletedProcess([], 1, stdout=stdout, stderr="")

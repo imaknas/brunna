@@ -22,9 +22,21 @@ def call(method: str, url: str, body: dict | None, headers: dict, timeout: float
             parsed = json.loads(raw)
         except ValueError:
             parsed = None
-        return e.code, parsed, dict(e.headers or {}), f"HTTP {e.code}:{raw[:300].decode(errors='replace')}"
+        return e.code, parsed, dict(e.headers or {}), _without(headers, f"HTTP {e.code}:{raw[:1000].decode(errors='replace')}")[:310]
     except (urllib.error.URLError, OSError, ValueError) as e:
-        return None, None, {}, str(e)[:300]
+        # a header that isn't plain text is refused before anything is sent, with an error that quotes it: never passed on
+        if any(not (isinstance(v, str) and v.isascii() and v.isprintable()) for v in headers.values()):
+            return None, None, {}, f"{type(e).__name__}: the request could not be made (a header's value isn't a plain line of text)"
+        return None, None, {}, _without(headers, str(e))[:300]
+
+
+def _without(headers: dict, text: str) -> str:
+    """An error's text without what was sent in a header (a service can quote the key back)."""
+    for v in headers.values():
+        for part in (str(v), str(v).removeprefix("Bearer ")):
+            if len(part) >= 8:
+                text = text.replace(part, "[redacted]")
+    return text
 
 
 RATE_LIMITED = {429, 503, 529}   # too many requests, temporarily overloaded: back off and retry

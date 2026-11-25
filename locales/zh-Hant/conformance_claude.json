@@ -90,5 +90,7 @@
  "denied in {how}, and not readable though ordinary: {files}": "禁止寫在{how},一般檔案也讀不到了:{files}",
  "a session's cost is not where the platform reads it": "session 的花費不在平台讀的地方",
  "a run against the stand-in failed": "對替身的執行失敗了",
- "a resumed session's total doesn't go on from what its record says": "接續的 session 的累計花費,沒有從紀錄裡的數字接下去"
+ "a resumed session's total doesn't go on from what its record says": "接續的 session 的累計花費,沒有從紀錄裡的數字接下去",
+ "a settings file takes the run's login elsewhere: {what}": "設定檔把這次執行的登入帶到別處:{what}",
+ "without it the run keeps its login anyway, so it tests nothing: {what}": "沒有它時登入也沒被帶走,所以什麼都沒測到:{what}"
 }

@@ -299,7 +299,9 @@ def deny_settings(project: str) -> pathlib.Path:
     import runtime_claude
     p = DIR / project / "settings.json"
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(json.dumps(runtime_claude.lease_settings(policy.for_project(project)), ensure_ascii=False))
+    tmp = p.with_name(f".{p.name}.{pysecrets.token_hex(4)}.tmp")   # a run starting meanwhile never reads half a deny list
+    tmp.write_text(json.dumps(runtime_claude.lease_settings(policy.for_project(project)), ensure_ascii=False))
+    os.replace(tmp, p)
     return p
 
 

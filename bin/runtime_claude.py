@@ -1010,6 +1010,31 @@ NO_FOLDER_GIT = {"CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1"}
 FOLDER_GIT_OFF = True   # runtime_ports.folder_git_unknown
 
 
+NO_CALLER_S = ("--setting-sources", "--managed-settings")
+
+
+def _settings_taken(point: str, extra: list) -> tuple[list, str | None]:
+    """(a caller's arguments without its --settings, that --settings); an argument that changes which settings a run loads
+    is refused."""
+    out, theirs, i = [], [], 0
+    while i < len(extra):
+        a = str(extra[i])
+        name, _eq, value = a.partition("=")
+        if name in NO_CALLER_S:
+            raise ValueError(f"judgment point {point}: a caller doesn't choose which settings a run loads: {name}")
+        if name == "--settings":
+            if not _eq:
+                i += 1
+                value = str(extra[i]) if i < len(extra) else ""
+            theirs.append(value)
+        else:
+            out.append(extra[i])
+        i += 1
+    if len(theirs) > 1:
+        raise ValueError(f"judgment point {point}: more than one --settings")
+    return out, theirs[0] if theirs else None
+
+
 RESUMING = ("--resume", "--fork-session", "--continue")   # a run's args that take up a session stored somewhere
 
 
@@ -1474,6 +1499,11 @@ def _flags(task, exe: str | None = None) -> list:
     if off:
         cmd += ["--disallowedTools", *off]
     extra = list(spec.get("extra_args") or []) + list(task.extra or [])
+    extra, theirs = _settings_taken(task.point, extra)
+    if RESTRICTED_FLAG not in cmd:   # it loads the folder's settings files
+        cmd += ["--settings", held_settings(env, theirs)]
+    elif theirs is not None:   # the last --settings replaces the first whole (measured 11-25): the platform's denies with it
+        raise ValueError(f"judgment point {task.point}: a restricted run takes no settings of a caller's")
     if spec.get("tool_servers") == "none" and SEAL not in extra:
         extra.append(SEAL)   # loads none of the environment's servers (the point's tool_servers: none)
     return cmd + extra
@@ -1720,6 +1750,8 @@ def run(task) -> TaskResult:
     cmd = _command(task, exe)
     if (why := unrestricted_refusal(cmd, task.cwd)):   # never started (the owner's decision of 11-18)
         return TaskResult(False, error=why, runtime_version=version, started=False)
+    if RESTRICTED_FLAG not in cmd:
+        env = carried_env(task.cwd, env)
     resumed = _resumed(cmd)
     before = session_cost(resumed) if resumed else None
     try:
@@ -1770,6 +1802,8 @@ def exec_stream(task) -> None:
     cmd += ["--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--verbose"]
     if (why := unrestricted_refusal(cmd, task.cwd)):   # a lease's session: never started (llm.py says why)
         raise ValueError(why)
+    if RESTRICTED_FLAG not in cmd:
+        env = carried_env(task.cwd, env)
     runtime_store.inheritable(NAME)   # the lease's process keeps the version it runs held (runtime_store.held)
     os.execvpe(cmd[0], cmd, env)
 
@@ -3196,19 +3230,112 @@ def install_info() -> dict:
             "settings": {"runtime": {"default": "claude"}, "modules": {"claude": True}}}
 
 
+# what a host that embeds Claude Code and chooses its login sets (its docs, env-vars): the endpoint, provider and login
+# variables of settings files are ignored then (measured 11-25 on 2.1.331). Not for the subscription login, which it turns off
+MANAGED_VAR = "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"
+
+
 def clean_env(env) -> dict:
-    return {k: v for k, v in env.items() if k != TOKEN_VAR}
+    return {k: v for k, v in env.items() if k not in (TOKEN_VAR, MANAGED_VAR)}
+
+
+# What else in an environment, or in the env of a settings file a run loads, decides which login its requests carry: every
+# run logs in as its point or job says (auth_env), so none of them is left in its environment
+LOGIN_OTHERS = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_UNIX_SOCKET", "ANTHROPIC_PROFILE",
+                "ANTHROPIC_IDENTITY_TOKEN", "ANTHROPIC_IDENTITY_TOKEN_FILE", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX",
+                "CLAUDE_CODE_USE_FOUNDRY", "CLAUDE_CODE_USE_MANTLE", "CLAUDE_CODE_USE_ANTHROPIC_AWS", "CLAUDE_CODE_USE_ANTHROPIC_GOOGLE_CLOUD",
+                "CLAUDE_CODE_USE_GATEWAY", "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR", "CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR",
+                "CLAUDE_CODE_OAUTH_REFRESH_TOKEN")
+# and the way its requests take, which that variable doesn't cover
+LOGIN_ROUTE = ("HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY", "NO_PROXY", "https_proxy", "http_proxy", "all_proxy", "no_proxy",
+               "NODE_EXTRA_CA_CERTS", "NODE_TLS_REJECT_UNAUTHORIZED")
+
+
+def login_held(env) -> dict:
+    """The part of a run's own settings (--settings) that keeps a project's settings files from taking its login or its
+    requests elsewhere, where it loads them (a value here wins over theirs: conformance_claude's run-login-held). env: the
+    run's environment (auth_env's). The route is the platform's, else the owner's own (their settings file), never the
+    project's. A token run's login is held by MANAGED_VAR; a subscription run's by emptying every other, which what such a run
+    starts sees as present and empty."""
+    env = os.environ if env is None else env
+    mine = user_settings().get("env")
+    mine = {k: v for k, v in mine.items() if isinstance(v, str)} if isinstance(mine, dict) else {}
+    def own(n: str) -> str:   # either spelling: a child that looks at the other one still finds the owner's proxy
+        both = dict.fromkeys((n, n.upper(), n.lower()))
+        return next((v for where in (env, mine) for k in both if (v := where.get(k))), "")
+    held = {n: own(n) for n in LOGIN_ROUTE}
+    if not env.get(TOKEN_VAR):
+        held |= {**dict.fromkeys((*LOGIN_OTHERS, TOKEN_VAR), ""), "ANTHROPIC_BASE_URL": env.get("ANTHROPIC_BASE_URL") or mine.get("ANTHROPIC_BASE_URL") or ""}
+    return {"env": held, "apiKeyHelper": ""}
+
+
+# what MANAGED_VAR also drops from settings files though it is no login (measured 11-25): a project's commands' cloud accounts and
+# its models. Given to a token run in its environment instead
+CARRIED = re.compile(r"(AWS|GOOGLE|GCLOUD|CLOUDSDK|CLOUD_ML|AZURE)_[A-Z0-9_]+|CLAUDE_CODE_SUBAGENT_MODEL|ANTHROPIC_DEFAULT_[A-Z0-9_]+_MODEL")
+NOT_CARRIED = ("AWS_BEARER_TOKEN_BEDROCK",)
+
+
+def carried_env(cwd, env) -> dict:
+    """The run's environment with CARRIED's names from the settings files a run in cwd loads (the user's, the project's, its
+    local one, in that order: the last wins, over the environment's own, as Claude Code applies them). A token run's only."""
+    if not env.get(MANAGED_VAR):
+        return env
+    docs = [user_settings()]
+    for rel in SETTINGS_FILES[:2]:
+        try:
+            docs.append(json.loads((pathlib.Path(cwd or os.getcwd()) / rel).read_text()))
+        except (OSError, ValueError, RecursionError):
+            pass
+    out = dict(env)
+    for doc in docs:
+        theirs = doc.get("env") if isinstance(doc, dict) else None
+        out.update({k: v for k, v in (theirs.items() if isinstance(theirs, dict) else ())
+                    if isinstance(v, str) and "\0" not in v and CARRIED.fullmatch(k) and k not in NOT_CARRIED})
+    return out
+
+
+def held_settings(env, theirs: str | None = None) -> str:
+    """The one --settings of a run that loads the folder's settings files: login_held over a caller's own (theirs, a file or
+    JSON; the last --settings would replace the first whole). Inline when it holds no value, else a file only the user reads
+    (a proxy's address can carry a password, and a caller's may be long): the same content is the same file. Raises
+    ValueError."""
+    import hashlib
+    doc = {}
+    if theirs is not None:
+        try:
+            doc = json.loads(theirs if theirs.lstrip().startswith("{") else pathlib.Path(theirs).read_text())
+        except (OSError, ValueError) as e:
+            raise ValueError(f"the settings given to a run can't be read: {type(e).__name__}") from None
+        if not isinstance(doc, dict):
+            raise ValueError("the settings given to a run aren't an object")
+    held = login_held(env)
+    doc = {**doc, "apiKeyHelper": held["apiKeyHelper"], "env": {**(doc.get("env") if isinstance(doc.get("env"), dict) else {}), **held["env"]}}
+    text = json.dumps(doc, ensure_ascii=False)
+    if theirs is None and not any(doc["env"].values()):
+        return text
+    import hubconf
+    import secrets
+    try:
+        f = hubconf.private_tmp() / f"run-settings-{hashlib.sha256(text.encode()).hexdigest()[:32]}.json"
+        tmp = f.with_name(f".{f.name}.{secrets.token_hex(4)}")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
+        with os.fdopen(fd, "w") as fh:
+            fh.write(text)
+        os.replace(tmp, f)
+    except OSError as e:
+        raise ValueError(f"the run's settings could not be written: {type(e).__name__}") from None
+    return str(f)
 
 
 def auth_env(mode: str, env) -> tuple:
-    out = clean_env(env)
+    out = {k: v for k, v in clean_env(env).items() if k not in LOGIN_OTHERS}
     if mode != "token":  # subscription: no token; claude uses the keychain login itself
         return out, ""
     f = _token_file()
     if not f.is_file():
         return None, _("{file} does not exist (the default is the headless token; to use the subscription login, "
                        "declare auth: subscription)", file=f)
-    out[TOKEN_VAR] = f.read_text().strip()
+    out[TOKEN_VAR], out[MANAGED_VAR] = f.read_text().strip(), "1"
     return out, ""
 
 
@@ -3425,7 +3552,7 @@ def resume_exec(sid: str, env=None, written_by: str | None = None) -> tuple[list
                 "(brunna runtimes shows the checks)", version=written_by, current=current or e.version,
                 how=_("failed to resume one ({reason})", reason=reason or runtime_ports.FORK_CHECK) if state == "fail"
                 else _("hasn't been checked resuming one yet")))
-    base = clean_env(dict(os.environ if env is None else env))
+    base, held = clean_env(dict(os.environ if env is None else env)), []
     run_env = _env(SimpleNamespace(env=base), own=False, entry=e)
     try:
         r = subprocess.run([exe, "auth", "status"], capture_output=True, text=True, timeout=60, env=run_env,
@@ -3436,9 +3563,10 @@ def resume_exec(sid: str, env=None, written_by: str | None = None) -> tuple[list
     if not logged_in:
         with_token, _why = auth_env("token", base)
         if with_token is not None:
-            run_env = _env(SimpleNamespace(env=with_token), own=False, entry=e)
+            run_env = carried_env(None, _env(SimpleNamespace(env=with_token), own=False, entry=e))
+            held = ["--settings", held_settings(with_token)]
     runtime_store.inheritable(NAME)
-    return [exe, "--resume", sid], run_env
+    return [exe, "--resume", sid, *held], run_env
 
 
 def install_blocker() -> str | None:

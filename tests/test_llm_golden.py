@@ -97,7 +97,9 @@ class Golden(unittest.TestCase):
 
     def observe(self, point: str, variant: dict) -> dict:
         spec = self.m.points()["points"][point]
-        env = {k: v for k, v in os.environ.items() if k not in ("LLM_AUTH", TOKEN_ENV)}
+        import runtime_claude
+        # nor what this shell would add to a run's held settings
+        env = {k: v for k, v in os.environ.items() if k not in ("LLM_AUTH", TOKEN_ENV, "ANTHROPIC_BASE_URL", *runtime_claude.LOGIN_ROUTE)}
         if "LLM_AUTH" in variant:
             env["LLM_AUTH"] = variant["LLM_AUTH"]
         # the environment's MCP servers (points declaring tool_servers): a fixed answer, never this machine's
@@ -120,7 +122,8 @@ class Golden(unittest.TestCase):
                 code = self.m.run(a)
             run_env = self.run_env(tasks[-1]) if code == 0 and tasks else None
         return {"exit": code, "auth": auth, "token_passed": bool(agent_env) and agent_env != rt.clean_env(agent_env),
-                "cmd": self.norm(json.loads(out.getvalue())) if code == 0 else None, "env": run_env}
+                "cmd": [x if '"apiKeyHelper": ""' not in x else "<LOGIN_HELD>" for x in self.norm(json.loads(out.getvalue()))]
+                if code == 0 else None, "env": run_env}
 
     def current(self) -> dict:
         return {f"{p}/{v}": self.observe(p, var) for p in sorted(self.m.points()["points"])

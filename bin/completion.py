@@ -121,6 +121,16 @@ def key_envs() -> set[str]:
             if isinstance(p, dict) and isinstance(p.get("key"), dict) and p["key"].get("env")}
 
 
+def is_key(v: str) -> bool:
+    return bool(re.fullmatch(r"[!-~]+", v.strip()))
+
+
+def _one_key(v: str, where) -> str:
+    if not is_key(v):   # never sent: an error about it could quote it
+        raise Refused(_("not a key: {where} holds a space, a line break or other than plain text", where=where))
+    return v.strip()
+
+
 def read_key(conf: dict) -> str | None:
     """None = this provider needs no key (e.g. a local Ollama, Claude Code logging in by itself). Needed but not
     available → Refused."""
@@ -135,13 +145,13 @@ def read_key(conf: dict) -> str | None:
             raise Refused(_("no key: {file} does not exist (`brunna llm set-key` writes it)", file=f))
         if not v:
             raise Refused(_("no key: {file} is empty", file=f))
-        return v
+        return _one_key(v, f)
     if k.get("env"):
         v = os.environ.get(k["env"])
         if not v:
             raise Refused(_("no key: environment variable {var} is not set (the scheduler runs under launchd and does not "
                             "see the shell's settings; a secret is more reliable)", var=k["env"]))
-        return v
+        return _one_key(v, k["env"])
     raise Refused(_("key must be {{\"secret\": {file}}} or {{\"env\": {var}}}", file=_("file name"),
                     var=_("variable name")))
 
