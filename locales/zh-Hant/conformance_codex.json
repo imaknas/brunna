@@ -35,5 +35,6 @@
  "the hook's context didn't reach the model": "hook 的上下文沒有到達模型",
  "the run answered but didn't change STATE.md": "執行有回答,但沒改 STATE.md",
  "the run failed: {error}": "執行失敗:{error}",
- "the session failed (exit {code})": "session 失敗(exit {code})"
+ "the session failed (exit {code})": "session 失敗(exit {code})",
+ "not shown: at its start this version ran no git status in the folder, only {commands}; what its git runs later isn't measured (runtime-codex.md, B1)": "沒有證實:這一版開始時沒有在資料夾裡跑 git status,只跑了 {commands};它的 git 之後會跑什麼還沒量(runtime-codex.md,B1)"
 }

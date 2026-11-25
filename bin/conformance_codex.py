@@ -28,6 +28,7 @@ from runtime_ports import Check, Outcome  # noqa: E402
 _ = i18n.domain(__file__)
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 RUN_S = 120
+START_TRIES = 5   # session-folder-git: how many starts it looks at for a git status
 # the folder-git canary's drivers, one per config source git reads in a repo's folder: the repo's config, a file it
 # includes, the worktree's own config (extensions.worktreeConfig) and a long-running process driver; each file a driver
 # is chosen for is staged, then its stat moved, so `git status` hashes it through the driver
@@ -140,21 +141,30 @@ def session_folder_git(world) -> Outcome:
     file a driver is chosen for has its stat moved with its content as staged, so `git status` hashes it through the
     driver. `codex debug prompt-input` builds a session's first context without a model call, and that runs Codex's git
     (measured 11-14 on 0.167; it also opens an unauthenticated connection to the model provider, which carries nothing).
-    It passes only when a `status` ran to the end in the folder and no driver ran."""
+    It passes only when a `status` ran to the end in the folder and no driver ran. A version whose start runs other git
+    there and no `status` (0.172: rev-parse and config) is a fail: what it runs later isn't seen here, so its sessions
+    stay held, which is all this check holds. No git of its own in the folder at all is an error."""
     project, root = pathlib.Path(world.project).resolve(), pathlib.Path(world.root).resolve()
     markers = _plant(project, root)
     log = root / "git-calls"
     log.unlink(missing_ok=True)
     try:
-        _codex(["debug", "prompt-input", "hi"], cwd=project)
+        for _n in range(START_TRIES):   # its git runs beside the rest, and Codex can end first (0.172, about one start in three)
+            _codex(["debug", "prompt-input", "hi"], cwd=project)
+            if any(subcommand(c["argv"]) == "status" and _in_folder(c, project) and c.get("done") for c in _calls(log)):
+                break
     except subprocess.TimeoutExpired:
         return Outcome("error", _("no answer in {s} s", s=RUN_S))
     ran = [DRIVERS[d] for d, m in markers.items() if m.exists()]
     if ran:
         return Outcome("fail", _("Codex's own git ran the folder's git drivers outside its sandbox: {kinds} "
                                  "(runtime-codex.md, B1)", kinds=", ".join(ran)))
-    statuses = [c for c in _calls(log) if subcommand(c["argv"]) == "status" and _in_folder(c, project)]
-    if not any(c.get("done") for c in statuses):
+    here = [c for c in _calls(log) if _in_folder(c, project) and c.get("done")]
+    if not any(subcommand(c["argv"]) == "status" for c in here):
+        if here:
+            return Outcome("fail", _("not shown: at its start this version ran no git status in the folder, only {commands}; "
+                                     "what its git runs later isn't measured (runtime-codex.md, B1)",
+                                     commands=", ".join(dict.fromkeys(subcommand(c["argv"]) or "git" for c in here))))
         return Outcome("error", _("tests nothing: no git status of Codex's ran to the end in the folder"))
     return Outcome("pass", _("Codex's own git status ran in the folder, and none of its drivers ran ({kinds})",
                              kinds=", ".join(DRIVERS.values())))
@@ -208,7 +218,9 @@ def control_globs(world) -> Outcome:
     entries = rx.profile_control_entries(project)
     lines = ["[permissions.brunna-guarded]", 'extends = ":workspace"', "", "[permissions.brunna-guarded.filesystem]"]
     lines += [f"{_toml_key(k)} = {_toml_key(v)}" for k, v in entries.items()]
-    lines += ["", "[permissions.brunna-open]", 'extends = ":workspace"', ""]
+    # the control by name: a newer Codex's own :workspace keeps the top ones unwritten too
+    lines += ["", "[permissions.brunna-open]", 'extends = ":workspace"', "", "[permissions.brunna-open.filesystem]"]
+    lines += [f'{_toml_key(str(project / c))} = "write"' for c, _t in rx.CONTROL]
     (pathlib.Path(world.tool) / "config.toml").write_text("\n".join(lines) + "\n")
     try:
         landed, unrun = _try_writes(project, "brunna-guarded")
@@ -572,8 +584,8 @@ def completion_no_tools(world) -> Outcome:
         return Outcome("error", _("the run failed: {error}", error=got.get("error")))
     if calls:
         return Outcome("fail", _("a completion called {tools}", tools=", ".join(calls)))
-    _got, shelled = _completion(world, ASK_COMMAND, shell=True)
-    if not shelled:
+    # the model decides whether to: asked up to three times
+    if not any(_completion(world, ASK_COMMAND, shell=True)[1] for _n in range(3)):
         return Outcome("error", _("tests nothing: with the shell on the run called no tool either"))
     return Outcome("pass", "")
 
@@ -691,7 +703,7 @@ CHECKS = [
     # the session side: the per-version gate reads these (a sandboxed project's Codex session whose version failed one).
     # session-folder-git holds the user's sessions only: the platform's runs never start where it matters
     # (runtime_codex.folder_refusal)
-    Check("session-folder-git", "sessions", "safety", session_folder_git, timeout_s=RUN_S + 60, side="session",
+    Check("session-folder-git", "sessions", "safety", session_folder_git, timeout_s=START_TRIES * RUN_S + 60, side="session",
           holds="sessions"),
     Check("control-globs", "control", "safety", control_globs, timeout_s=2 * 6 * RUN_S + 60, side="session"),
     Check("lifecycle-hooks", "lifecycle", "function", lifecycle_hooks, timeout_s=2 * RUN_S + 60, side="session",

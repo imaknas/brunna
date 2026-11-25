@@ -83,9 +83,14 @@ class Through(unittest.TestCase):
         self.assertEqual(self.child("session-folder-git", "idle")["state"], "error")
 
     def test_a_status_must_run_in_the_folder_to_count(self):
-        for mode in ("nostatus", "elsewhere"):
-            with self.subTest(mode=mode):
-                self.assertEqual(self.child("session-folder-git", mode)["state"], "error")
+        self.assertEqual(self.child("session-folder-git", "elsewhere")["state"], "error")
+
+    def test_other_git_in_the_folder_and_no_status_is_never_a_pass(self):
+        """it holds the sessions, and not the platform's own copy (a fail that holds sessions only, never an error)"""
+        got = self.child("session-folder-git", "nostatus")
+        self.assertEqual(got["state"], "fail", got)
+        check = next(c for c in conformance_codex.CHECKS if c.name == "session-folder-git")
+        self.assertEqual(check.holds, "sessions")
 
     def test_the_subcommand_is_the_word_after_the_global_options(self):
         self.assertEqual(conformance_codex.subcommand(["-c", "status.x=1", "-C", "/p", "status", "--porcelain"]),
