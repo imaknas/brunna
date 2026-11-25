@@ -92,5 +92,10 @@
  "a run against the stand-in failed": "對替身的執行失敗了",
  "a resumed session's total doesn't go on from what its record says": "接續的 session 的累計花費,沒有從紀錄裡的數字接下去",
  "a settings file takes the run's login elsewhere: {what}": "設定檔把這次執行的登入帶到別處:{what}",
- "without it the run keeps its login anyway, so it tests nothing: {what}": "沒有它時登入也沒被帶走,所以什麼都沒測到:{what}"
+ "without it the run keeps its login anyway, so it tests nothing: {what}": "沒有它時登入也沒被帶走,所以什麼都沒測到:{what}",
+ "the hook didn't run, so what it sees isn't known": "hook 沒有跑,所以不知道它看得到什麼",
+ "a run whose key can't be read uses another login": "key 讀不到的執行用了別的登入",
+ "a run over its spending cap doesn't stop": "超過花費上限的執行沒有停",
+ "a run on a key carries something else, or goes elsewhere": "用 key 的執行帶了別的東西,或送到別處",
+ "what a run starts sees its key": "執行啟動的程式看得到它的 key"
 }

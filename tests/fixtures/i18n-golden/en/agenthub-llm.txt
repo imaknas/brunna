@@ -2,7 +2,7 @@ $ agenthub llm
 [exit 2]
 --- stdout
 --- stderr
-usage: brunna llm setup | set-key <provider> (key from stdin) | health | usage [--days <n>]
+usage: brunna llm setup | set-key <provider> (key from stdin) | set-key --agent | health | usage [--days <n>]
 
 $ agenthub llm set-key nosuch
 [exit 2]
@@ -62,5 +62,6 @@ llm.providers.anthropic.key is not {"secret": file name} (a key from an environm
 $ agenthub llm setup --llm runtime --yes    # runtime claude
 [exit 0]
 --- stdout
-brunna's decisions go through claude's own login (the model for each: schedulectl models)
+brunna's decisions go through claude (the model for each: schedulectl models)
+⚠️ not yet: no login chosen for the platform's runs: brunna llm set-key --agent
 --- stderr

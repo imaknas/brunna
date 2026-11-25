@@ -55,5 +55,6 @@
  "requests or handovers in flight": "有請求或交接正在進行",
  "a lease in a turn or waiting for the owner's answer": "有租約正在回答或等主人回覆",
  "no runtime for leases: {e}": "租約沒有可用的 runtime:{e}",
- "{id}: a turn's usage could not be recorded: {e!r}": "{id}:這一輪的用量記不下來:{e!r}"
+ "{id}: a turn's usage could not be recorded: {e!r}": "{id}:這一輪的用量記不下來:{e!r}",
+ "leases don't run on an API key yet": "借對話還不能用 API key 跑"
 }

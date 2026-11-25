@@ -27,11 +27,10 @@ docs/design/llm-providers.md): if {settings} has an `llm` block, the provider is
 goes to runtime.default's completion interface (Claude Code run with its tools off). Agent-shaped points go to the
 agent interface as before.
 
-Credentials (unified, decided by the owner on 2026-10-24): by default ~/.claude/headless-oauth-token (`claude
-setup-token`, one year, the same under launchd and SSH, only one thing to replace); only judgment points declaring
-`auth: subscription`, or callers setting LLM_AUTH=subscription (a registry job's `connectors: true`), use the
+Credentials: as {settings} runtime.login says (runtime_ports.default_login: the owner's API key, whose runs are held to a
+daily budget by bin/spending.py, or the headless token); only judgment points declaring `auth: subscription`, or callers setting LLM_AUTH=subscription (a registry job's `connectors: true`), use the
 subscription login (keychain / .credentials.json): claude.ai connectors (Upwork etc.) load only with the subscription
-login. Wanting the token but having no token file fails (no silent switch to the subscription login;
+login. Wanting a login that isn't there fails (no silent switch to another one;
 brunna/claude-login raises an alert too).
 """
 from __future__ import annotations
@@ -49,6 +48,7 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import hubconf  # noqa: E402
+import event_jobs  # noqa: E402
 import names  # noqa: E402
 import i18n  # noqa: E402
 import minischema  # noqa: E402
@@ -113,12 +113,13 @@ def model_for(point: str, spec: dict | None = None, cli: str | None = None, runt
     return runtime_ports.models(name).get(spec.get("model_group") or "standard")
 
 
-def auth_mode(spec: dict) -> str:
+def auth_mode(spec: dict, runtime: str | None = None) -> str:
     """Which login: LLM_AUTH (set by the caller for this call, e.g. login-check checking the token) > the judgment
-    point's declared auth > the token by default.
+    point's declared auth > the runtime's (runtime_ports.default_login).
     Where the credentials are and what the environment variables are called is the runtime's business (the auth
     interface, layer 6)."""
-    return os.environ.get("LLM_AUTH") or spec.get("auth") or "token"
+    import runtime_ports
+    return os.environ.get("LLM_AUTH") or spec.get("auth") or runtime_ports.default_login(runtime)
 
 
 def auth_env(spec: dict, rt) -> tuple[dict | None, str]:
@@ -128,7 +129,7 @@ def auth_env(spec: dict, rt) -> tuple[dict | None, str]:
     import completion
     drop = {"LLM_AUTH"} | completion.key_envs()
     base = {k: v for k, v in os.environ.items() if k not in drop}
-    return rt.auth_env(auth_mode(spec), base)
+    return rt.auth_env(auth_mode(spec, getattr(rt, "NAME", None)), base)
 
 
 def completion_target(point: str, spec: dict, model: str | None = None) -> dict:
@@ -145,7 +146,7 @@ def completion_target(point: str, spec: dict, model: str | None = None) -> dict:
     if "completion" not in runtime_ports.capabilities(name):
         raise completion.Refused(completion.nowhere(name, spec))
     return completion.runtime_target(name, model if model is not None else model_for(point, spec, runtime=name),
-                                     auth_mode(spec))
+                                     auth_mode(spec, name))
 
 
 def project_calls() -> tuple[list[tuple[str, str, dict | None, str | None]], list[str], list[str]]:
@@ -185,7 +186,8 @@ def run_completion(a, spec: dict, prompt: str, model: str | None) -> int:
     import completion
     schema = json.loads((POINTS.parent / output_schema(spec)).read_text()) if output_schema(spec) else None
     try:
-        out = completion.run(a.point, spec, prompt, schema, target=completion_target(a.point, spec, model))
+        out = completion.run(a.point, spec, prompt, schema, target=completion_target(a.point, spec, model),
+                             project=os.environ.get("HUB_MEMORY_OF") or None)   # whose copy: its cap and its row are that project's
     except completion.Refused as e:
         return fail(a.point, spec, str(e))
     print(json.dumps(out, ensure_ascii=False))
@@ -490,7 +492,7 @@ def billing_gate(point: str, spec: dict, rt, env: dict, tier: str) -> tuple[str 
     import runtime_ports
     name = point_runtime(point, spec) or runtime_ports.default_name()
     restricted = spec.get("settings") == "platform" or bool(spec.get("restricted"))
-    how = rt.billing(auth_mode(spec), env, restricted) if "auth" in runtime_ports.capabilities(name) else "unknown"
+    how = rt.billing(auth_mode(spec, name), env, restricted) if "auth" in runtime_ports.capabilities(name) else "unknown"
     if how == "unknown":
         return how, _("{point} runs at the strength its job chose ({tier}) only where how {runtime} is paid for can be "
                       "told, and it can't be; not run", point=point, tier=tier, runtime=name)
@@ -789,6 +791,9 @@ def _launch(a, spec: dict, rt, env: dict, prompt: str, model, run_dir, how: str 
         if not spec.get("stream"):
             print(_("llm.py: {point} does not declare stream: true, so it cannot run under exec", point=a.point), file=sys.stderr)
             return 2
+        import spending
+        if spending.held(point_runtime(a.point, spec) or runtime_ports.default_name(), auth_mode(spec)):   # a conversation has no cap yet
+            return fail(key, spec, _("channel leasing doesn't run on a login billed per use yet"))
         if not hasattr(rt, "exec_stream"):
             print(_("llm.py: {point}: this runtime does not support long-running streaming sessions", point=a.point),
                   file=sys.stderr)
@@ -809,9 +814,22 @@ def _launch(a, spec: dict, rt, env: dict, prompt: str, model, run_dir, how: str 
     import completion
     import usage_log
     name, project = point_runtime(a.point, spec) or runtime_ports.default_name(), env.get(spec.get("project_env") or "") or None
-    paid = how or (rt.billing(auth_mode(spec), env, spec.get("settings") == "platform" or bool(spec.get("restricted")))
+    paid = how or (rt.billing(auth_mode(spec, name), env, spec.get("settings") == "platform" or bool(spec.get("restricted")))
                    if "auth" in runtime_ports.capabilities(name) else "unknown")
-    run = usage_log.begin(completion.USAGE, key, name, model, paid, project, gated=bool(how))
+    import spending
+    mode, capped = auth_mode(spec, name), None
+    if spending.held(name, mode):
+        project = project or os.environ.get("HUB_MEMORY_OF") or None
+        capped = spending.cap(a.point, spec, name, job_tier(spec, env), model)
+        what = names.env(event_jobs.JOB_VAR) or project if spending.backoff(a.point) == 1 else project
+        if (why := spending.allowed(a.point, project, mode) or spending.stopped(a.point, what, capped)):
+            return fail(key, spec, why)
+        run, why = spending.reserve(key, name, model, capped, project)
+        if run is None:
+            return fail(key, spec, why)
+        task = task._replace(max_cost_usd=capped)
+    else:
+        run = usage_log.begin(completion.USAGE, key, name, model, paid, project, gated=bool(how))
     try:
         res = rt.run(task)
     except (ValueError, runtime_ports.Unsupported) as e:
@@ -819,13 +837,22 @@ def _launch(a, spec: dict, rt, env: dict, prompt: str, model, run_dir, how: str 
         return fail(key, spec, str(e))
     if res.started:
         completion.record_run(key, name, model, paid, res.cost_usd, res.stop, project, res.input_tokens, res.output_tokens, run,
-                              gated=bool(how))
+                              gated=bool(how), reserved=capped)
+        if capped is not None and res.stop == getattr(rt, "CAP_STOP", None):
+            spending.note_stop(a.point, what, capped)
     else:
         usage_log.drop(completion.USAGE, run)
     if job_credentials(spec, env) and (why := bridge_failure(run_dir)):
         return fail(key, spec, why)
     if not res.ok:
+        if capped is not None and res.stop == getattr(rt, "CAP_STOP", None):
+            return fail(key, spec, _("stopped at the most it may cost (${cap}): {settings} llm.budget.caps.{point} raises it", cap=f"{capped:.2f}",
+                                     point=a.point))
+        if capped is not None and (res.refused or res.started and res.cost_usd):
+            spending.login_told(name, res.refused or None)
         return fail(key, spec, res.error)
+    if capped is not None:
+        spending.login_told(name, res.refused or None)
     # no structured_output isn't a failure: handed to the caller as is (the librarian deliberately "still goes by the
     # actual file changes"); if present, it must be valid
     if schema is not None and res.structured_output is not None:

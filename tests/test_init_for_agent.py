@@ -49,7 +49,7 @@ class ForAgent(unittest.TestCase):
         self.assertNotIn("agent", qs, "answered: not asked again")
         r = self.hub_cmd("init", "--questions", "--answers", self.answers(connect=""))
         self.assertNotIn("connect", {q["id"] for q in json.loads(r.stdout)["questions"]}, "\"\" is an answer (skip)")
-        for qid, via in (("install_agent", "dialog"), ("agent_token", "user"), ("register_mcp", "dialog"),
+        for qid, via in (("install_agent", "dialog"), ("agent_key", "page"), ("register_mcp", "dialog"),
                          ("llm_key", "page"), ("connect_root", "dialog")):
             self.assertEqual(qs[qid]["via"], via, qid)
             self.assertNotIn("default", qs[qid], "the owner answers it directly, the agent has nothing to fill in")
@@ -68,7 +68,7 @@ class ForAgent(unittest.TestCase):
         self.assertIn("error", json.loads(r.stdout))
 
     def test_the_file_cannot_consent_or_carry_secrets(self):
-        for bad in ({"register_mcp": "yes"}, {"connect_root": "yes"}, {"agent_token": "x"}, {"llm_key": "x"},
+        for bad in ({"register_mcp": "yes"}, {"connect_root": "yes"}, {"agent_key": "x"}, {"llm_key": "x"},
                     {"agent": "someone"}, {"owner": 5}, {"owner": "--dry-run"}, {"owner": "--scheduler-only"}):
             with self.subTest(bad=bad):
                 r = self.hub_cmd("init", "--answers", self.answers(**bad), "--no-launchd")

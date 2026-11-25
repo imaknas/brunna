@@ -87,7 +87,7 @@ $ llm.py run agent-job    # no checked copy
 $ llm.py run agent-job    # token missing
 [exit 1]
 --- stdout
-{"type": "result", "is_error": true, "structured_output": null, "llm_point": "agent-job", "llm_error": "沒有 <TMP>/home/.claude/headless-oauth-token(預設用 headless token;要用訂閱登入就宣告 auth: subscription)"}
+{"type": "result", "is_error": true, "structured_output": null, "llm_point": "agent-job", "llm_error": "平台的執行還沒有選登入方式:brunna llm set-key --agent"}
 --- stderr
 
 $ llm.py run consolidate    # schema

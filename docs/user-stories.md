@@ -18,12 +18,12 @@ model, and most of it needs Claude Code today.
 
 "Your choice" is `brunna llm setup`: your Codex login, an API key, or a local Ollama. With none, notes stay as they are.
 
-**Only Claude Code.** Connect your projects and work as usual. A session opens with the project's notes and any mail, writes
+**Only Claude Code.** Enter an Anthropic API key when init asks (optional: without one, the table's last two columns, scheduled agent jobs and folding old notes are off). Connect your projects and work as usual. A session opens with the project's notes and any mail, writes
 notes as it goes, and the rest runs by itself. A session can send a letter to another project, and that project's session is
 woken to handle it.
 
 **Only Claude Desktop.** The Code tab is Claude Code. You can install brunna without a terminal
-([how](../README.md#set-up-through-your-agent)), except for making and saving your token. The chat tabs aren't in a project
+([how](../README.md#set-up-through-your-agent)), except for entering your API key, which a page in your browser asks for. The chat tabs aren't in a project
 folder, so they aren't connected.
 
 **Only Codex.** Run `brunna user-settings --install --runtime codex` once, and letters and notes reminders appear when a session

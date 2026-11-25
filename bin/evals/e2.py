@@ -336,6 +336,10 @@ def prompt(point: str, case: pathlib.Path, arm: str) -> str:
 
 def run_env(run_dir: pathlib.Path) -> dict:
     """The real config, except this run's own bus and state dir (credentials stay in the real HOME)."""
+    import runtime_ports
+    import spending
+    if spending.held(runtime_ports.default_name(), runtime_ports.default_login()):   # a state of their own: the day's budget wouldn't hold them
+        raise SystemExit("evals don't run on a login billed per use (runtime.login: key)")
     cfg = run_dir / "config"
     if not cfg.exists():
         shutil.copytree(hubconf.config_dir(), cfg, ignore=shutil.ignore_patterns(".git"))

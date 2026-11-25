@@ -41,6 +41,8 @@ config:
                         guess names)
   brunna llm set-key <provider>   write the API key of {settings} llm.providers.<provider> from stdin into the platform's
                         secrets directory (chmod 600; not read from arguments, so it stays out of the shell history)
+  brunna llm set-key --agent   the API key the platform's agent runs with, and what its runs may cost in a day (asked in the
+                        terminal, not shown)
   brunna llm health        whether each provider works (= bin/llm.py health)
   brunna llm usage [--days <n>]
                         what every model run the platform started used in the last n days (30): by kind of work, with what the
@@ -246,6 +248,23 @@ def cmd_config(argv: list[str]) -> int:
     return 2
 
 
+def keep_login(d: dict) -> str | None:
+    """An install whose platform runs use the login they have had says so (runtime.login): nothing set is a login not chosen yet."""
+    import runtime_ports
+    rt = d.get("runtime") if isinstance(d.get("runtime"), dict) else {}
+    agent = rt.get("default") or runtime_ports.DEFAULT
+    if rt.get("login") is not None or agent not in runtime_ports.RUNTIMES or "token" not in runtime_ports.logins(agent) \
+            or len(runtime_ports.logins(agent)) < 2:
+        return None
+    try:
+        if runtime_ports._module(agent).auth_env("token", {})[0] is None:
+            return None
+    except Exception:   # noqa: BLE001 (what can't be told isn't written down)
+        return None
+    d["runtime"] = {**rt, "login": "token"}
+    return _("runtime.login: token (how the platform's runs log in here, as before)")
+
+
 def config_migrations(d: dict) -> list[str]:
     """The settings an earlier release took and this one's config check refuses, brought in line in d (the parsed {settings});
     one line each for the owner, what changed and why. Each is fail-closed: what can't be held to a point's limits stops, and
@@ -300,6 +319,8 @@ def config_migrations(d: dict) -> list[str]:
     if "providers" in llm and not providers:   # none left: use alone is refused (completion.config_errors)
         llm.pop("providers")
         llm.pop("use", None)
+    if (line := keep_login(d)):
+        said.append(line)
     return said
 
 
@@ -314,7 +335,9 @@ def config_migrate(apply: bool) -> int:
         d = read_hub_json()
     except (OSError, ValueError):
         return 0   # none yet, or one config check says is broken: nothing here to bring in line
+    before = (d.get("runtime") or {}).get("login") if isinstance(d, dict) and isinstance(d.get("runtime") or {}, dict) else None
     said = config_migrations(d) if isinstance(d, dict) else []
+    kept = int(bool(said) and (d.get("runtime") or {}).get("login") != before)
     if not said:
         return 0
     for line in said:
@@ -333,11 +356,12 @@ def config_migrate(apply: bool) -> int:
     mine = st.returncode == 0 and bool(st.stdout.strip())
     write_hub_json(d)
     hubconf._cfg = None
-    print(_("  judgment points again: brunna llm setup (an API key or a local model) or brunna init --agent {names}; a "
-            "throwaway-only runtime can still handle mailbox requests, pinned on {points} beside a default with session state "
-            "(llm.points.<point>.runtime, mailbox.handler: propose). Codex gets a runtime of its own next "
-            "(docs/design/runtime-codex.md, step 1)", points=", ".join(runtime_ports.THROWAWAY_POINTS),
-            names="|".join(agent_presets())))
+    if len(said) > kept:
+        print(_("  judgment points again: brunna llm setup (an API key or a local model) or brunna init --agent {names}; a "
+                "throwaway-only runtime can still handle mailbox requests, pinned on {points} beside a default with session state "
+                "(llm.points.<point>.runtime, mailbox.handler: propose). Codex gets a runtime of its own next "
+                "(docs/design/runtime-codex.md, step 1)", points=", ".join(runtime_ports.THROWAWAY_POINTS),
+                names="|".join(agent_presets())))
     print(_("  this is one-way: going back to an earlier release doesn't put the old values back (the config repo's history "
             "has them)"))
     if mine:
@@ -397,7 +421,7 @@ def judgment_points_can_run() -> bool:
     import completion
     import runtime_ports
     return bool((completion.settings() or {}).get("use")) \
-        or "completion" in runtime_ports.capabilities(runtime_ports.default_name())
+        or ("completion" in runtime_ports.capabilities(runtime_ports.default_name()) and runtime_ports.login_missing() is None)
 
 
 def llm_modules_warning(names: list[str]) -> str | None:
@@ -634,11 +658,14 @@ def apply_agent(d: dict, choice: str, presets: dict[str, dict]) -> None:
         for m in (info.get("settings") or {}).get("modules") or {}:
             d.setdefault("modules", {})[m] = False
     if choice == "none":
-        d["runtime"] = {**(d.get("runtime") or {}), "default": "none"}
+        d["runtime"] = {**{k: v for k, v in (d.get("runtime") or {}).items() if k != "login"}, "default": "none"}
         return
     s = presets[choice].get("settings") or {}
     was = d.get("runtime") or {}
     d["runtime"] = {**was, **(s.get("runtime") or {})}
+    import runtime_ports
+    if d["runtime"].get("login") is not None and d["runtime"]["login"] not in runtime_ports.logins(d["runtime"].get("default")):
+        del d["runtime"]["login"]   # the agent before's
     if isinstance(was.get("installed"), list) and isinstance(d["runtime"].get("installed"), list):
         # the agents whose sessions the instance serves are added to, never replaced
         d["runtime"]["installed"] = list(dict.fromkeys([*was["installed"], *d["runtime"]["installed"]]))
@@ -702,7 +729,7 @@ def store_install(choice: str) -> bool:
         creds = runtime_ports.load(choice, ports=("auth",)).credentials()
     except runtime_ports.Unsupported:
         creds = []
-    if (missing := [c for c in creds if c.mode == "token" and not c.present]):
+    if (missing := [c for c in creds if c.mode == runtime_ports.default_login(choice) and not c.present]):
         print(_("The platform's own copy of {runtime} is installed and checked with its login for unattended runs, and "
                 "that isn't there yet ({label}). Later: brunna runtimes install {runtime}", runtime=choice,
                 label=missing[0].label))
@@ -720,8 +747,10 @@ def store_install(choice: str) -> bool:
 
 def agent_login_check() -> str | None:
     """One real request through the platform's own path (llm.py's login-check point): None when it answers."""
+    import runtime_ports
+    env = {**os.environ, "LLM_AUTH": "key"} if runtime_ports.default_login() == "key" else None
     r = subprocess.run([*hubconf.launch(BIN / "llm.py"), "run", "login-check"], input="Reply with just: ok",
-                       capture_output=True, text=True, timeout=180)
+                       capture_output=True, text=True, timeout=180, env=env)
     try:
         out = json.loads(r.stdout.strip().splitlines()[-1])
     except (ValueError, IndexError):
@@ -729,46 +758,144 @@ def agent_login_check() -> str | None:
     return out.get("llm_error") or (out.get("result") if out.get("is_error") else None)
 
 
-def agent_credential(choice: str, presets: dict[str, dict]) -> None:
-    """The chosen agent's credential for unattended runs. agent-hub never asks for, writes or shows one (it reads the saved file to start the tool): a token the
-    tool prints is made and saved by the owner, in their own shell, where the tool's terms want it; a tool's own login
-    runs in the terminal. init then checks the agent answers, with one real request."""
+NEEDS_LOGIN = ("agent", "completion", "stream")   # ports whose features start a run
+
+
+def without_login() -> str:
+    """What is off while the platform's agent has no login (the feature table doctor prints), and what isn't."""
+    import runtime_ports
+    off = [f for f, need in runtime_ports.features() if set(need) & set(NEEDS_LOGIN)]
+    return "\n".join([_("Without it these are off (notes are then not tidied up overnight: no digest, STATE.md and todo.md aren't updated, "
+                        "unless another model is set up with brunna llm setup):"), *(f"  - {f}" for f in off),
+                      _("These work without it: notes, letters between projects and their reminders, waking an open session, the status "
+                        "page, command jobs and services, backup.")])
+
+
+def budget_of(said) -> float | None:
+    """What was said as a day's budget in dollars, or None."""
+    import math
+    try:
+        v = float(str(said).strip().lstrip("$"))
+    except ValueError:
+        return None
+    return v if math.isfinite(v) and 0 < v < 10000 else None
+
+
+def agent_key(choice: str, info: dict, asked: bool = False, budget_said: str | None = None) -> bool:
+    """The agent's API key and the day's budget, both from the owner in this run; saved and runtime.login set, or nothing.
+    asked: the owner asked for it by name (brunna llm set-key --agent). budget_said: an answer a relaying agent brought, which
+    the owner still says yes to. True when the platform's agent logs in with a key now."""
+    import completion
+    import runtime_ports
+    import spending
+    cred, rt = info["credential"], runtime_ports._module(choice)
+    chosen, have = hubconf.get("runtime.login"), rt.has_key()
+    if chosen == "key" and have and not asked:
+        return True
+    if chosen == "token" or (not chosen and rt.auth_env("token", {})[0] is not None):
+        if not asked or not UI().consent("agent_login_change", _("{label}'s runs already have a login here. Use an API key instead, billed per use?",
+                                                                 label=info["label"]), enter=False):
+            return False
+    print(_("{label} runs brunna's background work with your own {name} (make one: {where}).", label=info["label"], name=cred["name"],
+            where=cred["where"]))
+    print(cred["note"])
+    print(without_login())
+    prompt = _("{name} (not shown; Enter alone = later with brunna llm set-key --agent): ", name=cred["name"])
+    ask_budget = _("the most these runs may cost in a day, in US dollars")
+    if not UI().acts:   # only the questions: nothing is written
+        UI().secret("agent_key", prompt)
+        UI().ask("agent_budget", ask_budget, "5")
+        return False
+    entered = False
+    if have and not asked:   # saved before, not in use: the owner's yes, never just that it is there
+        if not UI().consent("agent_key_saved", _("An API key is saved here and not in use. Use it, billed per use?"), enter=False,
+                            later="brunna llm set-key --agent"):
+            return False
+    else:
+        for _try in range(3):
+            value = UI().secret("agent_key", prompt)
+            if not value:
+                if have:   # Enter keeps the one that is there
+                    break
+                print(_("no key entered: the features above stay off. Later: brunna llm set-key --agent"))
+                return False
+            if not completion.is_key(value):
+                print(_("not a key (it holds a space, a line break or other than plain text); nothing written"), file=sys.stderr)
+            elif (why := rt.check_key(value)) and ("401" in why or "403" in why or rt.is_login_error(why)):
+                print(_("that key doesn't work: {why}", why=why[:200]), file=sys.stderr)
+            else:
+                if why:
+                    print(_("⚠️ the key could not be checked now: {why}", why=why[:200]))
+                print(_("written to {path} (600)", path=write_secret(cred["secret"], value)))
+                entered = True
+                break
+            if not UI().can_ask:
+                return False
+        else:
+            return False
+    d = read_hub_json()
+    llm = d.get("llm") if isinstance(d.get("llm"), dict) else {}
+    was = budget_of(((llm.get("budget") or {}) if isinstance(llm.get("budget"), dict) else {}).get("daily_usd"))
+    budget = was
+    if asked or entered or was is None:
+        if UI().can_ask:
+            said = UI().ask("agent_budget", ask_budget, f"{was or 5:g}")
+        else:   # relayed: what the answers say, and the owner's own yes to it
+            said = budget_said
+        if said is None or (budget := budget_of(said)) is None:
+            UI().needs_user("agent_budget", _("no day's budget: the key is saved and not used until brunna llm set-key --agent sets one ({said})",
+                                              said=said or "-"))
+            return False
+    if not UI().can_ask and not UI().consent("agent_budget_yes", _("Let {label}'s runs use your key, at most ${budget} a day?", label=info["label"],
+                                                                   budget=f"{budget:g}"), enter=False, later="brunna llm set-key --agent"):
+        UI().needs_user("agent_budget_yes", _("the key is saved and not used: brunna llm set-key --agent in a terminal turns it on"))
+        return False
+    print(_("It is counted by the tool's own estimate, and a run is stopped between its requests, so a day can go a little over. {limit}",
+            limit=cred["limit"]))
+    llm["budget"] = {**(llm.get("budget") if isinstance(llm.get("budget"), dict) else {}), "daily_usd": budget}
+    d["llm"] = llm
+    d["runtime"] = {**(d.get("runtime") or {}), "login": "key"}
+    write_hub_json(d)
+    hubconf._cfg = None
+    print(_("✓ {label}'s runs log in with your key, at most ${budget} a day", label=info["label"], budget=f"{budget:g}"))
+    for point, least in spending.never(budget):
+        print(_("⚠️ {point} may cost more than this budget ever leaves for it: it needs a little over ${least} a day (or a lower {settings} llm.budget.caps.{point})",
+                point=point, least=f"{least:.2f}"))
+    return True
+
+
+def agent_checked(choice: str, info: dict, paid: bool) -> None:
+    """The platform's checked copy of the agent, and one real request. paid: its checks are billed, so the owner says yes."""
+    if paid and not UI().consent("agent_first_check", _("Install brunna's checked copy of {label} now? Its checks make some small requests "
+                                                       "with your key (measured: under a dollar by the tool's estimate)", label=info["label"]),
+                                 later=f"brunna runtimes install {choice}"):
+        print(_("Later: brunna runtimes install {runtime}", runtime=choice))
+        return
+    if not store_install(choice):
+        return
+    if (why := agent_login_check()):
+        print(_("⚠️ {label} did not answer with that login: {reason}", label=info["label"], reason=why[:300]))
+    else:
+        print(_("✓ {label} answers", label=info["label"]))
+
+
+def agent_credential(choice: str, presets: dict[str, dict], args: dict | None = None) -> None:
+    """The chosen agent's credential for unattended runs: its API key, entered hidden by the owner (agent_key), or the tool's own
+    login, which runs in the terminal. init then checks the agent answers, with one real request."""
     if choice == "none":
         return
     info = presets[choice]
     cred = info.get("credential") or {}
-    made = cred.get("kind") == "own-token" and pathlib.Path(os.path.expanduser(cred["file"])).exists()
-    # nothing to log in with yet (install_agent said how to install it), unless the token is already there: the
-    # platform's own copy is installed and checked with it, whether or not the user has a copy
-    if not made and not agent_found(info) and UI().acts:
+    # nothing to log in with yet (install_agent said how to install it)
+    if cred.get("kind") != "api-key" and not agent_found(info) and UI().acts:
         return
-    if cred.get("kind") == "own-token":
-        f = pathlib.Path(os.path.expanduser(cred["file"]))
-        if not f.exists():
-            UI().needs_user("agent_token", _(
-                "{label} runs brunna's background work with a one-year token that you make and save yourself; "
-                "brunna reads that file only to hand the token to the official {label} it starts (needs {needs}). In a terminal on this computer (an AI app's own terminal "
-                "works too):\n  1. {command}\n     sign in when it asks; it prints the token\n  2. {store}\n     paste "
-                "the token, then Enter (nothing shows while you paste)\nThen: brunna init --agent {name}",
-                label=info["label"], needs=cred.get("needs", ""), command=" ".join(cred["command"]),
-                store=cred["store"], name=choice))
-            if not (UI().acts and UI().terminal and UI().consent("agent_token_saved", _("Saved it? Check that {label} "
-                                                                                     "answers now?",
-                                                                                     label=info["label"]))):
-                return
-            if not f.exists():
-                print(_("{file} isn't there yet. Later: brunna init --agent {name}", file=f, name=choice))
-                return
-        if not UI().acts:
-            return
-        # the login check runs the platform's own checked copy: installed and checked first, with the token just made
-        if not store_install(choice):
-            return
-        if (why := agent_login_check()):
-            print(_("⚠️ {label} did not answer with that login: {reason}", label=info["label"], reason=why[:300]))
-        else:
-            print(_("✓ {label} answers", label=info["label"]))
-    elif cred.get("kind") == "tool-login":
+    if cred.get("kind") == "api-key":
+        import runtime_ports
+        mine = agent_key(choice, info, budget_said=(args or {}).get("agent-budget"))
+        if UI().acts and runtime_ports.login_missing(choice) is None:   # the platform's copy doesn't need the user's
+            agent_checked(choice, info, mine and bool(runtime_ports.no_checked_copy(choice)))
+        return
+    if cred.get("kind") == "tool-login":
         if agent_found(info) and subprocess.run(cred["status"], env=agent_env(), capture_output=True).returncode == 0:
             print(_("✓ {label} is logged in", label=info["label"]))
             return
@@ -970,7 +1097,7 @@ INIT_FLAGS = ("--verbose", "--yes", "--no-launchd", "--dry-run", "--scheduler-on
 # written when init has made the instance, removed once its later steps are done: a re-run after a Ctrl-C finishes them
 INIT_UNFINISHED = hubconf.STATE / "init-unfinished"
 INIT_OPTIONS = ("--owner", "--timezone", "--workspace", "--modules", "--home", "--llm", "--llm-model", "--llm-base-url",
-                "--lang", "--agent", "--connect", "--answers")
+                "--lang", "--agent", "--agent-budget", "--connect", "--answers")
 
 
 def parse_lang(value: str) -> tuple[str, str] | None:
@@ -1150,7 +1277,7 @@ def current_agent(d: dict, presets: dict[str, dict]) -> str:
 # init --answers: what each answer is to init (its option), and the values it may take
 ANSWERS = {"language": "lang", "language_ui": None, "language_content": None, "home": "home", "owner": "owner",
            "timezone": "timezone", "workspace": "workspace", "agent": "agent", "modules": "modules", "llm": "llm",
-           "llm_base_url": "llm-base-url", "llm_model": "llm-model", "connect": "connect"}
+           "llm_base_url": "llm-base-url", "llm_model": "llm-model", "connect": "connect", "agent_budget": "agent-budget"}
 
 
 def module_names(value: str) -> set[str]:
@@ -1185,6 +1312,8 @@ def answers_problem(a) -> str | None:
             return _("{id} takes {choices}", id=k, choices=", ".join(allowed))
     if (problem := modules_problem(a.get("modules", ""))):
         return problem
+    if a.get("agent_budget") and budget_of(a["agent_budget"]) is None:
+        return _("agent_budget must be an amount in dollars a day")
     if a.get("language") == "split" and not (a.get("language_ui") and a.get("language_content")):
         return _("language split needs language_ui and language_content")
     return None
@@ -1264,7 +1393,7 @@ def init_for_agent(flags: set, args: dict, argv: list[str]) -> int:
         emit({"error": _("brunna is already set up here"), "next": f"{names.current('cli')} doctor"})
         return 1
     if exists:   # carrying on an init that stopped: only its later steps take answers
-        opts = {k: v for k, v in opts.items() if k in ("llm", "llm-model", "llm-base-url", "connect")}
+        opts = {k: v for k, v in opts.items() if k in ("llm", "llm-model", "llm-base-url", "connect", "agent-budget")}
     if "--questions" in flags:
         emit({"questions": init_questions({**opts, "_answers": answers}),
               "next": _("ask the owner the chat questions, write the answers to a file as one JSON object (each id and its answer), run "
@@ -1399,7 +1528,7 @@ def cmd_init(argv: list[str], transport=None) -> int:
     if created and not dry:
         # a failure doesn't block init: doctor will say judgment points have nowhere to run; agenthub llm setup later
         # a carried-on init (no agent question this time) logs in the agent hub.json already names
-        agent_credential(args.get("_agent") or current_agent(read_hub_json(), agent_presets()), agent_presets())
+        agent_credential(args.get("_agent") or current_agent(read_hub_json(), agent_presets()), agent_presets(), args)
         offer_mcp_registration(agent_presets())
         llm_setup(args)
         INIT_UNFINISHED.unlink(missing_ok=True)
@@ -1946,12 +2075,22 @@ def cmd_doctor(argv: list[str]) -> int:
         try:
             auth = runtime_ports.load(name, ports=("auth",))
             for c in auth.credentials():
-                if c.mode == "token":  # unattended calls like the schedule and the librarian use this by default
+                if c.mode in ("token", "key"):  # unattended calls like the schedule and the librarian use this by default
                     add("ok" if c.present else "bad", _("agent login ({label}): present", label=c.label) if c.present
                         else _("agent login ({label}): missing", label=c.label),
                         "" if c.present else c.renew)
                 elif not c.present:
                     add("warn", _("agent login ({label}): missing", label=c.label), c.renew)
+            import spending
+            if spending.held(name, runtime_ports.default_login(name)) and spending.budget() is not None:
+                done, reserved, _rows = spending.spent()
+                add("ok", _("agent runs are billed per use: ${done} of today's ${budget} used, ${reserved} held for runs under way", done=f"{done:.2f}",
+                            budget=f"{spending.budget():.2f}", reserved=f"{reserved:.2f}"))
+                for point, least in spending.never(spending.budget()):
+                    add("warn", _("{point} never fits the day's budget: it needs a little over ${least} a day", point=point, least=f"{least:.2f}"),
+                        _("raise {settings} llm.budget.daily_usd, or lower llm.budget.caps.{point}", point=point))
+                for who, w in spending.waiting().items():
+                    add("warn", _("{who} waits to run: {why}", who=who, why=str(w.get("why", ""))[:300]), "")
         except runtime_ports.Unsupported:
             pass   # no agent login to check: the feature table above already said which features are off
         except Exception as e:
@@ -2474,8 +2613,9 @@ def write_secret(name: str, value: str) -> pathlib.Path:
     d.mkdir(parents=True, exist_ok=True)
     d.chmod(0o700)
     f = d / name
-    tmp = f.with_name(f.name + ".tmp")
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    import secrets
+    tmp = f.with_name(f".{f.name}.{secrets.token_hex(4)}.tmp")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(value.strip() + "\n")
     tmp.replace(f)
@@ -2487,7 +2627,8 @@ def default_llm_choice(runtime: str | None = None) -> str:
     Ollama models → Ollama; neither = leave unset for now. `runtime`: the one a hub.json not written yet will name."""
     import provider_ollama
     import runtime_ports
-    if "completion" in runtime_ports.capabilities(runtime or runtime_ports.default_name()):
+    name = runtime or runtime_ports.default_name()
+    if "completion" in runtime_ports.capabilities(name) and runtime_ports.login_missing(name) is None:
         return "runtime"
     return "ollama" if provider_ollama.list_models({}) else "none"
 
@@ -2518,7 +2659,8 @@ def llm_setup(args: dict) -> int:
                ("none", _("none: not now (until one is set up: no nightly digest, and STATE.md and todo.md are not "
                           "updated)"))]
     if "completion" in runtime_ports.capabilities(rt):   # else nothing to offer as runtime: no coding agent, or no such interface
-        options.insert(0, ("runtime", _("runtime: through your AI agent's own login ({runtime})", runtime=rt)))
+        options.insert(0, ("runtime", _("runtime: through your AI agent ({runtime})", runtime=rt) if runtime_ports.login_missing(rt) is None else
+                           _("runtime: through your AI agent ({runtime}), once it has a login (brunna llm set-key --agent)", runtime=rt)))
     logins = llm_logins(rt, args.get("_installed"))
     for n, info in logins.items():
         options.insert(len(options) - 1, (n, _("{name}: {label}, with your own login for it", name=n, label=info["label"])))
@@ -2570,8 +2712,9 @@ def llm_setup(args: dict) -> int:
             print(_("⚠️ {runtime} can't make brunna's decisions (it has no completion interface): they will fail. "
                     "Pick another provider: brunna llm setup", runtime=rt))
         else:
-            print(_("brunna's decisions go through {runtime}'s own login (the model for each: schedulectl models)",
-                    runtime=rt))
+            print(_("brunna's decisions go through {runtime} (the model for each: schedulectl models)", runtime=rt))
+            if (why := runtime_ports.login_missing(rt)):
+                print(_("⚠️ not yet: {why}", why=why))
         return 0
     if not interactive and not args.get("llm-model"):   # stop before a key is asked for nothing
         print(_("When running non-interactively, give the model with --llm-model <name> (or run brunna llm setup "
@@ -2683,8 +2826,27 @@ def cmd_llm(argv: list[str]) -> int:
         return llm_setup(opts)
     if argv[:1] == ["usage"]:
         return llm_usage(argv[1:])
+    if argv == ["set-key", "--agent"]:
+        import runtime_ports
+        presets = agent_presets()
+        choice = runtime_ports.default_name()
+        info = presets.get(choice) or {}
+        if (info.get("credential") or {}).get("kind") != "api-key":
+            print(_("{name} takes no API key from brunna", name=choice), file=sys.stderr)
+            return 2
+        init_dialogue.use(init_dialogue.Terminal())
+        if not UI().can_ask:
+            print(_("brunna llm set-key --agent asks for the key: run it in a terminal"), file=sys.stderr)
+            return 2
+        if not agent_key(choice, info, asked=True):
+            return 1
+        if subprocess.run([str(BIN / "commit-hub-files.sh"), "feat(config): the platform's agent runs log in with an API key",
+                           hubconf.config_path().name]).returncode != 0:
+            print(_("warning: {file} was written, but the commit/push failed; it needs a manual fix", file=hubconf.config_path().name))
+        agent_checked(choice, info, bool(runtime_ports.no_checked_copy(choice)))
+        return 0
     if argv[:1] != ["set-key"] or len(argv) != 2:
-        print(_("usage: brunna llm setup | set-key <provider> (key from stdin) | health | usage [--days <n>]"), file=sys.stderr)
+        print(_("usage: brunna llm setup | set-key <provider> (key from stdin) | set-key --agent | health | usage [--days <n>]"), file=sys.stderr)
         return 2
     conf = ((completion.settings() or {}).get("providers") or {}).get(argv[1])
     if not conf:
@@ -2727,7 +2889,8 @@ def cmd_land(argv: list[str]) -> int:
     for p in left:
         print(_("✗ {path} is still there after the move to {shared} (see above): brunna doctor shows it until it is resolved",
                 path=p, shared=hubconf.shared()), file=sys.stderr)
-    steps = [[*hubconf.launch(BIN / "registry.py"), "check", *argv],
+    steps = [[*hubconf.launch(BIN / "agenthub"), "config", "migrate"],
+             [*hubconf.launch(BIN / "registry.py"), "check", *argv],
              [*hubconf.launch(BIN / "render-project-settings.py"), "--only", hubconf.hub_project()]]
     if (w := upgrade.cli_wrapper()) and upgrade.own_wrapper(w) is not None:
         steps.append([*hubconf.launch(BIN / "agenthub"), "install-cli", "--dir", str(w.parent)])

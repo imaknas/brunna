@@ -414,8 +414,9 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   tool's `bin/conformance_<runtime>.py`) and promoted or held back with an alert, and the user's own copy is raised to it;
   `brunna runtimes` shows what runs and what was checked. The claude module (`modules/claude.yaml`): `claude-login`
   (hourly, `bin/check-claude-login.py`) actually makes a request
-  and checks expiry dates, alerting when it is broken or about to expire; the platform's `claude -p` (`llm.py`) uses the
-  headless token by default, and only a job whose registry entry says `connectors: true` (it needs claude.ai
+  and checks expiry dates, alerting when it is broken or about to expire; the platform's `claude -p` (`llm.py`) logs in as
+  brunna.json `runtime.login` says (the owner's API key, held to a daily budget by `bin/spending.py`; every run is counted by
+  `bin/usage_log.py`), and only a job whose registry entry says `connectors: true` (it needs claude.ai
   connectors) uses the subscription login
 - **The merge gate for parallel sessions** `bin/merge-branch` (run in the session's own worktree): rebase → the
   registry's `runtime.test` → fast-forward main (the main checkout) → push only when the registry says

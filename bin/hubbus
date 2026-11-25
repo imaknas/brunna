@@ -2487,7 +2487,7 @@ def received_line(c, r) -> None:
                 project=now_named(r["to_project"]), id=r["id"] if EVENT_ID.match(r["id"]) else "?")})
 
 
-def run_handler(c, proj, ws, rows) -> None:
+def run_handler(c, proj, ws, rows) -> bool:
     """Triage, the last resort: a headless agent in that project (templates/prompts/mailbox.md, filled by prompts.render;
     judgment point mailbox-escalation) answers what it can and asks the owner the rest. It takes nothing: via triage, once
     per letter, and what it leaves stays open for sessions. One run per sender, so a crafted letter can't close another
@@ -2495,16 +2495,16 @@ def run_handler(c, proj, ws, rows) -> None:
     (MAILBOX_LETTERS: run_refusal). The budget stops the run, not the word to the sender."""
     rows = [r for r in rows if not has_via(c, r["id"], "triage") and may_start(c, r)]
     if not rows:
-        return
+        return False
     if (why := propose_refusal(proj)):
         propose_refused(c, proj, why)
-        return
+        return False
     log_once(f"propose-refused-{proj}", "")
     # one at a time per project, whichever of its names a handler still running was started under
     for name in own_names(proj):
         try:
             if json.loads((AGENT_JOBS / f"mailbox-{name}" / "status.json").read_text()).get("state") == "running":
-                return  # these letters are dispatched next round
+                return False  # these letters are dispatched next round
         except (OSError, ValueError):
             pass
     if runs_today(c, proj) >= DAILY_RUNS:
@@ -2514,7 +2514,7 @@ def run_handler(c, proj, ws, rows) -> None:
         c.execute("COMMIT")
         log_once(f"daily-runs-{proj}", _("{project}: already dispatched {max} {max:time|times} today; {n} {n:letter waits|letters "
                                          "wait} (visible on the status page)", project=proj, max=DAILY_RUNS, n=len(rows)))
-        return
+        return False
     log_once(f"daily-runs-{proj}", "")
     sender = sender_of(rows[0])
     rows = [r for r in rows if sender_of(r) == sender]
@@ -2523,7 +2523,7 @@ def run_handler(c, proj, ws, rows) -> None:
     why = start_handler(proj, ws, rows)
     if why:
         start_failed(c, proj, rows, why)
-        return
+        return False
     c.execute("BEGIN IMMEDIATE")
     claim(c, rows, "triage", run=run)
     for r in rows:
@@ -2533,6 +2533,7 @@ def run_handler(c, proj, ws, rows) -> None:
     log(_("{project}: dispatched an agent (propose) for {n} {n:letter|letters} ({ids}, {run})", **said)
         if (hubconf.get("mailbox") or {}).get("handler") == "propose" else
         _("{project}: dispatched a headless agent for {n} {n:letter|letters} ({ids}, {run})", **said))
+    return True
 
 
 def propose_refusal(proj) -> str | None:
@@ -3095,6 +3096,31 @@ def end_route(c, r, st, proj, alive) -> bool:
     return same
 
 
+def held_runs() -> dict:
+    """Why a fork or a triage couldn't start now where runs are billed per use (bin/spending.py): no login, no budget, too little
+    of it left. Empty where they aren't. kept: whether a letter was held back this tick for it."""
+    import spending
+    triage = "mailbox-propose" if (hubconf.get("mailbox") or {}).get("handler") == "propose" else "mailbox-escalation"
+    kinds = {k: p for k, p in (("triage", triage), ("fork", FORK_POINT)) if spending.terms(p)}
+    if not kinds:
+        return {}
+    return {"kinds": kinds, "kept": None, **{k: spending.blocked(p) for k, p in kinds.items()}}
+
+
+def one_a_tick(held: dict) -> None:
+    """Where runs are held, one starts a tick: the next one is judged once this one holds what it may cost."""
+    for k in held.get("kinds", ()):
+        held[k] = held[k] or _("another letter's run has just started")
+
+
+def keep_letter(held: dict, kind: str) -> bool:
+    """Whether this kind of run can't start now; the letter then waits, and why is remembered for the status page."""
+    if not held.get(kind):
+        return False
+    held["kept"] = held["kept"] or held[kind]
+    return True
+
+
 def dispatch(c, rt=None, wakes: list | None = None) -> int:
     """The platform handles requests/questions nobody took (see the file header; each step's number is the design's,
     mailbox-session-first.md "Each tick"). Returns the number of letters still waiting for a hook. wakes: what to send later goes
@@ -3121,6 +3147,7 @@ def dispatch(c, rt=None, wakes: list | None = None) -> int:
         # a fork or triage started now would fail and use up the letter's one chance: they wait for a checked copy
         log_once("dispatch-no-copy", _("mailbox dispatch routes letters to sessions but starts no agent run: {e}", e=no_runs)
                  if no_runs else "")
+    held = held_runs() if ours and no_runs is None else {}
     try:
         live = rt.live_sessions()
         opened = rt.open_sessions() if callable(getattr(rt, "open_sessions", None)) else {}
@@ -3269,7 +3296,11 @@ def dispatch(c, rt=None, wakes: list | None = None) -> int:
                 hold(c, r)
                 waiting += 1
                 continue
+            if keep_letter(held, "fork" if fork else "triage"):   # it waits: the letter's one run isn't spent on a refusal
+                waiting += 1
+                continue
             if fork:
+                one_a_tick(held)
                 resume(c, r, sid, session_cwd(c, sid, ws) or ws, rt, ws, prompt=None if conversation else DELEGATE_PROMPT)
                 continue
             if not r["delivered"] and mcp:
@@ -3278,8 +3309,10 @@ def dispatch(c, rt=None, wakes: list | None = None) -> int:
             delegate.append(r)
         # agent-hub's letters too (they used to be left for its dedicated session; with nobody typing, nobody took
         # them, m10261706)
-        if delegate:
-            run_handler(c, proj, ws, delegate)
+        if delegate and keep_letter(held, "triage"):   # a fork of this project's took the tick
+            waiting += len(delegate)
+        elif delegate and run_handler(c, proj, ws, delegate):
+            one_a_tick(held)
 
     for proj, ws in projects().items():
         try:
@@ -3288,6 +3321,10 @@ def dispatch(c, rt=None, wakes: list | None = None) -> int:
         except Exception as e:   # the later projects' mail doesn't wait on this one
             waiting += 1
             dispatch_failed(c, proj, e)
+    if held:
+        import spending
+        if spending.note_waiting("mailbox", held["kept"]) and held["kept"]:
+            log(_("letters wait: {reason}", reason=held["kept"]))
     if wakes is None:
         t.send(c)
     else:

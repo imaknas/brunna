@@ -184,7 +184,7 @@ PAGE = """<!doctype html><meta charset="utf-8"><meta name="viewport" content="wi
 <title>brunna</title><style>body{{font:16px system-ui;max-width:36em;margin:3em auto;padding:0 1em}}
 input{{font:inherit;width:100%;padding:.4em;margin:.6em 0}}button{{font:inherit;padding:.4em 1.2em}}</style>
 <h1>brunna</h1><form method="post" action="{action}"><label>{prompt}<input type="password" name="value"
-autocomplete="off" autofocus required></label><button>{save}</button></form><p>{note}</p>"""
+autocomplete="off" autofocus></label><button>{save}</button></form><p>{note}</p>"""
 
 
 def secret_page(prompt: str, wait: int = WAIT) -> str | None:
@@ -225,10 +225,9 @@ def secret_page(prompt: str, wait: int = WAIT) -> str | None:
                 return self.reply(404, "")
             n = min(int(self.headers.get("Content-Length") or 0), 65536)
             value = (urllib.parse.parse_qs(self.rfile.read(n).decode(errors="replace")).get("value") or [""])[0]
-            if value.strip():
-                got["value"] = value.strip()
+            got["value"] = value.strip() or None   # nothing entered is an answer: later
             self.reply(200, "<!doctype html><meta charset=utf-8><p>" + html.escape(
-                _("Saved. You can close this page and go back to your chat.") if got else _("Nothing was entered.")))
+                _("Saved. You can close this page and go back to your chat.") if got["value"] else _("Nothing was entered.")))
 
     server = HTTPServer(("127.0.0.1", 0), Handler)
     port = server.server_address[1]

@@ -41,6 +41,15 @@ class Isolation(Temp):
         self.assertEqual(got["state"], "error")
         self.assertIn("nosuch", got["reason"], "past the isolation proof, to the check lookup")
 
+    def test_a_child_s_world_says_which_check_it_is(self):
+        """What the runner's world says, the child's says too: an adapter's enter() looks at it."""
+        seen = []
+        with mock.patch.object(conformance, "checks", lambda r: [Check("c", "agent", "safety", lambda w: (seen.append(w.check), Outcome("pass"))[1])]), \
+                mock.patch.object(conformance.World, "isolated", lambda self: None), \
+                mock.patch.object(conformance, "adapter", lambda r: mock.Mock(enter=lambda w: seen.append(w.check))), redirect_stdout(io.StringIO()):
+            conformance.child("fake", "c", str(self.world.root), "")
+        self.assertEqual(seen, ["c", "c"])
+
     def test_a_child_outside_its_world_runs_nothing(self):
         for var in ("STATE", "SECRETS", "CONFIG", "DATA"):
             with self.subTest(left_out=var):

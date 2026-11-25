@@ -21,6 +21,7 @@ import math
 import os
 import pathlib
 import secrets
+import time
 
 
 def now() -> str:
@@ -135,6 +136,14 @@ def alive(pid) -> bool:
     return True
 
 
+def booted() -> float:
+    """When this machine last started (epoch seconds), as near as its clocks say; 0 when they don't."""
+    for clock in ("CLOCK_BOOTTIME", "CLOCK_MONOTONIC_RAW"):   # Linux; macOS (counts sleep)
+        if (c := getattr(time, clock, None)) is not None:
+            return time.time() - time.clock_gettime(c)
+    return 0.0
+
+
 DEAD_AFTER_S = 2 * 86400   # no run takes this long: its pid is another process's now
 CLAIM_S = 60               # a claim this old is of a process killed while it wrote the row
 
@@ -150,10 +159,18 @@ def sweep(log: pathlib.Path, over: bool = False) -> None:
         try:
             if f.name.startswith(".") or f.suffix not in (".json", ".claim") or f.is_symlink() or not f.is_file():
                 continue
-            age = datetime.datetime.now().timestamp() - f.stat().st_mtime
-            row = json.loads(f.read_text(errors="replace"))
+            at = f.stat().st_mtime
+            age = datetime.datetime.now().timestamp() - at
+            try:
+                row = json.loads(f.read_text(errors="replace"))
+            except ValueError:   # cut short (a full disk, power gone): nothing in it to count
+                if age > CLAIM_S:
+                    f.unlink()
+                continue
             if not isinstance(row, dict):
                 row = {}
+            if at < booted() - 60:   # from before this start of the machine: its pid is another's
+                row["pid"] = 0
             if f.suffix == ".claim":
                 if age < CLAIM_S and not over:
                     continue
@@ -169,6 +186,7 @@ def sweep(log: pathlib.Path, over: bool = False) -> None:
 def _killed(row: dict) -> dict:
     reserved = row.get("reserved_usd")
     return ({k: row[k] for k in ("ts", "point", "provider", "model", "billing", "project") if k in row}
+            | ({"ts": now()} if reserved is not None else {})   # held for it until now: it counts on this day
             | {"input_tokens": None, "output_tokens": None, "cost_usd": reserved, "stop": "no-answer"}
             | ({"cost_assumed": True} if reserved is not None else {})
             | ({"cost_unknown": True} if reserved is None and row.get("billing") == "metered" and row.get("gated") else {}))

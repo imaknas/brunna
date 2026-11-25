@@ -47,6 +47,10 @@ class Check(unittest.TestCase):
         (self.home / ".claude").mkdir()
         self.token = self.home / ".claude" / "headless-oauth-token"
         self.creds = self.home / ".claude" / ".credentials.json"
+        import runtime_claude   # an install on the token (config migrate writes that down)
+        p = mock.patch.object(runtime_claude, "_login_chosen", lambda: "token")
+        p.start()
+        self.addCleanup(p.stop)
         env = mock.patch.dict(os.environ, {"HOME": str(self.home), "AGENT_HUB_LANG_UI": "zh-Hant"})
         env.start()
         self.addCleanup(env.stop)

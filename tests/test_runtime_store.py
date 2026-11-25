@@ -169,6 +169,7 @@ class UpdateRuntimes(Temp):
         self.alerts = []
         for p in (mock.patch.object(self.m, "HELD", self.tmp / "held.json"),
                   mock.patch.object(self.m.alert, "once", lambda key, problems, ok, ids=None: self.alerts.append((key, problems))),
+                  mock.patch.object(self.m.runtime_ports, "login_chosen", lambda n: True),
                   mock.patch.object(self.m.conformance, "record", lambda doc: self.tmp / "r.json")):
             p.start()
             self.addCleanup(p.stop)
@@ -179,6 +180,17 @@ class UpdateRuntimes(Temp):
     def doc(self, state="pass", version=None):
         return {"runtime": "claude", "version": version or self.latest, "checks": {
             "a": {"port": "agent", "kind": "safety", "state": state, "reason": "leaked" if state != "pass" else ""}}}
+
+    def test_no_login_chosen_is_off_and_no_failure(self):
+        """Nothing to check a copy with: nothing is downloaded, nobody is alerted, until the owner chooses one."""
+        asked = []
+        self.dist.latest = lambda: asked.append(1) or self.latest
+        with mock.patch.object(self.m.runtime_ports, "login_chosen", lambda n: False), \
+                mock.patch.object(self.m.runtime_ports, "login_missing", lambda n: "no login chosen"):
+            had, promoted, said = self.m.first_or_new("claude", self.dist, False)
+        self.assertEqual((had, promoted, asked), (True, False, []))
+        self.assertIn("no login chosen", said)
+        self.assertFalse([p for _k, p in [(a[0], a[1]) for a in self.alerts] if p])
 
     def test_first_install_then_nothing_new_then_a_new_version(self):
         with mock.patch.object(self.m.conformance, "run", lambda r, exe, only=None: self.doc()):

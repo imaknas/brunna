@@ -17,6 +17,7 @@ jobs:
   found_exit: true   # it sends what it finds (alert-routing.md step 3)
 secrets:
 - name: claude-headless-token
+  login: token
   path: ~/.claude/headless-oauth-token
   max_age_days: 365
   warn_days: 30

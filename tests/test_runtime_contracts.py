@@ -738,7 +738,13 @@ class AuthContract(unittest.TestCase):
 
     def test_missing_token_shows_as_not_present(self):
         def check(m, fx):
-            self.assertFalse(next(c for c in m.credentials() if c.mode == "token").present)
+            # none chosen yet (an agent that has more than one): said as that, under no login's name
+            mine = [c for c in m.credentials() if c.mode == "token" or (c.mode is None and not c.present)]
+            self.assertTrue(mine)
+            self.assertFalse(any(c.present for c in mine))
+            if callable(getattr(m, "_login_chosen", None)):
+                with mock.patch.object(m, "_login_chosen", lambda: "token"):
+                    self.assertFalse(next(c for c in m.credentials() if c.mode == "token").present)
         self.each(False, check)
 
     def test_login_errors_told_apart(self):

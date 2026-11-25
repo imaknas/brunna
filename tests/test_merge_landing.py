@@ -60,9 +60,11 @@ class CmdLand(unittest.TestCase):
         return rc, calls[:-1] if marked else calls
 
     def test_order_and_arguments(self):
-        rc, calls = self.land([0, 0, 0, 0], ["--rebuild"])
+        rc, calls = self.land([0, 0, 0, 0, 0], ["--rebuild"])
         self.assertEqual(rc, 0)
-        self.assertEqual(len(calls), 4)
+        self.assertEqual(len(calls), 5)
+        self.assertEqual(calls[0][-2:], ["config", "migrate"], "the settings are brought in line before they are read")
+        calls = calls[1:]
         self.assertEqual(calls[0][-3:], [str(BIN / "registry.py"), "check", "--rebuild"])
         self.assertEqual(calls[1][-3:], [str(BIN / "render-project-settings.py"), "--only",
                                          self.mod.hubconf.hub_project()])
@@ -71,10 +73,10 @@ class CmdLand(unittest.TestCase):
         self.assertEqual([c[-2:] for c in calls[2:]], [["init", "--scheduler-only"], ["config", "apply"]])
 
     def test_both_run_and_the_worse_code_wins(self):
-        for codes, want in (([1, 0, 0, 0], 1), ([0, 2, 0, 0], 2), ([3, 1, 0, 0], 3), ([0, 0, 0, 4], 4)):
+        for codes, want in (([1, 0, 0, 0, 0], 1), ([0, 2, 0, 0, 0], 2), ([0, 3, 1, 0, 0], 3), ([0, 0, 0, 0, 4], 4)):
             with self.subTest(codes=codes):
                 rc, calls = self.land(codes)
-                self.assertEqual(len(calls), 4, "every step runs even when one failed")
+                self.assertEqual(len(calls), 5, "every step runs even when one failed")
                 self.assertEqual(rc, want)
 
     def test_is_a_command(self):

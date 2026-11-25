@@ -126,6 +126,8 @@ def analyze(stats: dict) -> dict:
     if (off := llm_ready.unsupported("reflect-week")):
         # no model to call: the analysis is off and the report says why (the statistics are still there)
         return {"error": _("the analysis is off: {reason}; the statistics are not affected", reason=off), "meta": meta}
+    if (why := llm_ready.held_up("reflect-week")):
+        return {"held": True, "error": _("the analysis is off: {reason}; the statistics are not affected", reason=why), "meta": meta}
     d = muninn_digests(stats["week"])
     if d and d["sessions"]:
         meta.update(source="stats+digests", digests=len(d["sessions"]), withheld=d.get("withheld", 0),

@@ -33,23 +33,27 @@ With a model set up (`brunna llm setup`) and the scheduler running, the next mor
 in the instance's data directory. Without a model they are not written: the nightly tidy-up is off, and `brunna doctor`,
 the status page and `brunna run brunna/librarian` say so, with the reason, until you set one up.
 
-## Claude Code's token
+## Claude Code's API key
 
-brunna runs Claude Code for its background work (the nightly tidy-up, agents sent to letters) with a one-year token
-that you make and keep yourself; brunna has no sign-in of its own. It reads that file to hand the token to the official
-Claude Code it starts (and to a throwaway folder for the checks of a new version), never prints it, and the default
-backup doesn't include it. `brunna init` shows these two steps when the token isn't there yet. In a terminal on the computer that runs
-brunna (an AI app's own terminal works too):
+brunna runs Claude Code for its background work (the nightly tidy-up, agents sent to letters, scheduled agent jobs) with
+your own Anthropic API key. Make one in the [Claude Console](https://platform.claude.com/settings/keys); `brunna init` asks for it
+(not shown) and for the most its runs may cost in a day. Skip it and init lists what stays off; enter it later with
+`brunna llm set-key --agent`.
 
-1. `claude setup-token`: sign in when it asks; it prints the token.
-2. Save it, pasting the token and pressing Enter (nothing shows while you paste):
-
-   ```bash
-   (umask 077; read -rs t && printf '%s\n' "$t" > ~/.claude/headless-oauth-token)
-   ```
-
-Then `brunna init --agent claude` checks that Claude Code answers with it. A year later, `brunna doctor` and an
-alert say it is about to expire; do the same two steps again.
+- **Cost.** Anthropic bills the key for what is used; a Claude plan doesn't cover it. Max, Ultra and Team plans include
+  [monthly API credits](https://support.claude.com/en/articles/17154008), which you claim by linking a Console organization; the key has to
+  be that organization's. Whether they cover runs another program starts isn't said there.
+- **The budget.** Each run reserves what it may cost before it starts and is stopped there; the nightly tidy-up has its share
+  first; what doesn't fit waits, a letter or a job's turn with it (the weekly report's analysis is skipped that week). It counts by the tool's own estimate and stops between
+  requests, so a day can go a little over: set a spend limit in the Console too. `brunna llm usage` shows what was used.
+- **What one run may cost** is set by kind of work (an agent run: $0.25 fast, $1 ordinary, $4 strong, such as folding old notes; an answer:
+  $0.10, $0.50, $2); `llm.budget.caps.<point>` in `brunna.json` changes one. Work whose cap the day's budget never has room for is named by
+  `brunna doctor`: folding old notes (an optional module) needs a little over $6.67 a day, or a lower cap.
+- **A project's own agent jobs and model calls** need your leave per project (`metered_models: true` in its registry entry).
+- **Lending the conversation to your assistant** doesn't run on a key yet.
+- **The key** is in brunna's secrets folder, read only by you, and in the encrypted backup. Claude Code is handed it on a pipe: what a run
+  starts doesn't see it. brunna itself uses it once an hour to ask Anthropic whether it works (its list of models, which costs nothing), and
+  puts it in a throwaway folder for the checks of a new version. A run with a shell in a project that isn't sandboxed runs as you and could read the file.
 
 ## Requirements
 
@@ -60,7 +64,7 @@ alert say it is about to expire; do the same two steps again.
   don't depend on whichever `python3` is on PATH.
 - **A model for the platform's judgment calls**, for the core payoff: the nightly digest, the upkeep of each `STATE.md`,
   and the items in `todo.md` (which are read from the to-do sections the model keeps in `STATE.md`) are all written by
-  a model. It can be your coding agent's own login, an Anthropic or OpenAI-compatible API key, or a local Ollama; pick
+  a model. It can be your coding agent (with its key), an Anthropic or OpenAI-compatible API key, or a local Ollama; pick
   one with `brunna llm setup` (`brunna init` asks). Without one, the platform still runs: project memory folders,
   the mailbox, the scheduler and its jobs, the status page and the project registry all work, judgment calls fail and
   say why, nothing is written overnight, and init leaves the modules that only do model work (consolidation, reflection) off.

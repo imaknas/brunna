@@ -99,6 +99,10 @@ class Check(unittest.TestCase):
         token.write_text("x")
         t = time.time() - 10 * 86400
         os.utime(token, (t, t))
+        import runtime_claude   # an install on the token (config migrate writes that down)
+        p = mock.patch.object(runtime_claude, "_login_chosen", lambda: "token")
+        p.start()
+        self.addCleanup(p.stop)
         env = mock.patch.dict(os.environ, {"HOME": str(self.home), "AGENT_HUB_LANG_UI": "zh-Hant"})
         env.start()
         self.addCleanup(env.stop)
@@ -136,7 +140,7 @@ class Check(unittest.TestCase):
         self.assertEqual((code, self.asked, self.sent), (0, ["token"], []))
         sub = self.m.runtime_ports.load(ports=("auth",)).credentials()[0].name
         self.assertIn(ui("{name}: not checked: no registry job declares connectors: true, and everything else the "
-                         "platform runs uses the headless token", name=sub), out)
+                         "platform runs uses its own login", name=sub), out)
 
     def test_no_registry_index_checks_it_anyway(self):
         self.jobs = None
@@ -210,6 +214,35 @@ class Check(unittest.TestCase):
         store_fixture.stand_in(self)
         self.run_check()
         self.assertEqual(len(self.sent), 1, "the third failure in a row, counted across the run that asked nothing")
+
+    def test_a_key_is_asked_about_whatever_the_copy(self):
+        """No run is made for it: with no checked copy it is still asked, a broken one is told, a fixed one is over, and a
+        service that doesn't answer is counted."""
+        import runtime_claude
+        self.jobs = []
+        key = runtime_claude.Credential(name="API key", label="API key", mode="key", present=True, renew="r", path="/k")
+        said = ["HTTP 401:invalid x-api-key"]
+        with mock.patch.object(runtime_claude, "credentials", lambda: [key]), mock.patch.object(runtime_claude, "check_login", lambda m: said[0]):
+            store_fixture.empty(self)
+            self.run_check()
+            self.assertEqual(len(self.sent), 1)
+            said[0] = None
+            self.run_check()
+            self.assertEqual(len(self.sent), 2, "it works again: the alert is over")
+            said[0] = "HTTP 529:overloaded"
+            for _ in range(2):
+                self.run_check()
+            self.assertEqual(len(self.sent), 2)
+            self.run_check()
+            self.assertEqual(len(self.sent), 3, "the third in a row")
+
+    def test_nothing_chosen_yet_is_no_alert(self):
+        import runtime_claude
+        (self.home / ".claude" / "headless-oauth-token").unlink()
+        self.jobs = []
+        with mock.patch.object(runtime_claude, "_login_chosen", lambda: None):
+            code, _out = self.run_check()
+        self.assertEqual((code, self.sent), (0, []))
 
     def test_when_the_last_connector_job_goes_the_open_alert_is_resolved(self):
         self.answers[None] = "Login expired · Please run /login"

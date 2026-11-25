@@ -42,5 +42,6 @@
  "{project}: a restore didn't finish; run brunna state restore {project} to finish it (left alone until then)": "{project}:有一次還原沒做完;執行 brunna state restore {project} 把它做完(在那之前不動這個專案)",
  "{project}: nothing more is written in the memory copy {path} ({why}); the checkpoint is not advanced, left for the next night": "{project}:記憶副本 {path} 不再寫任何東西({why});檢查點不前進,留到下一晚",
  "{project}: its notes are not tidied up: the librarian can't write in the memory copy {path} ({why})": "{project}:它的筆記沒有整理:librarian 沒辦法寫記憶副本 {path}({why})",
- "{project}: the librarian can write in its memory copy again": "{project}:librarian 又可以寫它的記憶副本了"
+ "{project}: the librarian can write in its memory copy again": "{project}:librarian 又可以寫它的記憶副本了",
+ "{project}: not now: {reason}; the checkpoint stays, the notes wait": "{project}:現在不行:{reason};checkpoint 不動,筆記等著"
 }

@@ -227,5 +227,6 @@
  "Work": "工作",
  "Runs": "次數",
  "≈${amount} (not billed per use)": "≈${amount}(不按次計費)",
- "{n} with no cost given": "{n} 次沒有回報花費"
+ "{n} with no cost given": "{n} 次沒有回報花費",
+ "{n} {n:thing waits|things wait} to run ({names}): {why}": "{n} 件在等著執行({names}):{why}"
 }

@@ -117,7 +117,7 @@ Everything it does, in detail: [docs/features.md](docs/features.md).
 | What | Options |
 |---|---|
 | Your AI agent | See [below](#what-you-get-by-agent). Any CLI agent with a headless mode, or one that speaks the [Agent Client Protocol](https://agentclientprotocol.com/), can also handle mailbox requests in a throwaway copy, beside Claude Code |
-| The model behind brunna's decisions | Your agent's own login, Anthropic, any OpenAI-compatible API, or a local Ollama (`brunna llm setup`) |
+| The model behind brunna's decisions | Your agent, Anthropic, any OpenAI-compatible API, or a local Ollama (`brunna llm setup`) |
 | The computer | macOS or Linux. An always-on machine is best; a laptop works |
 
 No agent and no model yet? Notes, schedules and the mailbox still work, the nightly tidy-up doesn't; `brunna doctor`
@@ -142,8 +142,8 @@ to you there instead, so you answer from your phone. [How people use brunna](doc
 - Everything stays on your computer: your settings, notes and keys are in `~/.brunna`, never in the repo.
 - Model calls go only to the provider you chose. The weekly reflection sends statistics, never conversation
   text; with the assistant module on, also the session summaries a model on your computer wrote.
-- brunna has no sign-in for Claude: you make and save the token yourself. brunna reads that file to hand the token to
-  the official Claude Code it starts, and never prints it.
+- brunna has no sign-in for Claude. Its background runs use your own Anthropic API key, within a daily budget you set; they are the official Claude Code's, and
+  what a run starts doesn't see the key ([how](docs/install.md#claude-codes-api-key)).
 - Vulnerabilities: [SECURITY.md](SECURITY.md).
 
 ## Set up through your agent

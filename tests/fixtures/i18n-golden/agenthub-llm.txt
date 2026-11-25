@@ -2,7 +2,7 @@ $ agenthub llm
 [exit 2]
 --- stdout
 --- stderr
-用法:brunna llm setup | set-key <provider>(key 從 stdin)| health | usage [--days <n>]
+用法:brunna llm setup | set-key <provider>(key 從 stdin)| set-key --agent | health | usage [--days <n>]
 
 $ agenthub llm set-key nosuch
 [exit 2]
@@ -62,5 +62,6 @@ llm.providers.anthropic.key 不是 {"secret": 檔名}(用環境變數的不用�
 $ agenthub llm setup --llm runtime --yes    # runtime claude
 [exit 0]
 --- stdout
-brunna 的判斷透過 claude 自己的登入來做(各自用哪個模型:schedulectl models)
+brunna 的判斷透過 claude(各自的模型:schedulectl models)
+⚠️ 還不行:平台的執行還沒有選登入方式:brunna llm set-key --agent
 --- stderr

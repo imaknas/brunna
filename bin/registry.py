@@ -79,7 +79,8 @@ schema v1 (contracts/project.v1.md has the full description):
     sends that changes them is rejected whole (a project can't switch off its own sandbox, widen its scope or add
     capabilities);
     to change them, ask the brunna session (the owner confirms)
-  secrets:   [{name, path, env_key?, expires? | max_age_days?, warn_days?, backup?, why?, rotate?}]
+  secrets:   [{name, path, env_key?, expires? | max_age_days?, warn_days?, backup?, why?, rotate?, login? (a module's: the login of its
+             agent it is, checked only where that login is used)}]
                                   the credentials this project uses: only name, location and expiry, **never the
                                   value** (check-secrets.py checks daily that they exist, are backed up, and aren't
                                   about to expire). path is relative to runtime (if there is one) else workspace, or
@@ -224,7 +225,7 @@ ENV_NAME = re.compile(r"[A-Z_][A-Z0-9_]*\Z")
 # a secret's path goes into confined runs' deny rules (policy.secret_paths): no glob, bracket, brace or control character
 SECRET_PATH = re.compile(r"[^\x00-\x1f\x7f()\[\]{}*?]+")
 SECRET = {"name", "path", "env_key", "expires", "max_age_days", "warn_days", "backup", "why", "rotate", "kind", "server",
-          "broken"}
+          "broken", "login"}
 CREDENTIAL_KINDS = ("oauth", "static")
 CREDENTIAL_NAME = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")   # a file name and part of an owner to-do's key
 SERVER_ID = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")         # runtime_ports.ToolServer.id's spelling
@@ -360,7 +361,9 @@ def validate_secrets(secrets, credentials_ok: bool = True) -> list[str]:
         if not isinstance(sec, dict):
             errs.append(_("{where} must be a mapping", where=where))
             continue
-        errs += [_("{where}: unknown field {key}", where=where, key=k) for k in sec if k not in SECRET]
+        errs += [_("{where}: unknown field {key}", where=where, key=k) for k in sec if k not in SECRET or (k == "login" and credentials_ok)]
+        if "login" in sec and not credentials_ok and not (isinstance(sec["login"], str) and sec["login"]):   # a module's
+            errs.append(_("{where}: login must be the name of a login", where=where))
         if "kind" in sec:
             if not credentials_ok:
                 errs.append(_("{where}: kind (a platform credential) is for a project's registry entry, not a module",

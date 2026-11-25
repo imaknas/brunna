@@ -542,6 +542,11 @@ def main() -> None:
                                 "notifications in {settings} alerts): it cannot alert when the scheduler stops")))
 
     alerts += store_alerts()
+    import spending
+    if (held := spending.waiting()):
+        first = min(held.values(), key=lambda v: str(v.get("since", "")))
+        alerts.append(("notify", _("{n} {n:thing waits|things wait} to run ({names}): {why}", n=len(held), names=", ".join(sorted(held)[:5]),
+                                   why=str(first.get("why", ""))[:300])))
     # nothing for the nightly tidy-up to run on: what brunna is for doesn't happen, though every job runs. Off is not red,
     # but never "Healthy" either. A reason an alert above already gave (no checked copy) is not said twice
     if tidy_off and not any(tidy_off in text for _level, text in alerts):

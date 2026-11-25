@@ -63,6 +63,8 @@ config:
                         guess names)
   brunna llm set-key <provider>   write the API key of hub.json llm.providers.<provider> from stdin into the platform's
                         secrets directory (chmod 600; not read from arguments, so it stays out of the shell history)
+  brunna llm set-key --agent   the API key the platform's agent runs with, and what its runs may cost in a day (asked in the
+                        terminal, not shown)
   brunna llm health        whether each provider works (= bin/llm.py health)
   brunna llm usage [--days <n>]
                         what every model run the platform started used in the last n days (30): by kind of work, with what the

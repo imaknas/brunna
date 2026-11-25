@@ -50,11 +50,13 @@ Tool servers (runtime_ports' tool_servers interface; docs/design/evaluators.md s
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import pathlib
 import re
 import shlex
+import stat
 import subprocess
 import sys
 from typing import NamedTuple
@@ -1047,7 +1049,7 @@ def run_kind(task, own: bool | None = None) -> str:
       subscription  no token (the login-check point, connectors jobs): the user's ~/.claude and its Keychain login
     Every token run gets the refusing `security` first on PATH; a subscription run can't (it reads the Keychain)."""
     env = os.environ if task.env is None else task.env
-    if not env.get(TOKEN_VAR):
+    if not env.get(TOKEN_VAR) and not on_key(env):
         return "subscription"
     if own is None:
         spec = getattr(task, "spec", None) or {}
@@ -1504,6 +1506,8 @@ def _flags(task, exe: str | None = None) -> list:
         cmd += ["--settings", held_settings(env, theirs)]
     elif theirs is not None:   # the last --settings replaces the first whole (measured 11-25): the platform's denies with it
         raise ValueError(f"judgment point {task.point}: a restricted run takes no settings of a caller's")
+    if task.max_cost_usd is not None:
+        cmd += ["--max-budget-usd", f"{task.max_cost_usd:.4f}"]
     if spec.get("tool_servers") == "none" and SEAL not in extra:
         extra.append(SEAL)   # loads none of the environment's servers (the point's tool_servers: none)
     return cmd + extra
@@ -1709,6 +1713,15 @@ def _resumed(args) -> str | None:
     return None
 
 
+def _refused(out) -> str:
+    """The service's refusal of the login in a result, in fixed words: its status, never the text (which can be a model's)."""
+    out = out if isinstance(out, dict) else {}
+    status = out.get("api_error_status")
+    if not out.get("is_error") or not isinstance(status, int):
+        return ""
+    return f"HTTP {status}" if status in (401, 402, 403) else "HTTP 400, no credit" if status == 400 and "credit balance" in str(out.get("result")).lower() else ""
+
+
 def _num(x):
     import math
     try:
@@ -1755,8 +1768,11 @@ def run(task) -> TaskResult:
     resumed = _resumed(cmd)
     before = session_cost(resumed) if resumed else None
     try:
-        r = subprocess.run(cmd, cwd=task.cwd or None, capture_output=True, text=True, errors="replace", timeout=task.timeout_s,
-                           env=env, input=task.prompt)
+        with key_passed(env) as (env, fds):
+            r = subprocess.run(cmd, cwd=task.cwd or None, capture_output=True, text=True, errors="replace", timeout=task.timeout_s,
+                               env=env, input=task.prompt, pass_fds=fds)
+    except NoKey as e:
+        return TaskResult(False, error=str(e), runtime_version=version, started=False)
     except subprocess.TimeoutExpired:
         return TaskResult(False, error=_("over {minutes} {minutes:minute|minutes}", minutes=task.timeout_s // 60),
                           runtime_version=version)
@@ -1775,7 +1791,8 @@ def run(task) -> TaskResult:
             got = None
         return TaskResult(False, error=_("exit {code}: {detail}", code=r.returncode,
                                                  detail=(r.stderr.strip() or r.stdout.strip())[-300:]),
-                          runtime_version=version, **_used(got, resumed, before))
+                          runtime_version=version, stop=str((got if isinstance(got, dict) else {}).get("subtype") or ""),
+                          refused=_refused(got), **_used(got, resumed, before))
     try:
         out = json.loads(r.stdout)
     except ValueError:
@@ -1787,7 +1804,7 @@ def run(task) -> TaskResult:
         ok=True, incomplete=bool(out.get("is_error")), text=str(out.get("result") or ""),
         structured_output=out.get("structured_output"), **_used(out, resumed, before),
         session_id=out.get("session_id"), turns=out.get("num_turns"), stop=str(out.get("subtype") or ""),
-        denials=tuple(out.get("permission_denials") or ()), runtime_version=version)
+        denials=tuple(out.get("permission_denials") or ()), runtime_version=version, refused=_refused(out))
 
 
 def exec_stream(task) -> None:
@@ -1798,6 +1815,8 @@ def exec_stream(task) -> None:
     import runtime_store
     exe, copy = _run_copy()   # raises NoCheckedCopy: llm.py says why
     env = _env(task, entry=copy)
+    if on_key(env):   # what a conversation costs isn't held to the budget yet: not on a key
+        raise ValueError(_("channel leasing doesn't run on an API key yet"))
     cmd = _flags(task, exe)   # no prompt argument (never is): messages come from stdin (stream-json)
     cmd += ["--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--verbose"]
     if (why := unrestricted_refusal(cmd, task.cwd)):   # a lease's session: never started (llm.py says why)
@@ -3188,7 +3207,8 @@ def native_answers(answers: dict) -> dict:
 
 
 # ---------- auth (layer 6, login) ----------
-# Three logins: the subscription login (keychain; readable under launchd, not under SSH), the headless token (`claude
+# The logins: the owner's API key (key_passed), or the headless token, whichever runtime.login says (the platform's runs); the
+# subscription login (keychain; readable under launchd, not under SSH), the headless token (`claude
 # setup-token`, one year, the default for unattended use), ~/.claude/.credentials.json (for interactive claude under
 # SSH). Paths are computed at call time (tests swapping HOME swap them).
 # No value is ever read or printed; only auth_env puts the token into the environment variables handed to claude.
@@ -3218,12 +3238,13 @@ def install_info() -> dict:
             "install": ['[ -s "$HOME/.nvm/nvm.sh" ] || curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.3/install.sh | bash',
                         '. "$HOME/.nvm/nvm.sh" && nvm install --lts && nvm alias default "lts/*" '
                         '&& npm install -g @anthropic-ai/claude-code'],
-            # made and saved by the owner in their own shell: agent-hub never asks for or writes the token; it reads the file
-            # to hand it to the claude it starts (Claude Code's terms: a third-party tool may not collect, store or
-            # intermediate Claude.ai credentials; whether reading a file the owner made counts isn't said)
-            "credential": {"kind": "own-token", "command": ["claude", "setup-token"], "file": str(_token_file()),
-                           "store": "(umask 077; read -rs t && printf '%s\\n' \"$t\" > ~/.claude/headless-oauth-token)",
-                           "needs": _("a Claude Pro, Max, Ultra, Team or Enterprise plan")},
+            # the owner's own key, made in the Claude Console, entered hidden (init, brunna llm set-key --agent)
+            "credential": {"kind": "api-key", "secret": KEY_FILE, "login": "key", "name": _("Anthropic API key"),
+                           "where": "https://platform.claude.com/settings/keys",
+                           "note": _("Claude bills what these runs use to this key; a Claude plan doesn't cover it. Some plans (Max, Ultra, Team) "
+                                     "include monthly API credits, which you claim by linking a Console organization; the key has to be that "
+                                     "organization's: {url}", url="https://support.claude.com/en/articles/17154008"),
+                           "limit": _("The hard limit is the one you set in the Claude Console.")},
             # user scope: ~/.claude.json, which the Desktop app's Code tab reads too
             "mcp_register": ["claude", "mcp", "add", "--scope", "user", "{server}", "--", "{cli}", "mcp"],
             "mcp_unregister": ["claude", "mcp", "remove", "--scope", "user", "{server}"],
@@ -3235,8 +3256,84 @@ def install_info() -> dict:
 MANAGED_VAR = "CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST"
 
 
+# the logins its platform runs take (runtime_ports.default_login): the owner's own API key, the plan's headless token
+LOGINS = ("key", "token")
+REPORTS_COST = True   # a run says what it cost, and stops at a cap it is given (bin/spending.py)
+CAP_STOP = "error_max_budget_usd"
+# a run on the owner's key, in its environment: the key itself is never there (key_passed)
+KEY_FD_VAR = "CLAUDE_CODE_API_KEY_FILE_DESCRIPTOR"
+KEY_FILE = "claude-api-key"
+
+
 def clean_env(env) -> dict:
-    return {k: v for k, v in env.items() if k not in (TOKEN_VAR, MANAGED_VAR)}
+    import names
+    return {k: v for k, v in env.items() if k not in (TOKEN_VAR, MANAGED_VAR, KEY_FD_VAR, *names.env_names("RUN_LOGIN"))}
+
+
+def on_key(env) -> bool:
+    import names
+    return names.env("RUN_LOGIN", environ=env) == "key"
+
+
+def _login_chosen() -> str | None:
+    import hubconf
+    return hubconf.get("runtime.login")
+
+
+def _key_file() -> pathlib.Path:
+    import hubconf
+    return hubconf.secrets_dir() / KEY_FILE
+
+
+def _read_key() -> tuple[str | None, str]:
+    """(the owner's API key, why there is none): one line of plain text, in a file of the owner's nobody else reads."""
+    import completion
+    f = _key_file()
+    try:
+        fd = os.open(f, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    except FileNotFoundError:
+        return None, _("no API key saved ({file}): brunna llm set-key --agent", file=f)
+    except OSError as e:
+        return None, _("the API key in {file} can't be read: {why}", file=f, why=type(e).__name__)
+    with os.fdopen(fd, errors="replace") as fh:
+        st = os.fstat(fh.fileno())
+        if not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o077:
+            return None, _("{file} isn't a file only you can read: brunna llm set-key --agent writes it again", file=f)
+        text = fh.read(4096)
+    if not completion.is_key(text):
+        return None, _("not a key: {where} holds a space, a line break or other than plain text", where=f)
+    return text.strip(), ""
+
+
+class NoKey(ValueError):
+    """A run on the owner's key with no key to hand over."""
+
+
+def has_key() -> bool:
+    return _read_key()[0] is not None
+
+
+@contextlib.contextmanager
+def key_passed(env):
+    """(the run's environment, the descriptors it inherits): a run on the owner's key is handed it on a pipe, read once by the
+    tool, so neither what it starts nor its settings files see it (measured 11-25 on 2.1.331; conformance_claude's
+    run-key-held). Raises ValueError when there is no key to hand over."""
+    if not on_key(env):
+        yield env, ()
+        return
+    key, why = _read_key()
+    if key is None:
+        raise NoKey(why)
+    r, w = os.pipe()
+    try:
+        os.write(w, key.encode())
+        os.close(w)
+        w = -1
+        yield {**env, KEY_FD_VAR: str(r)}, (r,)
+    finally:
+        for fd in (r, w):
+            if fd >= 0:
+                os.close(fd)
 
 
 # What else in an environment, or in the env of a settings file a run loads, decides which login its requests carry: every
@@ -3264,7 +3361,7 @@ def login_held(env) -> dict:
         both = dict.fromkeys((n, n.upper(), n.lower()))
         return next((v for where in (env, mine) for k in both if (v := where.get(k))), "")
     held = {n: own(n) for n in LOGIN_ROUTE}
-    if not env.get(TOKEN_VAR):
+    if not env.get(TOKEN_VAR) and not on_key(env):
         held |= {**dict.fromkeys((*LOGIN_OTHERS, TOKEN_VAR), ""), "ANTHROPIC_BASE_URL": env.get("ANTHROPIC_BASE_URL") or mine.get("ANTHROPIC_BASE_URL") or ""}
     return {"env": held, "apiKeyHelper": ""}
 
@@ -3329,9 +3426,23 @@ def held_settings(env, theirs: str | None = None) -> str:
 
 def auth_env(mode: str, env) -> tuple:
     out = {k: v for k, v in clean_env(env).items() if k not in LOGIN_OTHERS}
+    if mode == "key":
+        import names
+        if _login_chosen() != "key":
+            return None, _("the API key isn't the login chosen for the platform's runs (runtime.login)")
+        _key, why = _read_key()
+        if why:
+            return None, why
+        out.pop("ANTHROPIC_BASE_URL", None)   # the key goes to its own service
+        out[MANAGED_VAR] = "1"
+        return names.env_set(out, "RUN_LOGIN", "key"), ""
+    if mode not in ("token", "subscription"):   # never another login than the one named
+        return None, _("no login called {mode!r} (have: {have})", mode=mode, have=", ".join((*LOGINS, "subscription")))
     if mode != "token":  # subscription: no token; claude uses the keychain login itself
         return out, ""
     f = _token_file()
+    if not f.is_file() and not _login_chosen():
+        return None, _("no login chosen for the platform's runs: brunna llm set-key --agent")
     if not f.is_file():
         return None, _("{file} does not exist (the default is the headless token; to use the subscription login, "
                        "declare auth: subscription)", file=f)
@@ -3351,6 +3462,8 @@ def billing(mode: str, env, restricted: bool = False) -> str:
     reaches another endpoint (ANTHROPIC_BASE_URL), else subscription. Unknown too for the interactive login (mode
     subscription), which may be a pay-per-use Console login, and for a run that loads the user's or the project's saved
     settings, which can name a key, a helper or an endpoint of their own."""
+    if mode == "key":
+        return "metered"
     if mode != "token" or not restricted:
         return "unknown"
     seen = dict(env or {})
@@ -3360,13 +3473,23 @@ def billing(mode: str, env, restricted: bool = False) -> str:
 
 
 def credentials() -> list:
+    import runtime_ports
     token, creds = _token_file(), _creds_file()
+    if runtime_ports.default_login(NAME) == "key":
+        key, _why = _read_key()
+        mine = Credential(name=_("API key"), label=_("the Anthropic API key"), mode="key", present=key is not None,
+                          renew=_("brunna llm set-key --agent (make one in the Claude Console)"), path=str(_key_file()))
+    elif not token.exists() and not _login_chosen():
+        mine = Credential(name=_("login"), label=_("no login chosen for the platform's runs"), mode=None, present=False,
+                          renew=_("brunna llm set-key --agent"))
+    else:
+        mine = Credential(name="headless token", label="headless token", mode="token", present=token.exists(),
+                          renew=_("rerun `claude setup-token` and write it to {path}", path=token), path=str(token),
+                          since=datetime.datetime.fromtimestamp(token.stat().st_mtime) if token.exists() else None,
+                          max_age=datetime.timedelta(days=335), lifetime=_("one year"))
     out = [Credential(name=_("subscription login (launchd)"), label=_("claude's subscription login"), mode="subscription",
                       present=True, renew=_("log in on the hub machine (`claude` → /login)")),
-           Credential(name="headless token", label="headless token", mode="token", present=token.exists(),
-                      renew=_("rerun `claude setup-token` and write it to {path}", path=token), path=str(token),
-                      since=datetime.datetime.fromtimestamp(token.stat().st_mtime) if token.exists() else None,
-                      max_age=datetime.timedelta(days=335), lifetime=_("one year"))]
+           mine]
     expires, note, present = None, None, creds.exists()
     if present:
         try:
@@ -3384,6 +3507,22 @@ def credentials() -> list:
                           path=str(creds), expires=expires, warn_before=datetime.timedelta(days=7),
                           used_by=_("used by claude under SSH"), note=note, key="ssh-file"))
     return out
+
+
+def check_login(mode: str) -> str | None:
+    """Whether a login works, asked without a run where that can be (the key: its list of models, which costs nothing): None =
+    it does, else the error. Raises NotImplementedError for a login that takes a run."""
+    if mode != "key":
+        raise NotImplementedError
+    key, why = _read_key()
+    return why if key is None else check_key(key)
+
+
+def check_key(key: str) -> str | None:
+    """Whether a key works, by its list of models: None = it does, else the error (never the key)."""
+    import provider_anthropic
+    ok, why = provider_anthropic.health({"_key": key})
+    return None if ok else why
 
 
 def is_login_error(text: str) -> bool:
@@ -3560,7 +3699,7 @@ def resume_exec(sid: str, env=None, written_by: str | None = None) -> tuple[list
         logged_in = r.returncode == 0 and '"loggedIn": true' in r.stdout
     except (OSError, subprocess.SubprocessError):
         logged_in = False
-    if not logged_in:
+    if not logged_in and runtime_ports.default_login(NAME) == "token":   # never a login that wasn't chosen
         with_token, _why = auth_env("token", base)
         if with_token is not None:
             run_env = carried_env(None, _env(SimpleNamespace(env=with_token), own=False, entry=e))
@@ -3727,6 +3866,8 @@ def completion_command(req, exe: str | None = None) -> list:
         cmd += ["--append-system-prompt", req.system]
     if req.schema is not None:
         cmd += ["--json-schema", json.dumps(req.schema, ensure_ascii=False)]
+    if req.max_cost_usd is not None:
+        cmd += ["--max-budget-usd", f"{req.max_cost_usd:.4f}"]
     return cmd
 
 
@@ -3793,7 +3934,7 @@ def complete(req, conf) -> CompletionResult:
     import tempfile
     import threading
     import runtime_ports
-    env, why = auth_env(conf.get("auth") or "token", os.environ)
+    env, why = auth_env(conf.get("auth") or runtime_ports.default_login(NAME), os.environ)
     if env is None:
         return CompletionResult(False, stop="error", error=why, started=False)
     env["HUB_LLM_POINT"] = req.point   # the process started (hooks included) knows it's a platform headless call
@@ -3811,8 +3952,11 @@ def complete(req, conf) -> CompletionResult:
         return CompletionResult(False, stop="error", error=_("could not make a folder for the run: {e}", e=e), started=False)
     with tmp as cwd:
         try:
-            proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, env=env)
+            with key_passed(env) as (env, fds):
+                proc = subprocess.Popen(cmd, cwd=cwd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                        text=True, env=env, pass_fds=fds)
+        except NoKey as e:
+            return CompletionResult(False, stop="error", error=str(e), runtime_version=version, started=False)
         except FileNotFoundError:
             return CompletionResult(False, stop="error", error=_(NOT_FOUND), runtime_version=version, started=False)
         errs: list = []
@@ -3862,7 +4006,8 @@ def complete(req, conf) -> CompletionResult:
     tokens_in = sum(usage.get(k) or 0 for k in ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens")) or None
     if code != 0 or out.get("is_error"):
         text = str(out.get("result") or stderr.strip())[-300:]
-        return CompletionResult(False, stop="error", error=_("exit {code}: {detail}", code=code, detail=text),
+        return CompletionResult(False, stop="error", error=_("exit {code}: {detail}", code=code, detail=text), capped=out.get("subtype") == CAP_STOP,
+                                refused=_refused(out),
                                 input_tokens=tokens_in, output_tokens=usage.get("output_tokens"),
                                 cost_usd=out.get("total_cost_usd"), runtime_version=version)
     so = out.get("structured_output")
@@ -3874,8 +4019,9 @@ def complete(req, conf) -> CompletionResult:
 def health(conf) -> tuple:
     """No request made (the hourly claude-login already makes real ones): whether the checked copy is there and whether
     the login to use is there."""
+    import runtime_ports
     e, why = checked_copy()
     if e is None and not _CHECKED:
         return False, why
-    env, why = auth_env(conf.get("auth") or "token", {})
+    env, why = auth_env(conf.get("auth") or runtime_ports.default_login(NAME), {})
     return (env is not None), why

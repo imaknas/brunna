@@ -49,11 +49,11 @@ StreamEvent(type='error', data={'error': 'process_crashed', 'detail': 'exit 1: s
 === resume_command
 ('<HUB>/bin/lease-resume 0000', 'Paste it in a terminal on the hub machine: it resumes the same conversation (Claude Code). When you are done, go back to the assistant and press "detach" for the handover.')
 === auth_env token missing
-(None, '<TMP>/home/.claude/headless-oauth-token does not exist (the default is the headless token; to use the subscription login, declare auth: subscription)')
+(None, "no login chosen for the platform's runs: brunna llm set-key --agent")
 === credential subscription
 ('subscription login (launchd)', "claude's subscription login", 'log in on the hub machine (`claude` → /login)', None, None, None)
-=== credential token
-('headless token', 'headless token', 'rerun `claude setup-token` and write it to <TMP>/home/.claude/headless-oauth-token', 'one year', None, None)
+=== credential None
+('login', "no login chosen for the platform's runs", 'brunna llm set-key --agent', None, None, None)
 === credential None
 ('.credentials.json (for SSH)', '~/.claude/.credentials.json', 'run claude once in a terminal on the hub machine so it refreshes, or /login again', None, 'used by claude under SSH', '.credentials.json: no refreshTokenExpiresAt, expiry check skipped')
 === complete: timeout
@@ -65,4 +65,4 @@ StreamEvent(type='error', data={'error': 'process_crashed', 'detail': 'exit 1: s
 === complete: no init event
 (False, 'error', "the run of p gave no init event before its result, so its tools can't be told: its result refused")
 === health: token missing
-(False, '<TMP>/home/.claude/headless-oauth-token does not exist (the default is the headless token; to use the subscription login, declare auth: subscription)')
+(False, "no login chosen for the platform's runs: brunna llm set-key --agent")

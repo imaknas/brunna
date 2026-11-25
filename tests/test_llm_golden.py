@@ -146,9 +146,10 @@ class Golden(unittest.TestCase):
         self.assertNotIn("not-a-real-token", GOLDEN.read_text())
 
     def test_missing_token_file_fails_instead_of_falling_back(self):
+        import runtime_claude
         self.token_file.unlink()
         spec = self.m.points()["points"]["login-check"]
-        with mock.patch.dict(os.environ, {"LLM_AUTH": "token"}):
+        with mock.patch.dict(os.environ, {"LLM_AUTH": "token"}), mock.patch.object(runtime_claude, "_login_chosen", lambda: "token"):
             import runtime_ports
             env, why = self.m.auth_env(spec, runtime_ports.load("claude", ports=("auth",)))
         self.assertIsNone(env)

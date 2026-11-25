@@ -62,5 +62,6 @@
   "commit/push failed: {output}": "commit/push 失敗:{output}",
   "=== consolidate end ({n} failed) ===": "=== consolidate end(失敗 {n} 個)===",
   "consolidation is off: {reason}. The date files stay as they are until a model is set up": "回頭清理停用:{reason}。日期檔保持原樣,等設好模型再整理",
-  "{project}: {who} has been writing in the memory copy since {since}; left for the next night": "{project}:{who} 從 {since} 起在寫 memory 副本;留到下一晚"
+  "{project}: {who} has been writing in the memory copy since {since}; left for the next night": "{project}:{who} 從 {since} 起在寫 memory 副本;留到下一晚",
+  "{project}: not now: {reason}; left for another night": "{project}:現在不行:{reason};留到別晚"
 }

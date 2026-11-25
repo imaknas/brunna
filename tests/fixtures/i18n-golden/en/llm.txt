@@ -89,7 +89,7 @@ $ llm.py run agent-job    # no checked copy
 $ llm.py run agent-job    # token missing
 [exit 1]
 --- stdout
-{"type": "result", "is_error": true, "structured_output": null, "llm_point": "agent-job", "llm_error": "<TMP>/home/.claude/headless-oauth-token does not exist (the default is the headless token; to use the subscription login, declare auth: subscription)"}
+{"type": "result", "is_error": true, "structured_output": null, "llm_point": "agent-job", "llm_error": "no login chosen for the platform's runs: brunna llm set-key --agent"}
 --- stderr
 
 $ llm.py run consolidate    # schema

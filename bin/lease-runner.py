@@ -479,7 +479,7 @@ def turn_point(lease: Lease) -> str:
 
 def turn_billing() -> str:
     runtime = rt()
-    return runtime.billing("token", {}, False) if callable(getattr(runtime, "billing", None)) else "unknown"
+    return runtime.billing(runtime_ports.default_login(), {}, False) if callable(getattr(runtime, "billing", None)) else "unknown"
 
 
 def total_before(lease: Lease, resuming: bool) -> float | None:
@@ -868,7 +868,7 @@ def idle_loop() -> None:
 # old code never mixes in a module from the new (lease 9af483fb's handover failed that way on 10-25). main also loads the
 # runtime adapter (rt()) and registrar.py (registrar()), which are loaded by path or by name
 PRELOAD = ("completion", "lease_files", "memory_paths", "policy", "project_git", "prompts", "registry", "runtime_claude",
-           "runtime_store", "usage_log")
+           "runtime_store", "spending", "usage_log")
 CODE_POLL_S = 2
 WATCH = None   # code_watch.Watch, set by main
 ACTIVE = 0     # POST requests being handled and handovers running (in_flight, spawn_detach)
@@ -1418,6 +1418,9 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.err(409, "runtime_unsupported",
                             _("runtime {name} has no {missing}; cannot open a lease", name=runtime_ports.default_name(),
                               missing=runtime_ports.or_list(runtime_ports.PORT_LABELS[p] for p in sorted(miss))))
+        import spending
+        if spending.held(runtime_ports.default_name(), runtime_ports.default_login()):
+            return self.err(409, "runtime_unsupported", _("leases don't run on an API key yet"))
         if mode not in ("discuss", "work"):
             return self.err(400, "bad_request", _("mode must be discuss or work"))
         try:

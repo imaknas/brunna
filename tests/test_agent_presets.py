@@ -54,7 +54,7 @@ class Presets(unittest.TestCase):
             with self.subTest(name=name):
                 self.assertTrue(info["label"] and info["gives"] and info["find"])
                 self.assertIn("runtime", info["settings"])
-                self.assertIn(info["credential"]["kind"], ("own-token", "tool-login"))
+                self.assertIn(info["credential"]["kind"], ("api-key", "tool-login"))
 
     def test_apply(self):
         presets = ah.agent_presets()

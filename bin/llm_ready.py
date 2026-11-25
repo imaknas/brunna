@@ -5,6 +5,7 @@ the reason, instead of failing on every item it would have handled).
   llm_ready.unsupported(point) -> str | None    None: it can be called (a call may still fail: no login, no key, a
                                                 network error; those are real failures). Otherwise the reason it is off
   llm_ready.librarian() -> str | None            the same for the nightly tidy-up (either of its versions will do)
+  llm_ready.held_up(point, project) -> str | None   the feature is on, but a run couldn't start now (the day's budget)
   llm_ready.job(name) -> str | None              the same for a scheduled job that does nothing without a model
 
 What counts as "can be called" follows bin/llm.py's dispatch: a `shape: completion` point needs {settings}'s llm section
@@ -42,6 +43,13 @@ def librarian() -> str | None:
     if isinstance(on, bool):
         return unsupported(completion if on else agent)
     return None if unsupported(agent) is None else unsupported(completion)
+
+
+def held_up(point: str, project: str | None = None) -> str | None:
+    """Why this point's run couldn't start now though the feature is on (bin/spending.py): for a caller that would otherwise
+    take a turn for it. None where runs aren't billed per use."""
+    import spending
+    return spending.blocked(point, project)
 
 
 def job(name: str) -> str | None:

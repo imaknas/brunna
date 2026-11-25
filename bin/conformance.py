@@ -74,6 +74,7 @@ class World:
     root. The child's environment points the platform at it (env()); the adapter's checks point the tool at tool/."""
 
     PARTS = ("project", "home", "tool", "config", "state", "data", "secrets", "bus", "tmp", "instance")
+    check = ""    # the check it is for
     pair = None   # the platform's current copy, for a check that pairs a session's version with it (the runner's choice)
 
     def __init__(self, root: pathlib.Path):
@@ -176,6 +177,7 @@ def run_one(runtime: str, check: Check, exe: str | None, top: pathlib.Path, pair
     if check.run is None:
         return Outcome("not-checkable", _short(check.measurement))
     world = World(top / f"{check.name}-{secrets.token_hex(4)}").create()
+    world.check = check.name
     prep = getattr(adapter(runtime), "prepare", None)
     try:
         if callable(prep):
@@ -218,6 +220,21 @@ def _kill_group(p) -> None:
         pass
 
 
+ROOM_USD = 0.50   # what a check's runs may cost, where they are billed per use
+
+
+def no_room(runtime: str, check: Check) -> str | None:
+    """Why a check that makes real runs doesn't now: they are billed per use here, and the day's budget has no room (bin/spending.py).
+    The adapter names the checks that make none (OFFLINE)."""
+    import spending
+    if check.name in getattr(adapter(runtime), "OFFLINE", ()) or not spending.held(runtime, runtime_ports.default_login(runtime)):
+        return None
+    try:   # the same words every day: the reason is part of an alert's id
+        return _("today's budget has no room for it") if spending.room("conformance", ROOM_USD) else None
+    except OSError as e:
+        return _("what today's runs cost can't be told: {e}", e=type(e).__name__)
+
+
 def run(runtime: str, exe: str | None = None, only: list[str] | None = None, pair: str | None = None) -> dict:
     """Every check (or only these) of runtime against exe; the result document (not written). pair: the platform's
     current copy, which a check of a session's version pairs it with (sessions-fork); with none such a check pairs the
@@ -253,6 +270,8 @@ def run(runtime: str, exe: str | None = None, only: list[str] | None = None, pai
                     held = _("withheld: a safety check failed first")
                 elif callable(window):
                     held = window(c.timeout_s)
+            if not held and c.run is not None and (why := no_room(runtime, c)):
+                held = why
             if held:
                 out["checks"][c.name] = {"port": c.port, "kind": c.kind, "state": "error", "reason": _short(held),
                                          "tries": 0, "login": True}
@@ -353,7 +372,7 @@ def child(runtime: str, name: str, root: str, exe: str, pair: str = "") -> int:
         print(json.dumps({"state": o.state, "reason": _short(o.reason)}))
         return 0
     world = World(pathlib.Path(root))
-    world.pair = pair or None
+    world.pair, world.check = pair or None, name
     if (why := world.isolated()):
         return say(Outcome("error", why))
     mod = runtime_ports._module(runtime)

@@ -116,6 +116,9 @@ def first_or_new(runtime: str, mod, first: bool) -> tuple[bool, bool, str]:
     cur = runtime_store.current(runtime)
     if first and cur:
         return True, False, _("{runtime}: checked copy {version} in place", runtime=runtime, version=cur.version)
+    if cur is None and not runtime_ports.login_chosen(runtime):   # nothing to check it with: off until the owner chooses, not a failure
+        _quiet(runtime, "latest", "install", "checks", "held")
+        return True, False, _("{runtime}: {why}", runtime=runtime, why=runtime_ports.login_missing(runtime))
     try:
         latest = mod.latest()
     except RuntimeError as e:

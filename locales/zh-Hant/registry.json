@@ -252,5 +252,6 @@
  "mailbox must be a mapping": "mailbox 要是 mapping",
  "{key}[{i}]: {fields} must be text": "{key}[{i}]:{fields} 要是文字",
  "service {name}: local_port {port} is the platform's (the sign-in callback of brunna credentials grant, or the status page)": "服務 {name}:local_port {port} 是平台的(brunna credentials grant 登入的回呼,或狀態頁)",
- "runtime_preset.login_use is the text asked of the owner": "runtime_preset.login_use 是要問擁有者的話"
+ "runtime_preset.login_use is the text asked of the owner": "runtime_preset.login_use 是要問擁有者的話",
+ "{where}: login must be the name of a login": "{where}:login 要是登入方式的名稱"
 }

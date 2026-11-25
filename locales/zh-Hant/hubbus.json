@@ -236,5 +236,7 @@
  "{project}: its push requests could not be taken in: {e!r}": "{project}:它的推送請求收不進來:{e!r}",
  "bus.db could not be checked ({why}); it is left as it is": "bus.db 檢查不了({why});照原樣留著",
  "The mailbox's database was broken ({why}): it was moved to {file} and a new, empty one started at {at}. Letters nobody had received yet are no longer in the mailbox.": "信箱的資料庫壞了({why}):已搬到 {file},{at} 開了一個新的空的。還沒有人收到的信不在信箱裡了。",
- "the owner could not be told that bus.db was moved aside: {e!r}": "bus.db 被搬開這件事沒能通知 {owner}:{e!r}"
+ "the owner could not be told that bus.db was moved aside: {e!r}": "bus.db 被搬開這件事沒能通知 {owner}:{e!r}",
+ "letters wait: {reason}": "信等著:{reason}",
+ "another letter's run has just started": "另一封信的執行剛開始"
 }

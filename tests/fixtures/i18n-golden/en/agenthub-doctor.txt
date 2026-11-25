@@ -38,8 +38,8 @@ $ agenthub doctor    # launchd, problems
 ✓ unattended jobs on the platform's own MCP grants (credentials:): available
 ✗ the runtime claude starts no platform run: no checked copy of Claude Code yet: brunna runtimes install claude makes one (the nightly brunna/update-runtimes does too)
     → no npm from nvm's node on this machine: the platform installs its own copy of Claude Code with it. Install nvm and a node version (nvm install --lts), then run brunna runtimes install claude
-✗ agent login (headless token): missing
-    → rerun `claude setup-token` and write it to <TMP>/home/.claude/headless-oauth-token
+! agent login (no login chosen for the platform's runs): missing
+    → brunna llm set-key --agent
 ! agent login (~/.claude/.credentials.json): missing
     → run claude once in a terminal on the hub machine so it refreshes, or /login again
 ✗ LLM provider anthropic: no key: <TMP>/secrets/anthropic-api-key does not exist (`brunna llm set-key` writes it)
@@ -58,7 +58,7 @@ $ agenthub doctor    # launchd, problems
 · gitleaks is not installed: platform pushes are scanned by the built-in rules only
     → install gitleaks (8.19 or newer) for a wider scan
 
-6 problems, 5 reminders
+5 problems, 6 reminders
 --- stderr
 
 $ agenthub doctor    # launchd, all fine

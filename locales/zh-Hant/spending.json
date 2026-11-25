@@ -1,0 +1,11 @@
+{
+  "{point} for {project} would be paid per use, and the owner has not allowed that for {project} (registry metered_models); not run": "{project} 的 {point} 會按用量計費,而擁有者沒有允許 {project} 這樣做(registry 的 metered_models);沒有執行",
+  "{point} was stopped at its cap for {project}; it is tried again after {days} days, or when its cap is raised ({settings} llm.budget.caps.{point})": "{project} 的 {point} 碰到上限被停下來;{days} 天後再試,或把上限調高({settings} llm.budget.caps.{point})",
+  "no daily budget is set ({settings} llm.budget.daily_usd), and runs here are billed per use": "沒有設每日預算({settings} llm.budget.daily_usd),而這裡的執行按用量計費",
+  "today's budget (llm.budget.daily_usd ${budget}) has ${free} left for this, and {point} may cost ${cap}": "今天的預算(llm.budget.daily_usd ${budget})還剩 ${free} 給這個用,而 {point} 最多會花 ${cap}",
+  "what today's runs cost can't be told: {e}": "今天的執行花了多少看不出來:{e}",
+  "what this run would cost can't be recorded; not run": "這次執行的花費記不下來,沒有執行",
+  "{runtime}'s runs are refused by the service ({why}): check the key and its credit": "{runtime} 的執行被服務拒絕({why}):檢查 key 和它的額度",
+  "{runtime}'s runs answer again": "{runtime} 的執行又有回應了",
+  "the alert could not be sent: {e}": "告警送不出去:{e}"
+}

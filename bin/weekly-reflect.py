@@ -252,7 +252,7 @@ def main() -> None:
         path = OUT / f"{label}.json"
         # without --llm the analysis already written for this week stays: it can't be had back without paying for it
         # again, and a re-run (new statistics, a fixed page) shouldn't cost it
-        if "analysis" not in stats and path.exists():
+        if ("analysis" not in stats or (stats["analysis"] or {}).pop("held", None)) and path.exists():
             try:
                 kept = json.loads(path.read_text()).get("analysis")
             except (OSError, ValueError):

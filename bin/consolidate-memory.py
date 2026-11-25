@@ -648,6 +648,9 @@ def main() -> int:
 
     start, failed, entries = time.monotonic(), 0, []
     for s in due[: args.max]:
+        if (why := llm_ready.held_up("consolidate", s["name"])):   # not its turn used up: last_try is not set
+            log(_("{project}: not now: {reason}; left for another night", project=s["name"], reason=why))
+            continue
         if time.monotonic() - start > BUDGET_MINUTES * 60:
             log(_("over {minutes} minutes; the rest runs tomorrow", minutes=BUDGET_MINUTES))
             break

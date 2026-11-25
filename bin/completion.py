@@ -256,13 +256,13 @@ def metered(target: dict) -> bool:
 
 
 def login_metered(target: dict) -> bool:
-    """A runtime whose own login is an API key: pay-per-use, and what a call cost isn't known."""
+    """A runtime whose own login is an API key: pay-per-use."""
     import runtime_ports
     impl = target.get("impl")
     if impl not in runtime_ports.RUNTIMES or "auth" not in runtime_ports.capabilities(impl):
         return False
     rt = runtime_ports.load(impl, ports=("auth",), platform_runs=False)
-    return rt.billing((target.get("conf") or {}).get("auth") or "token", {}, True) == "metered"   # {}: the login itself
+    return rt.billing((target.get("conf") or {}).get("auth") or runtime_ports.default_login(impl), {}, True) == "metered"   # {}: the login itself
 
 
 def billing(target: dict) -> str:
@@ -273,14 +273,29 @@ def billing(target: dict) -> str:
     return "local" if target.get("location") == "local" else "subscription"
 
 
-_open: list[tuple[str, str]] = []   # (point, run): the requests this process has open
+_open: list[tuple[str, str, float | None]] = []   # (point, run, what is held for it): the requests this process has open
 
 
-def begin(point: str, target: dict, project: str | None = None) -> str | None:
-    """Open a completion's request in the usage log (usage_log.begin): settled by record."""
-    rid = usage_log.begin(USAGE, point, target["provider"], target["model"], billing(target), project, gated=login_metered(target))
+def on_budget(target: dict) -> bool:
+    """A request through a runtime's own login that is billed per use and says what it cost: held like its agent runs (spending)."""
+    import runtime_ports
+    import spending
+    impl = target.get("impl")
+    return impl in runtime_ports.RUNTIMES and spending.held(impl, (target.get("conf") or {}).get("auth") or runtime_ports.default_login(impl))
+
+
+def begin(point: str, target: dict, project: str | None = None, capped: float | None = None) -> str | None:
+    """Open a completion's request in the usage log (usage_log.begin): settled by record. capped: what it may cost is held for
+    it; when it doesn't fit today's budget, Refused."""
+    if capped is not None:
+        import spending
+        rid, why = spending.reserve(point, target["provider"], target["model"], capped, project)
+        if rid is None:
+            raise Refused(why)
+    else:
+        rid = usage_log.begin(USAGE, point, target["provider"], target["model"], billing(target), project, gated=login_metered(target))
     if rid:
-        _open.append((point, rid))
+        _open.append((point, rid, capped))
     return rid
 
 
@@ -301,7 +316,10 @@ def record(point: str, target: dict, res, project: str | None = None, run: str |
     row = {"ts": usage_log.now(), "point": point,
            "provider": target["provider"], "model": target["model"], "input_tokens": res.input_tokens,
            "output_tokens": res.output_tokens, "cost_usd": cost, "stop": res.stop, "billing": billing(target)}
-    if cost is None and login_metered(target):
+    if cost is None and entry and entry[2] is not None:
+        cost = entry[2]
+        row |= {"cost_usd": cost, "cost_assumed": True}
+    elif cost is None and login_metered(target):
         row["cost_unknown"] = True
     if project:
         row["project"] = project
@@ -311,13 +329,15 @@ def record(point: str, target: dict, res, project: str | None = None, run: str |
 
 def record_run(point: str, runtime: str, model: str | None, how: str, cost: float | None, stop: str | None,
                project: str | None = None, input_tokens: int | None = None, output_tokens: int | None = None,
-               run: str | None = None, gated: bool = True) -> None:
+               run: str | None = None, gated: bool = True, reserved: float | None = None) -> None:
     """One row for an agent run (run: what usage_log.begin opened for it): the runtime is the provider, how the adapter says
     it is paid for. gated: one at a strength its project chose, whose cost must be told (unknown_cost_today)."""
     row = {"ts": usage_log.now(), "point": point,
            "provider": runtime, "model": model, "input_tokens": input_tokens, "output_tokens": output_tokens, "cost_usd": cost,
            "stop": stop, "billing": how}
-    if how == "metered" and cost is None and gated:   # e.g. it ran to its timeout: what it spent can't be told (unknown_cost_today)
+    if cost is None and reserved is not None:   # it gave none (its timeout, an unreadable result): what was held for it (spending)
+        row |= {"cost_usd": reserved, "cost_assumed": True}
+    elif how == "metered" and cost is None and gated:   # e.g. it ran to its timeout: what it spent can't be told (unknown_cost_today)
         row["cost_unknown"] = True
     if project:
         row["project"] = project
@@ -381,11 +401,15 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
     conf = dict(target["conf"])
     conf["_key"] = read_key(conf)
     conf["_context"] = target["context"]
+    import spending
+    capped = spending.cap(point, {"shape": "completion", **spec}, target["impl"], target.get("group"), target["model"]) if on_budget(target) else None
     budget = ((settings() or {}).get("budget") or {}).get("daily_usd")
-    if budget is not None and today_cost() >= float(budget):
+    if capped is not None and (why := spending.stopped(point, project, capped)):
+        raise Refused(why)
+    if capped is None and budget is not None and today_cost() >= float(budget):
         raise Refused(_("today's model spending has reached the budget (llm.budget.daily_usd ${budget}); not sending this "
                         "one", budget=budget))
-    if budget is not None and not target.get("price") and login_metered(target):
+    if capped is None and budget is not None and not target.get("price") and login_metered(target):
         raise Refused(_("{provider}'s login is billed per use and what a call costs can't be told, so it can't be kept within "
                         "llm.budget.daily_usd; not sending this one", provider=target["provider"]))
     prompt = redact(prompt)
@@ -419,7 +443,7 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
 
     fits(prompt)
     req = runtime_ports.CompletionRequest(point=point, prompt=prompt, model=target["model"], schema=schema,
-                                          max_tokens=max_tokens, timeout_s=total)
+                                          max_tokens=max_tokens, timeout_s=total, max_cost_usd=capped)
     cost_total, last_errs = 0.0, None
     # max_attempts: the most requests one call may make, retries of both kinds included (a point anyone's text reaches, so a
     # crafted input can't make it cost more than one); unset = the retries above
@@ -428,15 +452,21 @@ def run(point: str, spec: dict, prompt: str, schema: dict | None, sleep=time.sle
         rate_tries = 0
         while True:
             req = req._replace(timeout_s=time_left())
-            rid = begin(point, target, project)
+            rid = begin(point, target, project, capped)
             res = impl.complete(req, conf)
             cost_total += record(point, target, res, project, rid) or 0
             left = left - 1 if left is not None else None
+            if capped is not None and (res.ok or res.refused):
+                spending.login_told(target["impl"], res.refused or None)
             if res.stop != "rate_limited" or rate_tries >= MAX_RATE_RETRIES or left == 0:
                 break
             rate_tries += 1
             sleep(min(res.retry_after_s or 5 * 2 ** rate_tries, 60, max(deadline - clock() - MIN_REQUEST_S, 0)))
         if not res.ok:
+            if res.capped and capped is not None:
+                spending.note_stop(point, project, capped)
+                raise Refused(_("stopped at the most it may cost (${cap}): {settings} llm.budget.caps.{point} raises it", cap=f"{capped:.2f}",
+                                point=point))
             if res.stop == "length":
                 raise Refused(_("output cut off at the length limit ({provider}/{model}, max_tokens {max_tokens}); not "
                                 "retried", provider=target["provider"], model=target["model"], max_tokens=max_tokens))

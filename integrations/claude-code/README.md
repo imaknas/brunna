@@ -33,6 +33,10 @@ Answer `y` to add the marketplace, then choose the user scope. From a shell inst
 `claude plugin install brunna --marketplace <hub>`. The mod is read from that folder, so it is always the release brunna
 runs; after `brunna upgrade`, `/reload-plugins` in an open session (or its next start) picks up the new one.
 
+Where it shows: a session in a terminal, and a session in the Claude Desktop app's Code tab on the computer the app runs on. **Not in the app's
+SSH sessions**: the app doesn't copy a mod's hooks to the other machine (Claude Code's docs, "Where mods run"), and one installed on that
+machine wasn't seen there either (tried 11-21 and 11-25). `brunna glance`, the status page and the herdr panel show the same.
+
 Only you install it: brunna and its agents never add a marketplace or a plugin to your settings.
 
 ## Checking it

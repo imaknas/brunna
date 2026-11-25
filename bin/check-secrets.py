@@ -175,6 +175,15 @@ def undeclared(project: str, doc: dict, declared: set[pathlib.Path]) -> list[pat
     return sorted(set(found))
 
 
+def runtime_logins() -> list:
+    """The logins the platform's agent runs use here (the runtime's auth interface)."""
+    import runtime_ports
+    try:
+        return runtime_ports.load(ports=("auth",), platform_runs=False).credentials()
+    except Exception:   # noqa: BLE001 (no such interface, or it can't be told)
+        return []
+
+
 def main(argv: list[str]) -> int:
     today = datetime.date.today()
     index = registry.refresh()  # a registry change just made counts too, without waiting for the scheduler's tick
@@ -187,6 +196,10 @@ def main(argv: list[str]) -> int:
     work = runtime_ports.platform_work()
     modules = {n: d for n, d in (index.get("modules") or {}).items() if d.get("secrets")
                and not (n in runtime_ports.RUNTIMES and n not in work)}
+    # a login a module's agent doesn't use here isn't checked (its secret names the login it is)
+    modules = {n: {**d, "secrets": kept} for n, d in modules.items()
+               if (kept := [s for s in d["secrets"] if s.get("login") is None or (s["login"] == runtime_ports.default_login(n)
+                                                                                  and runtime_ports.login_chosen(n))])}
     module_paths = {p.resolve() for d in modules.values() for s in d["secrets"] if (p := locate(d["name"], d, s["path"]))}
     problems, count = [], 0
     hub = hubconf.hub_project()
@@ -203,9 +216,11 @@ def main(argv: list[str]) -> int:
         alert_keys = [{"name": "discord-bot-token", "path": tok,
                        "why": _("the Discord bot for alerts (watchdog, render-services, claude-login, secrets)")}
                       for tok in [hubconf.get("alerts.discord_token_file")] if tok]
-        if llm_keys or alert_keys:
+        login_keys = [{"name": "agent-api-key", "path": c.path, "why": _("the login of the platform's agent runs (runtime.login)")}
+                      for c in runtime_logins() if c.mode == "key"]
+        if llm_keys or alert_keys or login_keys:
             projects = {**projects, hub: {**projects[hub],
-                                          "secrets": [*(projects[hub].get("secrets") or []), *alert_keys, *llm_keys]}}
+                                          "secrets": [*(projects[hub].get("secrets") or []), *alert_keys, *llm_keys, *login_keys]}}
     import credentials
     cred_rows = {(r["project"], r["name"]): r for r in credentials.rows(index)}
     for row in cred_rows.values():   # stored, declared nowhere: still live at the provider

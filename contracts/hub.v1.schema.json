@@ -371,6 +371,10 @@
           "items": {"type": "string", "minLength": 1},
           "description": "every coding agent the user opens sessions with (docs/design/mailbox-runtimes.md A1): each gets its hooks, its rules-file block, and its sessions are asked about by their runtime. Default [runtime.default]; runtime.default stays the one the platform starts"
         },
+        "login": {
+          "enum": ["key", "token"],
+          "description": "how the platform's runs of runtime.default log in: key (the owner's own API key, billed per use; needs llm.budget.daily_usd) or token; not set: token. brunna init writes it"
+        },
         "bare_ids": {
           "type": "string",
           "minLength": 1,
@@ -449,7 +453,7 @@
         "providers": {"type": "object"},
         "use": {"type": "object"},
         "points": {"type": "object"},
-        "budget": {"type": "object", "properties": {"daily_usd": {"type": "number", "minimum": 0}}}
+        "budget": {"type": "object", "properties": {"daily_usd": {"type": "number", "minimum": 0}, "caps": {"type": "object", "description": "the most one run of a judgment point may cost, where runs are billed per use (bin/spending.py): {point: USD}"}}}
       }
     }
   }

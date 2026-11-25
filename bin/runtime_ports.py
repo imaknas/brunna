@@ -173,6 +173,8 @@ The current interfaces (the other layers get added one at a time, following the 
                                                          over to someone else, or to use the default login)
     credentials() -> list[Credential]                   which logins this machine has, whether present, when they
                                                         expire (values never read or printed)
+    check_login(mode) -> str | None                      optional: whether a login works, asked without a run (None: it
+                                                         does); NotImplementedError: this one takes a run
     is_login_error(text) -> bool                         whether this error message is a login problem (a person has
                                                          to deal with it) or something else (timeout, quota…)
     session_cost(sid) -> float | None                    optional: what a session's record says it had cost, where a run
@@ -713,6 +715,7 @@ class Task(NamedTuple):
     servers: tuple = ()      # ToolServer: what the platform attaches to this run (its mail tools)
     run_dir: str | None = None  # a confined run's own folder (llm.py makes it and removes it when the run ends): what
                                 # the runtime writes for this run alone goes there
+    max_cost_usd: float | None = None   # the most it may cost: the tool stops it there (an adapter with REPORTS_COST)
 
 
 class TaskResult(NamedTuple):
@@ -733,6 +736,7 @@ class TaskResult(NamedTuple):
     input_tokens: int | None = None      # the run's own tokens, cached ones included, when the tool says
     output_tokens: int | None = None
     started: bool = True                 # False: nothing was started, so nothing was used
+    refused: str = ""                    # the service refused the login (its status, in fixed words): never the run's own text
 
 
 class CompletionRequest(NamedTuple):
@@ -745,6 +749,7 @@ class CompletionRequest(NamedTuple):
     system: str | None = None
     max_tokens: int = 8192
     timeout_s: int = 600
+    max_cost_usd: float | None = None   # the most it may cost: the tool stops it there (an adapter with REPORTS_COST)
 
 
 class CompletionResult(NamedTuple):
@@ -760,6 +765,8 @@ class CompletionResult(NamedTuple):
     retry_after_s: float | None = None   # when stop is rate_limited, how long the service suggests waiting
     runtime_version: str | None = None   # a runtime's completion: the version of the copy it started (as TaskResult)
     started: bool = True             # False: no request was made (as TaskResult)
+    refused: str = ""                # the service refused the login (as TaskResult)
+    capped: bool = False             # stopped at the most it may cost (CompletionRequest.max_cost_usd)
 
 
 # end = finished normally; length = truncated by length (a retry would truncate the same way, so no retry); refused =
@@ -821,6 +828,40 @@ def default_name() -> str:
         return hubconf.get("runtime.default", DEFAULT) or DEFAULT
     except Exception:
         return DEFAULT
+
+
+def logins(name: str | None = None) -> tuple:
+    """The logins a runtime's platform runs take (its LOGINS; without one, its own login, called token)."""
+    return tuple(getattr(_module(name or default_name()), "LOGINS", None) or ("token",))
+
+
+def default_login(name: str | None = None) -> str:
+    """How a runtime's platform runs log in: {settings} runtime.login for the platform's agent (runtime.default), where it
+    takes that login; else token. Nothing set is never a paid login."""
+    name = name or default_name()
+    if name != default_name() or name not in RUNTIMES:
+        return "token"
+    import hubconf
+    chosen = hubconf.get("runtime.login")
+    return chosen if chosen in logins(name) else "token"
+
+
+def login_missing(name: str | None = None) -> str | None:
+    """Why a runtime's platform runs have nothing to log in with (none chosen, or the one chosen isn't there), or None. None for a
+    runtime with one login of its own."""
+    name = name or default_name()
+    if name not in RUNTIMES or len(logins(name)) < 2 or "auth" not in capabilities(name):
+        return None
+    env, why = _module(name).auth_env(default_login(name), {})
+    return why if env is None else None
+
+
+def login_chosen(name: str | None = None) -> bool:
+    """Whether the owner has a login for a runtime's platform runs: {settings} runtime.login says one, or the one it had before
+    there was a choice is there."""
+    import hubconf
+    name = name or default_name()
+    return bool(hubconf.get("runtime.login")) or login_missing(name) is None
 
 
 def no_checked_copy(name: str | None = None) -> str | None:

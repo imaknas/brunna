@@ -98,6 +98,13 @@ total_cost = 0.0
 cost_added = False   # the shell version printed $0 when there was no cost at all, %.6f only when there was
 
 
+def shadow_on() -> bool:
+    """The other version runs alongside to compare: not where each run is billed."""
+    import runtime_ports
+    import spending
+    return SHADOW and not spending.held(runtime_ports.default_name(), runtime_ports.default_login())
+
+
 def completion_in_charge(part: str) -> bool:
     agent, completion = PARTS[part]
     on = ((hubconf.get("librarian") or {}).get("completion") or {}).get(part)
@@ -368,7 +375,7 @@ def shadow_state(proj: str, d: pathlib.Path, before: str, after: str, agent_chan
                  memory_section: str, h_note: str, d_note: str) -> None:
     """Compare the completion version's proposal for the same input with the STATE.md the agent version actually wrote.
     Records only; writes no real file."""
-    if not SHADOW or COMPLETION["state"]:
+    if not shadow_on() or COMPLETION["state"]:
         return
     try:
         so, meta = _shadow_call("librarian-state-edits", state_edits_prompt(proj, d, before, memory_section, h_note, d_note))
@@ -420,7 +427,7 @@ ROSTER = re.compile(r"<!-- roster:begin -->.*?<!-- roster:end -->", re.S)
 
 
 def shadow_index(before: str, after: str, digest_text: str) -> None:
-    if not SHADOW or COMPLETION["index"]:
+    if not shadow_on() or COMPLETION["index"]:
         return
     try:
         so, meta = _shadow_call("librarian-index-edits", index_edits_prompt(before, digest_text))
@@ -456,7 +463,7 @@ def todo_check(path: pathlib.Path) -> subprocess.CompletedProcess:
 def shadow_todo(proj: str, malformed: str, fixed: str, problems: str) -> None:
     """The completion version of the format fix on the same malformed STATE.md the agent version was given: whether its
     proposal passes check-state-todo, keeps every key marker, and how close it is to the agent version's fix."""
-    if not SHADOW or COMPLETION["todo_format"]:
+    if not shadow_on() or COMPLETION["todo_format"]:
         return
     try:
         so, meta = _shadow_call("librarian-todo-format-edits", todo_edits_prompt(problems, malformed))
@@ -501,7 +508,7 @@ def _edits_call(point: str, prompt: str, before: str, rec: dict, removable: bool
     """Call a completion point and apply its edit list to `before`, recording the run in the shadow log (in_charge,
     so the report counts it apart from the comparisons). Returns (exit, llm.py's object, raw text, the new text); the
     new text is None when the list fails a check (that object then carries llm_error)."""
-    rc, obj, text = llm(point, prompt, None)
+    rc, obj, text = llm(point, prompt, None, rec.get("project"))
     so = (obj or {}).get("structured_output") if rc == 0 else None
     rec.update(ts=_now(), point=point, in_charge=True, cost_usd=(obj or {}).get("total_cost_usd"),
                model=(obj or {}).get("model"), provider=(obj or {}).get("provider"))
@@ -873,6 +880,9 @@ def _process(proj: str, d: pathlib.Path, handoffs: list[dict], digest: list[str]
               anchors=" ".join(a["raw"] for a in anchors)))
     d_note = dangling_note(dangling) + anchor_note(anchors)
 
+    if (why := llm_ready.held_up(PARTS["state"][1 if COMPLETION["state"] else 0], proj)):
+        log(_("{project}: not now: {reason}; the checkpoint stays, the notes wait", project=proj, reason=why))
+        return
     pre = git(d, "rev-parse", "HEAD")
     before = (d / "STATE.md").read_text(errors="replace") if (d / "STATE.md").exists() else ""   # input for shadow mode
     # Only ./STATE.md may be written: saying so in the prompt does not stop it (a small model changed memory/reference/

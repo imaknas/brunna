@@ -842,15 +842,29 @@ def waiting_on(job: dict, by_name: dict[str, dict], state: dict, running: set[st
                 if (d := by_name.get(f"{now_name}/{short}")):
                     dep = f"{now_name}/{short}"
         try:
-            if d is not None and unfinished_today(dep, d, state, running, now, today):
+            if d is not None and unfinished_today(dep, d, state, running, now, today, before_tidy_up(job, by_name)):
                 return dep
         except Exception as e:   # a job whose due logic is broken doesn't run: it holds nobody
             log(f"not waiting for '{dep}': {e!r}")
     return None
 
 
-def unfinished_today(dep: str, d: dict, state: dict, running: set[str], now: datetime.datetime, today: str) -> bool:
-    """Whether the job dep (d) is due today and not finished: what after: waits for."""
+def before_tidy_up(job: dict, by_name: dict[str, dict]) -> bool:
+    """Whether the tidy-up waits for this job (it is the tidy-up, or one of its after:, through others)."""
+    todo, seen = [f"{hubconf.hub_project()}/librarian"], set()
+    while todo:
+        name = todo.pop()
+        if name == job.get("name"):
+            return True
+        if name not in seen:
+            seen.add(name)
+            todo += (by_name.get(name) or {}).get("after") or []
+    return False
+
+
+def unfinished_today(dep: str, d: dict, state: dict, running: set[str], now: datetime.datetime, today: str, tidy: bool = False) -> bool:
+    """Whether the job dep (d) is due today and not finished: what after: waits for. tidy: for the tidy-up's own sake, which a job
+    that itself waits for the tidy-up can't hold."""
     if not d.get("enabled", True) or not runs_today(d, now, state):
         return False
     if dep in running:
@@ -860,6 +874,8 @@ def unfinished_today(dep: str, d: dict, state: dict, running: set[str], now: dat
     if now < hhmm(now, d["time"]) and not (not scheduled_on(d, now.date()) and missed_day(d, now, state)):
         return True
     if state.get(dep) == today:
+        return False
+    if run_lasting(d, tidy):   # held up by what doesn't pass today, or waits for the tidy-up itself: it holds nobody
         return False
     att = state.get(f"{dep}.attempts", {})
     tried = att.get("count", 0) if att.get("date") == today else 0
@@ -1049,6 +1065,67 @@ def status_page() -> None:
         log(f"gen-status-page did not finish: {e!r}")
 
 
+STARTED_USD = [0.0]   # what this tick's agent jobs may cost: their runs hold it only once they have started
+
+
+def run_terms(job: dict) -> tuple[str, str | None, str | None] | None:
+    """(point, strength, login) of an agent job's run; None for another job."""
+    command = str(job.get("command") or "")
+    if "run-agent-job.sh" not in command:
+        return None
+
+    def said(var: str) -> str | None:
+        m = re.search(rf"(?:^|\s){var}=(\S+)", command)
+        return m.group(1) if m else None
+    return (said("AGENT_JOB_POINT") or ("agent-job-confined" if said("AGENT_JOB_ALLOW") else "agent-job"), said("AGENT_JOB_TIER"), said("LLM_AUTH"))
+
+
+def run_blocked(job: dict) -> str | None:
+    """Why this agent job's run couldn't start now (bin/spending.py: only on a login billed per use), or None."""
+    if (terms := run_terms(job)) is None:
+        return None
+    try:
+        import spending
+        point, tier, auth = terms
+        return spending.blocked(point, job.get("project"), tier, auth, what=job.get("name"), more=STARTED_USD[0])
+    except Exception as e:   # the run itself says
+        log(f"whether '{job.get('name')}' can start could not be asked: {e!r}")
+        return None
+
+
+def run_lasting(job: dict, tidy: bool = False) -> bool:
+    if (terms := run_terms(job)) is None:
+        return False
+    try:
+        import spending
+        point, tier, auth = terms
+        return spending.lasting(point, job.get("project"), tier, auth, what=job.get("name"), tidy=tidy)
+    except Exception as e:
+        log(f"whether '{job.get('name')}' is held up could not be asked: {e!r}")
+        return False
+
+
+def run_waits(job: dict) -> bool:
+    """run_blocked, said (once) and kept for the status page."""
+    why = run_blocked(job)
+    if run_terms(job) is not None:
+        import spending
+        if spending.note_waiting(job["name"], why) and why:
+            log(f"job '{job['name']}' waiting: {why}")
+    return why is not None
+
+
+def run_started(job: dict) -> None:
+    if (terms := run_terms(job)) is None:
+        return
+    try:
+        import spending
+        if (held := spending.terms(*terms)):
+            STARTED_USD[0] += held[2]
+    except Exception as e:
+        log(f"what '{job.get('name')}' may cost could not be told: {e!r}")
+
+
 def turn(job: dict, by_name: dict[str, dict], state: dict, running: set[str], now: datetime.datetime,
          today: str) -> dict | None:
     """Whether this job runs now: {batch, tried} (an event job's events; the attempts it has had today), else None."""
@@ -1066,6 +1143,8 @@ def turn(job: dict, by_name: dict[str, dict], state: dict, running: set[str], no
     if dep := waiting_on(job, by_name, state, running, now, today):
         log(f"job '{name}' waiting for '{dep}' (after:)")
         return None
+    if run_waits(job):
+        return None
     attempts = state.get(f"{name}.attempts", {})
     tried = attempts.get("count", 0) if attempts.get("date") == today else 0
     if job.get("max_attempts_per_day") is not None and tried >= job["max_attempts_per_day"]:
@@ -1077,6 +1156,7 @@ def run_job(job: dict, batch: dict | None, state: dict, running: set[str], now: 
     """One run, its attempt already recorded. A failed one is recorded here; only a state that can't be saved, or a run
     that can't be started, raises."""
     name = job["name"]
+    run_started(job)
     job_log_path = LOG_DIR / f"{fs(name)}-{today}.log"
     events = batch["events"] if batch else None
     chain, depth = event_jobs.run_chain(name, events or []), event_jobs.run_depth(events or [])

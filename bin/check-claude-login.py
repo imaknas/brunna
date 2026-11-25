@@ -5,12 +5,13 @@ Discord.
 claude has three sets of credentials on the hub machine, each of which can break (the owner, 2026-10-24: a caller
 silently falling back to a local model when the login lapsed is a serious silent failure):
   1. subscription login, under launchd: keychain. Only registry jobs with `connectors: true` use it (they need the
-     account's claude.ai connectors); everything else the platform runs uses the headless token (the owner,
-     2026-11-13). So it is checked only while some project's or enabled module's job declares connectors: true: then one
+     account's claude.ai connectors); everything else the platform runs uses the login
+     below (the owner, 2026-11-13). So it is checked only while some project's or enabled module's job declares connectors: true: then one
      real minimal request (llm.py's login-check). With none it is not checked and says why (no alert); with no
      registry index to read (a new machine) it is checked, since "no jobs known" is not "no such job"
-  2. headless token (~/.claude/headless-oauth-token, `claude setup-token`, one year): llm.py's default credential
-     (scheduler, leases, lease-resume). One request with LLM_AUTH=token; remind once the file is over 335 days old
+  2. the login of the platform's runs (runtime.login): an API key, asked about hourly without a run (its list of models, which
+     costs nothing; a refusal of a run itself is llm.py's to tell), or the headless token (~/.claude/headless-oauth-token,
+     `claude setup-token`, one year; scheduler, leases, lease-resume). One request with LLM_AUTH=token; remind once the file is over 335 days old
      (30 days before the year runs out)
   3. ~/.claude/.credentials.json (what claude uses when the keychain cannot be read under SSH): only
      refreshTokenExpiresAt is looked at, reminding when fewer than 7 days remain -- no token is read or printed. An
@@ -72,7 +73,7 @@ def used_by(mode: str, jobs: list[str] | None = None) -> str | None:
     if mode == "subscription":
         return (_("used by the jobs with connectors: true: {jobs}", jobs=", ".join(jobs)) if jobs
                 else _("used by the jobs with connectors: true"))
-    return {"token": _("used by all scheduled jobs and leases")}.get(mode)
+    return {"token": _("used by all scheduled jobs and leases"), "key": _("used by all scheduled jobs")}.get(mode)
 
 
 def clean_error(err: str) -> str:
@@ -88,7 +89,7 @@ def clean_error(err: str) -> str:
 
 
 def missing_means(mode: str) -> str:
-    return _("all scheduled jobs and leases will fail") if mode == "token" else _("every call with this login will fail")
+    return _("all scheduled jobs and leases will fail") if mode == "token" else _("all scheduled agent jobs will fail") if mode == "key" else _("every call with this login will fail")
 
 
 def ask(env: dict) -> str | None:
@@ -124,6 +125,7 @@ def main() -> int:
     rt = runtime_ports.load(ports=("auth",))
     base = rt.clean_env({k: v for k, v in os.environ.items() if k != "LLM_AUTH"})
 
+    asked_now: set[str] = set()   # logins asked about without a run: what was found before is over
     jobs = connector_jobs()
     # logins the owner says nothing on this machine uses (brunna.json logins.not_used, by the credential's key): their
     # expiry is still shown here and on the status page, never alerted on (11-16: the SSH file, on a machine whose owner
@@ -134,7 +136,7 @@ def main() -> int:
         if c.mode == "subscription":
             if jobs == []:   # nothing the platform runs uses it: a lapsed login there breaks nothing
                 print(_("{name}: not checked: no registry job declares connectors: true, and everything else the platform "
-                        "runs uses the headless token", name=c.name))
+                        "runs uses its own login", name=c.name))
                 continue
             if jobs is None:
                 print(_("{name}: the registry index has not been produced yet, so which jobs declare connectors: true "
@@ -143,7 +145,20 @@ def main() -> int:
             if not c.present:
                 problem(f"{c.mode}:missing", _("{path} is missing ({means})", path=c.path, means=missing_means(c.mode)))
                 continue
-            if no_copy:
+            try:   # one that can be asked without a run, and so without a copy of the tool
+                err, asked = rt.check_login(c.mode), True
+            except (AttributeError, NotImplementedError):
+                err, asked = None, False
+            if asked:
+                asked_now.add(c.mode)
+            if asked and err is None:
+                print(_("{name}: ok", name=c.name))
+            elif asked and (rt.is_login_error(err) or "403" in err):
+                problem(f"{c.mode}:login", _("{label} ({used_by}) does not work: {err} — {renew}", label=c.label,
+                                             used_by=used_by(c.mode, jobs) or c.used_by or "", err=clean_error(err), renew=c.renew))
+            elif asked:
+                soft[c.mode] = err
+            elif no_copy:
                 print(_("{name}: no request made: the platform has no copy of the coding agent to make it with: {reason}",
                         name=c.name, reason=no_copy))
             elif (err := ask(base if c.mode == "subscription" else {**base, "LLM_AUTH": c.mode})) is None:
@@ -173,13 +188,25 @@ def main() -> int:
     # what the last requests found ({id: text}), beside the streak: with no request made it stands as it was, so an open
     # alert keeps its ids and the streak its counts
     requested = STREAK.with_name("claude-login-requests.json")
+    if no_copy and (counted := {k for k in soft if k in asked_now}):   # asked without a run: counted whatever the copy
+        try:
+            streak = json.loads(STREAK.read_text())
+        except (OSError, ValueError):
+            streak = {}
+        streak = {**(streak if isinstance(streak, dict) else {}), **{k: int((streak if isinstance(streak, dict) else {}).get(k, 0)) + 1 for k in counted}}
+        STREAK.write_text(json.dumps(streak))
+        for k in counted:
+            print(_("{mode}: request failed (does not look like a login problem; {n} {n:time|times} in a row): {err}", mode=k,
+                    n=streak[k], err=clean_error(soft[k])))
+            if streak[k] >= SOFT_LIMIT:
+                problem(f"{k}:failing", _("claude requests failed {n} times in a row ({mode}): {err}", n=streak[k], mode=k, err=clean_error(soft[k])))
     if no_copy:
         try:
             carried = json.loads(requested.read_text())
         except (OSError, ValueError):
             carried = {}
         for pid, text in (carried.items() if isinstance(carried, dict) else ()):
-            if isinstance(pid, str) and isinstance(text, str) and pid not in ids:
+            if isinstance(pid, str) and isinstance(text, str) and pid not in ids and pid.split(":", 1)[0] not in asked_now:
                 problem(pid, text)
     else:
         try:
