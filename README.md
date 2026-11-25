@@ -103,8 +103,8 @@ overnight (no digest, no `todo.md`, and each `STATE.md` stays a placeholder) unt
 - **Projects talk to each other.** A mailbox between projects; a request nobody picks up gets an agent sent to it.
 - **It runs on its own.** A scheduler with a watchdog, each project's background services, alerts, and a status
   page. A laptop that sleeps catches up when it wakes.
-- **Safe by default.** Sandboxed projects can't read each other or your credentials; credentials are checked and
-  never printed; backups are encrypted.
+- **Projects can be kept apart.** A project you sandbox (`brunna connect` asks) can't read the others or your
+  credentials; declared credentials are checked and never printed; cloud backup, when you turn it on, is encrypted.
 - **English or Traditional Chinese**, for what you read and what your agents write.
 
 Everything it does, in detail: [docs/features.md](docs/features.md).
@@ -123,7 +123,8 @@ says what is off and why.
 ## Privacy and safety
 
 - Everything stays on your computer: your settings, notes and keys are in `~/.brunna`, never in the repo.
-- Model calls go only to the provider you chose. The weekly reflection sends statistics, never conversation text.
+- Model calls go only to the provider you chose. The weekly reflection sends statistics, never conversation
+  text; with the assistant module on, also the session summaries a model on your computer wrote.
 - brunna never receives your Claude login: you make and save the token yourself, and brunna only checks that
   it works.
 - Vulnerabilities: [SECURITY.md](SECURITY.md).

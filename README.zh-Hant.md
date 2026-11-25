@@ -68,7 +68,8 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
    ```
 
 2. 在專案資料夾裡打開你的 agent(`claude` 或 `codex`;brunna 用
-   [nvm 的 node](docs/install.md#requirements) 跑 Claude Code)。session 開始時它會載入這個專案的設定，邊做事邊寫筆記。
+   [nvm 的 node](docs/install.md#requirements) 跑 Claude Code)。session 開始時，Claude Code 會載入這個專案的設定，邊做事邊寫筆記;Codex 目前透過 brunna 的工具
+   (MCP)用信箱和筆記。
 3. `brunna doctor` 會列出還缺什麼，每項都附上怎麼補。狀態頁(網址用 `brunna glance` 看)讓你不開終端機也能看到
    一切是否正常([從別台電腦看](docs/install.md#the-status-page-from-another-computer)、
    [在容器裡](docs/install.md#without-launchd-or-systemd)沒有東西替你開這個網址)。
@@ -95,7 +96,8 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
   協定交給你的個人助理),你回答後再送回專案。
 - **專案之間會溝通。** 專案之間有信箱;沒人接的請求，平台會派 agent 去處理。
 - **自己會跑。** 排程和看門狗、各專案的背景服務、警報、狀態頁。會睡眠的筆電醒來後會補跑。
-- **預設就安全。** 開了 sandbox 的專案讀不到彼此，也讀不到你的憑證;憑證會被檢查、從不顯示;備份有加密。
+- **專案可以隔開。** 開了 sandbox 的專案(`brunna connect` 會問)讀不到其他專案，也讀不到你的憑證;宣告過的憑證會被檢查、從不顯示;
+  雲端備份要你自己打開，開了就有加密。
 - **英文或繁體中文**,你看到的和 agent 寫的都可以選。
 
 完整功能說明:[docs/features.md](docs/features.md)(英文)。
@@ -104,16 +106,17 @@ curl -fsSL https://raw.githubusercontent.com/imaknas/brunna/main/install.sh | sh
 
 | 項目 | 可以用 |
 |---|---|
-| 你的 AI agent | Claude Code:全部功能。Codex:它的 session 開始時會收到信件和寫筆記提醒,也透過 brunna 的工具(MCP)用信箱;`brunna llm setup` 可以讓 brunna 自己的判斷用你的 Codex 登入跑。Codex 本身不處理信箱交辦和 agent job。任何有 headless 模式的 CLI agent,或支援 [Agent Client Protocol](https://agentclientprotocol.com/) 的 agent,透過轉接層接上 |
+| 你的 AI agent | Claude Code:全部功能。Codex:它的 session 開始時會收到信件和寫筆記提醒,也透過 brunna 的工具(MCP)用信箱;`brunna llm setup` 可以讓 brunna 自己的判斷用你的 Codex 登入跑。Codex 本身不處理信箱交辦和 agent job。任何有 headless 模式的 CLI agent,或支援 [Agent Client Protocol](https://agentclientprotocol.com/) 的 agent,可以透過轉接層在拋棄式副本裡處理信箱的請求,旁邊要有一個認得自己 session 的預設 agent(目前是 Claude Code;沒有的話,信箱的請求不會交給任何 agent) |
 | brunna 做判斷用的模型 | 你的 agent 自己的登入、Anthropic、任何相容 OpenAI 的 API,或本機的 Ollama(`brunna llm setup`) |
 | 電腦 | macOS 或 Linux。一直開著的機器最好，筆電也可以 |
 
-還沒有 agent 或模型?筆記、排程和信箱照樣能用;`brunna doctor` 會說哪些功能關著、為什麼。
+還沒有 agent 或模型?筆記、排程和信箱照樣能用，每晚的整理不會跑;`brunna doctor` 會說哪些功能關著、為什麼。
 
 ## 隱私與安全
 
 - 一切都留在你的電腦上：設定、筆記和金鑰放在 `~/.brunna`,不在 repo 裡。
-- 模型呼叫只送到你選的 provider。每週回顧只送統計數字，從不送對話內容。
+- 模型呼叫只送到你選的 provider。每週回顧送的是統計數字，從不送對話內容;開了助理模組時，
+  還會送你電腦上的模型寫的 session 摘要。
 - brunna 不經手你的 Claude 登入:token 由你自己產生、自己存,brunna 只檢查它能不能用。
 - 回報漏洞:[SECURITY.md](SECURITY.md)。
 
@@ -134,6 +137,7 @@ AI App 幫你安裝 brunna 的過程中，有些事會直接問你，不經過�
 | 日常指令 | [docs/commands.md](docs/commands.md) |
 | 更新與退回 | [docs/upgrading.md](docs/upgrading.md) |
 | 給任何 agent 用的信箱(MCP) | [docs/mcp.md](docs/mcp.md) |
+| 無人看管的工作要用的登入(`brunna credentials`) | [docs/credentials.md](docs/credentials.md) |
 | 每個部分的設計 | [docs/design/](docs/design) |
 | 跟其他系統共用的介面 | [contracts/](contracts) |
 | 參與開發(人和 agent) | [CONTRIBUTING.md](CONTRIBUTING.md)、[AGENTS.md](AGENTS.md) |
