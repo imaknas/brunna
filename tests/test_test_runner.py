@@ -334,6 +334,42 @@ class Runner(unittest.TestCase):
         with self.assertRaises(ProcessLookupError):
             os.kill(pid, 0)
 
+    def test_a_detached_server_doesnt_outlive_its_tier(self):
+        """A server started in its own session (Playwright's webServer) left two running for days after the-crucible's
+        nightly tiers (11-25): one whose parent already exited is found by its working folder in the run's tree."""
+        pidfile = self.tmp / "pid"
+        spawn = ("import os, subprocess, sys; p = subprocess.Popen(['sleep', '300'], start_new_session=True); "
+                 "open(sys.argv[1], 'w').write(str(p.pid))")
+        self.declare(v=2, inputs=["env:PIDFILE"], tests=[{"tier": "bg", "when": ["merge"],
+                                                          "run": f'python3 -c "{spawn}" "$PIDFILE"; exit 0'}])
+        r = self.run_("--tier", "bg", PIDFILE=str(pidfile))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        pid = int(pidfile.read_text())
+        time.sleep(0.5)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(pid, 0)
+
+    def test_stop_takes_a_child_in_its_own_session_while_its_parent_lives(self):
+        """The time limit's path: the tree is read before the first signal, so a child in another group goes too."""
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("tr", ROOT / "bin" / "test-runner.py")
+        tr = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(tr)
+        pidfile = self.tmp / "pid2"
+        code = ("import subprocess, sys, time; p = subprocess.Popen(['sleep', '300'], start_new_session=True); "
+                "open(sys.argv[1], 'w').write(str(p.pid)); time.sleep(300)")
+        p = subprocess.Popen([sys.executable, "-c", code, str(pidfile)], start_new_session=True)
+        for _ in range(50):
+            if pidfile.exists() and pidfile.read_text():
+                break
+            time.sleep(0.1)
+        child = int(pidfile.read_text())
+        tr.stop(p, grace=1)
+        p.wait(timeout=10)
+        time.sleep(0.3)
+        with self.assertRaises(ProcessLookupError):
+            os.kill(child, 0)
+
     def test_only_affected_tiers_run_at_merge(self):
         self.git(self.ws, "checkout", "-q", "-b", "work")
         self.declare(v=2, code=["src/**"], tests=[{"tier": "full", "run": "true", "when": ["merge"]}])

@@ -419,20 +419,106 @@ class Slots:
         self.fds = []
 
 
-def stop(p: subprocess.Popen) -> None:
-    """The whole process group: TERM, a grace period, KILL (children that outlived the command included)."""
-    for sig, wait in ((signal.SIGTERM, GRACE), (signal.SIGKILL, 0)):
+class Stopped(Exception):
+    """The runner was sent TERM (the scheduler's time limit, a person's kill): its tiers are stopped, not left running."""
+
+
+def _on_term(_sig, _frame):
+    raise Stopped()
+
+
+def descendants(pid: int) -> list[int]:
+    """Every process below pid (by parent), whatever its group: a tier's servers may start their own group or session
+    (Playwright's webServer does), and killing the tier's group alone left two running for days (the-crucible,
+    11-25)."""
+    try:
+        out = subprocess.run(["ps", "-axo", "pid=,ppid="], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    kids: dict[int, list[int]] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            kids.setdefault(int(parts[1]), []).append(int(parts[0]))
+    found, todo = [], [pid]
+    while todo:
+        for c in kids.get(todo.pop(), []):
+            if c not in found:
+                found.append(c)
+                todo.append(c)
+    return found
+
+
+def working_in(tree: pathlib.Path) -> list[int]:
+    """Processes of this user whose working folder is inside the run's tree: a server a tier started detached and whose
+    parent already exited is no one's child any more, but it still works in the exported tree."""
+    try:
+        out = subprocess.run(["lsof", "-a", "-d", "cwd", "-u", str(os.getuid()), "-Fpn"], capture_output=True,
+                             text=True, timeout=20).stdout
+    except (OSError, subprocess.SubprocessError):
+        return []
+    root, found, pid = str(tree.resolve()), [], None
+    for line in out.splitlines():
+        if line.startswith("p") and line[1:].isdigit():
+            pid = int(line[1:])
+        elif line.startswith("n") and pid and pid != os.getpid() and (line[1:] == root or line[1:].startswith(root + "/")):
+            found.append(pid)
+    return found
+
+
+def sweep(tree: pathlib.Path) -> None:
+    """KILL what still works in the tree after its tier is done (the tree is about to be removed)."""
+    for pid in working_in(tree):
         try:
-            os.killpg(p.pid, sig)
+            os.kill(pid, signal.SIGKILL)
         except (ProcessLookupError, PermissionError):
-            return
-        end = time.monotonic() + wait
-        while time.monotonic() < end:
+            pass
+
+
+def stop(p: subprocess.Popen, grace: float = GRACE) -> None:
+    """The whole process group and every process below the command, wherever its group: TERM, a grace period, KILL
+    (children that outlived the command included). The tree is taken before the first signal: a child whose parent
+    dies is handed to init and can't be traced to the run afterwards."""
+    tree = descendants(p.pid)
+    groups = {p.pid}
+    for pid in tree:
+        try:
+            groups.add(os.getpgid(pid))
+        except (ProcessLookupError, PermissionError):
+            pass
+    groups.discard(os.getpgrp())   # never the runner's own group
+
+    def alive() -> bool:
+        for g in groups:
             try:
-                os.killpg(p.pid, 0)
+                os.killpg(g, 0)
+                return True
             except (ProcessLookupError, PermissionError):
-                return
+                pass
+        for pid in tree:
+            try:
+                os.kill(pid, 0)
+                return True
+            except (ProcessLookupError, PermissionError):
+                pass
+        return False
+
+    for sig, wait in ((signal.SIGTERM, grace), (signal.SIGKILL, 0)):
+        for g in groups:
+            try:
+                os.killpg(g, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+        for pid in tree:
+            try:
+                os.kill(pid, sig)
+            except (ProcessLookupError, PermissionError):
+                pass
+        end = time.monotonic() + wait
+        while time.monotonic() < end and alive():
             time.sleep(0.2)
+        if not alive():
+            return
 
 
 def run_tier(tier: dict, tree: pathlib.Path, env: dict, slots: Slots, log, cache: pathlib.Path | None = None) -> bool:
@@ -454,12 +540,15 @@ def run_tier(tier: dict, tree: pathlib.Path, env: dict, slots: Slots, log, cache
                              stdin=subprocess.DEVNULL, start_new_session=True)
         try:
             rc = p.wait(timeout=TIMEOUT)
-        except (subprocess.TimeoutExpired, KeyboardInterrupt):
-            stop(p)
+        except (subprocess.TimeoutExpired, KeyboardInterrupt, Stopped):
+            # stopped from outside (the scheduler's TERM): a short grace, so the tree is gone before its KILL
+            stop(p, grace=min(GRACE, 3))
             p.wait()
+            sweep(tree)
             log.write(_("(stopped: over {minutes} minutes or interrupted)\n", minutes=TIMEOUT // 60).encode())
             return False
-        stop(p)   # what the command left running in its group
+        stop(p)   # what the command left running in its group, and below it
+        sweep(tree)
         return rc == 0
     finally:
         slots.release()
@@ -486,6 +575,7 @@ def main(argv: list[str]) -> int:
     src.add_argument("--rev")
     src.add_argument("--index", action="store_true")
     a = ap.parse_args(argv)
+    signal.signal(signal.SIGTERM, _on_term)
     started = time.monotonic()
     name = None
     try:
