@@ -540,6 +540,12 @@ memory tracking and runs nothing long-lived (most projects) needs nothing under 
   each exists, whether it is backed up (`backup.covers()`, the same rules as the nightly backup) and whether it is about
   to expire, and alerts on problems; it also lists files whose names look like credentials but are not declared
   (reminder only). Neither this script nor `check-claude-login.py` prints values
+- **A project's data outside its folder** (recordings, datasets, results, weights it trained) is declared in its
+  registry entry's `data:` (path, what, exclude patterns, or `backup: false` with a why; `bin/project_data.py`, design
+  `docs/design/project-data.md`): the nightly backup takes each entry resolved, with its excludes, and the platform job
+  `brunna/data` (daily at 08:10, `bin/check-data.py`) checks each is there and hasn't ballooned, and writes to a project
+  about an undeclared folder named after it. The owner's backup rule (the `bin/backup.py` header): what can be made or
+  downloaded again is not backed up; weights we changed ourselves and results are
 - **Alerts** (`bin/alert.py`; channels: Discord, ntfy, email, macOS notifications, configured in brunna.json `alerts`): a
   new problem is sent at once, an unresolved one is re-sent daily (after 23 hours), and a recovery goes only to the assistant (it
   closes its item; nothing is pushed to the owner); every notice tried is logged in `.state/alerts-log.jsonl`

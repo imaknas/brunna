@@ -45,6 +45,7 @@ import tempfile
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import gitdirs  # noqa: E402
 import hubconf  # noqa: E402
+import project_data  # noqa: E402
 import i18n  # noqa: E402
 import project_git  # noqa: E402
 from project_git import EX_SANDBOX  # noqa: E402
@@ -131,7 +132,7 @@ def workspace_env_files(ws: pathlib.Path) -> list[pathlib.Path]:
     return sorted(p for p in out if p.is_file())
 
 
-def included() -> list[pathlib.Path]:
+def owner_included() -> list[pathlib.Path]:
     """{settings} backup.include, and with .state in it the hub's shared state too (hubconf.shared(): what sandboxed code
     reads, split off .state on 11-08, docs/design/capabilities.md; the renames record in it can't be rebuilt)."""
     out = [p for p in (hubconf.path(x) for x in CFG.get("include") or []) if p]
@@ -140,11 +141,31 @@ def included() -> list[pathlib.Path]:
     return out
 
 
+def declared() -> list[project_data.Entry]:
+    """The projects' declared data the backup takes (registry data:, docs/design/project-data.md): resolved, each one
+    that passes the place rules and doesn't overlap the owner's include or another project's; the rest are skipped
+    here and reported by bin/check-data.py."""
+    return [e for e in project_data.entries(include=owner_included()) if e.path and e.backup]
+
+
+def included() -> list[pathlib.Path]:
+    """What the backup takes as folders: the owner's include, then the projects' declared data (resolved: restic
+    matches excludes against the path as given, and stores a symlink argument as the link only)."""
+    return owner_included() + [e.path for e in declared()]
+
+
+def excludes() -> list[str]:
+    """Every restic --exclude pattern: the owner's (~ expanded) and each declared entry's, on its resolved path."""
+    out = [str(hubconf.path(x)) if x.startswith("~") else x for x in CFG.get("exclude") or []]
+    for e in declared():
+        out += e.patterns()
+    return out
+
+
 def covers(path: pathlib.Path) -> bool:
     """Whether this file goes into the backup (used by check-secrets.py; same rules as cmd_run / stage): under include
     and not excluded, or a .env / .env.* in a registered project's workspace (stage copies those, see
     workspace_env_files)."""
-    import fnmatch
     path = path.expanduser().resolve()
     if {hubconf.session_addresses_dir().resolve(), (hubconf.secrets_dir() / "tmp").resolve(),
             hubconf.runtimes_dir().resolve(), (hubconf.secrets_dir() / "credentials").resolve(),
@@ -156,10 +177,8 @@ def covers(path: pathlib.Path) -> bool:
     dbs = [hubconf.bus_db(), *(hubconf.path(d["path"]) for d in CFG.get("sqlite") or [])]
     if any(db and path == db.resolve() for db in dbs):  # SQLite is copied separately with the backup API
         return True
-    for x in CFG.get("exclude") or []:
-        pat = str(hubconf.path(x)) if x.startswith(("~", "/")) else x
-        if fnmatch.fnmatch(str(path) if "/" in pat else path.name, pat):
-            return False
+    if any(project_data.excluded(path, x) for x in excludes()):   # restic's rules, not fnmatch's
+        return False
     for inc in included():
         if path == inc.resolve() or inc.resolve() in path.parents:
             return True
@@ -256,8 +275,8 @@ def cmd_run() -> int:
                 "--exclude", str(hubconf.secrets_dir() / "tmp"), "--exclude", str(hubconf.runtimes_dir()),
                 "--exclude", str(hubconf.secrets_dir() / "credentials"),
                 "--exclude", str(hubconf.secrets_dir() / "git-push")]
-        for x in CFG.get("exclude") or []:
-            args += ["--exclude", str(hubconf.path(x)) if x.startswith("~") else x]
+        for x in excludes():
+            args += ["--exclude", x]
         r = restic(*args, *paths, capture=True)
         summary = next((json.loads(l) for l in r.stdout.splitlines() if '"message_type":"summary"' in l), {})
         if retention_due(now().date(), last_retention()):   # Sundays, or the first backup after a missed one

@@ -500,6 +500,11 @@ class Routing(unittest.TestCase):
             pt.start()
             self.addCleanup(pt.stop)
 
+    def test_a_projects_declared_data_goes_to_that_project(self):
+        """bin/check-data.py's key: the project whose declaration it is fixes it (docs/design/project-data.md)."""
+        self.assertEqual(self.a.route(self.a.DATA_KEY + "garden"), "garden")
+        self.assertEqual(self.a.route(self.a.DATA_KEY + "gone"), "brunna")
+
     def hubbus(self, *a, out=None):
         self.letters.append(a)
         ok = self.letter_ok(a) if callable(self.letter_ok) else self.letter_ok

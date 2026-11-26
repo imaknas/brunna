@@ -19,6 +19,10 @@
   key) gets brunna's own grant for it, kept in the secrets folder and given only to that job's connection to that
   service, never to the agent or your Keychain. A to-do tells you when to run `brunna credentials grant`
   ([`docs/credentials.md`](credentials.md)).
+- **A project's data outside its folder.** A project declares the data it keeps outside its folder (recordings,
+  datasets, weights it trained) in the registry; the nightly encrypted backup takes it, leaving out what can be made
+  or downloaded again, a daily check says when a folder is gone or has ballooned, and a project is asked about an
+  undeclared folder named after it ([`docs/design/project-data.md`](design/project-data.md)).
 - **Sandboxed projects.** A project with `enforce.sandbox` gets a policy computed by the platform: its agents, services and
   jobs can write only its own folders, can't read other projects, credentials or the Keychain, listen only on a
   declared port, and mail only as themselves (Seatbelt on macOS, Landlock and seccomp on Linux; an OS without a working

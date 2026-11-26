@@ -452,6 +452,7 @@ PLATFORM_KEYS = ("runtime-held-", "runtime-checks-", "runtime-install-", "runtim
 # not here on purpose: git-fence (what it finds in a project's git is a security finding) and every safety refusal
 # (memory-sync-refused, memory-copy-refused, tool-servers): the owner's
 JOB_KEY = "scheduler-job:"
+DATA_KEY = "project-data:"   # bin/check-data.py, per project (docs/design/project-data.md)
 BROKEN_KEY = "scheduler-broken:"   # + a project (or module) with a job the scheduler can't use
 # the platform's jobs that keep the mailbox running: their failure can't go through it
 OWNER_JOBS = ("hubbus-bridge",)
@@ -480,6 +481,12 @@ def _route(key: str) -> str:
             return project
         return hubconf.hub_project()   # brunna's own jobs and the modules'
     if key.startswith(PLATFORM_KEYS):
+        return hubconf.hub_project()
+    if key.startswith(DATA_KEY):   # a project's declared data (bin/check-data.py): its own agents fix the declaration
+        project = key[len(DATA_KEY):]
+        docs = hubconf.projects()
+        if project in docs and project != hubconf.hub_project() and docs[project].get("type") != "platform":
+            return project
         return hubconf.hub_project()
     return "owner"
 

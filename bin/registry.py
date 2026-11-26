@@ -98,6 +98,15 @@ schema v1 (contracts/project.v1.md has the full description):
       sent as Bearer <value>). backup defaults to false (re-grant after a restore), broken: todo (default; an alert and
       an owner to-do with the re-grant command) | alert. An entry with kind is owner-only (credential_entries), and not
       for modules
+  data:      [{path, what, backup?, why?, exclude?}]
+                                  data this project keeps outside its folder, or in an ignored folder inside it
+                                  (recordings, datasets, weights it trained, its downloads): the nightly backup takes
+                                  each one unless backup: false (which needs a why), leaving out the exclude patterns
+                                  (restic's, relative to path); bin/check-data.py checks them daily. path is ~/… or
+                                  absolute and must be plainly the project's: inside its workspace or runtime (not the
+                                  whole of it) or with a folder named after the project, never in a platform or owner
+                                  folder; checked as text here and resolved where the disk is read (bin/project_data.py,
+                                  docs/design/project-data.md). Not a security field
   gate: strict                    the merge gate enforced: main in the main checkout can't be committed to directly
                                   (only via merge-branch); by default it only detects
   jobs:      [{name, at | every | trigger, run | (kind: agent + prompt), cwd?, days?, days_of_month?, months?,
@@ -203,6 +212,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import event_jobs  # noqa: E402
 import hubconf  # noqa: E402
 import names  # noqa: E402
+import project_data  # noqa: E402
 import i18n  # noqa: E402
 import isolation  # noqa: E402
 import tiers  # noqa: E402
@@ -214,7 +224,7 @@ _ = i18n.domain(__file__)
 CACHE = hubconf.REGISTRY_INDEX.parent   # hubconf.SHARED: readable inside every sandbox, written only here
 TOP = {"v", "name", "type", "purpose", "paths", "memory", "privacy", "runtime", "push_on_merge", "commits", "mailbox",
        "publishes", "provides", "consumes", "services", "jobs", "enforce", "network", "allow_write", "gate", "secrets",
-       "models", "metered_models", "layout_intent", "agents", "agents_per_day"}
+       "models", "metered_models", "layout_intent", "agents", "agents_per_day", "data"}
 TOP_V2 = TOP | {"tests", "code", "inputs", "commit_gate"}
 # what the index's documents are: 2 = project v2 (v1 files upgraded as they are read). Readers that need v2 fields
 # (merge-branch) refuse an index of an older format; registry.refresh never overwrites a newer one
@@ -1009,6 +1019,7 @@ def _validate_body(doc: dict, stem: str, top: set[str], runtime_keys: tuple[str,
     if doc.get("gate") not in (None, "strict", "detect"):
         errs.append(_("gate can only be strict or detect (the default)"))
     errs += validate_secrets(doc.get("secrets"))
+    errs += project_data.text_problems(stem, doc)
     for key in ("network", "allow_write"):
         v = doc.get(key)
         if v is not None and (not isinstance(v, list) or not all(isinstance(x, str) and x for x in v)):

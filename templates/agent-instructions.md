@@ -170,6 +170,29 @@ no longer needed), close it, or {{assistant}} keeps showing it as "waiting for y
   (rewriting history is not enough, others may have cloned it); deployment settings that point at this machine go in a
   settings file that is not in the repo.
 
+## Data outside the project folder (declare it, or it isn't backed up)
+
+The nightly backup never takes whole project folders. **The moment you keep data outside this project's folder, or in
+an ignored folder inside it** (recordings, datasets, results, weights you trained, a download cache of your own),
+declare it in this project's registry entry with a manifest.update, as above:
+
+    data:
+    - path: ~/<a folder named after this project>/…   # or a folder inside this project's own folder
+      what: one line saying what it is
+      exclude: ["checkpoints/", "**/*.wav"]           # what can be made again; restic patterns, relative to path
+    - path: ~/.cache/<this project>
+      what: downloaded models
+      backup: false
+      why: downloaded again on first use
+
+The rule for what is backed up: a binary that can be made again is not; of models only weights we changed ourselves
+are, and one that can be downloaded again never is; results that took runs to get are data, and are. The path must be
+plainly this project's (inside its folder, or with a folder named after it), never inside another project's or one of
+{{owner}}'s own folders. The platform checks every day that each declared folder is there and hasn't ballooned, and
+writes to you about an undeclared folder named after this project. Private data (recordings of a person, personal
+data) never goes into the repo, ignored or not, if the repo is or may become public: keep it outside the folder and
+declare it.
+
 ## Programs the sandbox blocks (the platform runs them)
 
 When this project's registry entry declares capabilities in `enforce.capabilities` (e.g. `gpu` for an idea sandbox), a

@@ -209,6 +209,14 @@ jobs:
   max_attempts_per_day: 2
   run: bin/py bin/check-secrets.py
   found_exit: true   # it sends what it finds (alert-routing.md step 3)
+# the projects' declared data outside their folders: resolves, exists, hasn't ballooned; asks a project about an
+# undeclared folder named like it (docs/design/project-data.md)
+- name: data
+  at: "08:10"
+  cwd: hub
+  max_attempts_per_day: 2
+  run: bin/py bin/check-data.py
+  found_exit: true
 # merged, clean worktrees: idle ≥ 2 days, delete rebuildable dependencies; removed only at ≥ 14 days with nobody using
 # them (branch kept)
 - name: prune-worktrees

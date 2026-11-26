@@ -273,6 +273,11 @@ Built: steps 0–2 and step 4, the waiting report. Left:
 
 ### 5. Smaller items
 
+- **A project's data outside its folder** (`project-data.md`, 11-26, asked by the owner through breezyvoice): built
+  after one blind review of the design: registry `data:`, the backup taking it, `brunna/data` daily, the rules text.
+  Left: knowing which project uses which shared download (a Hugging Face or Ollama model), so unused ones are offered
+  for deletion without the owner asking around.
+
 - **Event jobs:** a receiver for outside sources (CI, webhooks) with its auth; waking the scheduler when an event is
   published.
 - **Idea sandboxes:** an archive endpoint for dropped ideas. Growing up (11-15, `idea-sandboxes.md` "Growing up") is

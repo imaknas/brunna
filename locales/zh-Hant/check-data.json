@@ -1,0 +1,11 @@
+{
+ "Checked {count} declared {count:folder|folders}; {problems} {problems:project|projects} with problems": "檢查了 {count} 個宣告的資料夾;{problems} 個專案有問題",
+ "The platform found {path} (over 50 MB), which looks like {project}'s data but isn't declared. If it is yours, declare it in your registry entry's data: (path, what, and either the exclude patterns of what can be made again, or backup: false with a why if all of it can be downloaded or made again), with a manifest.update. Until then the nightly backup doesn't take it. If it isn't yours, reply saying so.": "平台找到 {path}(超過 50 MB),看起來是 {project} 的資料,但沒有宣告。如果是你們的,請用 manifest.update 在登錄條目的 data: 宣告(path、what,再加上可重新產生之物的 exclude pattern;若全部都能重新下載或產生,改寫 backup: false 並附 why)。宣告之前,每晚的備份不會收它。如果不是你們的,請回信說明。",
+ "{project}'s declared data is fine again": "{project} 宣告的資料又正常了",
+ "{project}: undeclared data that looks like its: {path}": "{project}:看起來是它的、沒宣告的資料:{path}",
+ "{project}: {path} backed up, {mb} MB": "{project}:{path} 有備份,{mb} MB",
+ "{project}: {path} declared, not backed up": "{project}:{path} 已宣告,不備份",
+ "{where}: missing (moved? change the declaration)": "{where}:不見了(搬走了?請改宣告)",
+ "{where}: skipped by the backup: {why}": "{where}:備份跳過它:{why}",
+ "{where}: what the backup takes of it grew to {gb} GB in a week: did something that can be made again land in it without an exclude?": "{where}:備份要收的部分一週內長到 {gb} GB:是不是有可以重新產生的東西放進去、卻沒排除?"
+}
