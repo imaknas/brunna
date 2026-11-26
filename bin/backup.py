@@ -19,6 +19,9 @@ What is backed up (what only the hub machine has, and cannot be recovered once l
     .env* (up to three levels deep, e.g. backend/.env)
   - the directories listed in {settings} backup.include (the assistant's data, platform state, secrets, service data,
     Claude Code transcripts)
+The rule for what goes in backup.include (the owner's, 11-26): a binary that can be made again is not backed up, and
+of models only weights we changed ourselves (a fine-tune, a trained checker) are; a model that can be downloaded again
+never is. Results that took runs to get (an experiment's databases) are data, and are backed up.
 Not backed up: transcripts of the work profile (company content), GitHub mirrors, whole workspaces, generated videos,
 venv/cache, and live sessions' wake addresses (hubconf.session_addresses_dir: one only works while its session runs), and the
 store of the coding agents' checked copies (hubconf.runtimes_dir: rebuilt from the vendor, ~300 MB a copy), and the
