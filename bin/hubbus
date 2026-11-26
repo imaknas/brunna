@@ -4116,9 +4116,8 @@ def send_letter(c, a, sender: str, session, here, boxed: bool = False, mid: str 
     that project, never a name in the file; a reply only in its own threads). mid: the letter id (else --id, else a
     new one); --id stays what it is to a task, its key. Returns the id to print. A question with --replaces closes
     each open question it names after it is sent, as a drop --question saying which replaced it."""
-    replaced = list(getattr(a, "replaces", None) or [])
     out = send_one(c, a, sender, session, here, boxed, mid)
-    for i, old in enumerate(replaced):
+    for i, old in enumerate(getattr(a, "replaces", None) or []):   # as send_one left them: unique, still open
         drop = argparse.Namespace(cmd="send", sender=sender, to=OWNER_ADDRESS, type="drop", question=old,
                                   text=_("replaced by {id}", id=out), **{k: None for k in SEND_FIELDS
                                                                          if k not in ("to", "type", "question", "text")})

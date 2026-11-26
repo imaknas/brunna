@@ -79,7 +79,7 @@ class Create(Base):
         (self.ws / ".git").mkdir(parents=True)
         self.started, self.asked = [], []
 
-        def lookup(project, key):
+        def lookup(project, key, strict=False):
             self.asked.append((project, key))
             return dict(Q) if (project, key) == ("proj", Q["id"]) else None
         for target, attr, value in [
@@ -142,11 +142,21 @@ class Create(Base):
     def test_a_resume_drops_a_question_no_longer_open(self):
         self.assertEqual(self.post({"question": Q["id"]})[0], 201)
         self.m.LEASES[SID].state = "detached"
-        with mock.patch.object(self.m, "open_question", lambda project, key: None):
+        with mock.patch.object(self.m, "open_question", lambda project, key, strict=False: None):
             code, body = self.post({"resume": True})
         self.assertEqual(code, 201)
         self.assertIsNone(self.m.LEASES[SID].question)
         self.assertNotIn("question", body)
+
+    def test_a_resume_that_can_t_read_the_mailbox_keeps_the_question(self):
+        self.assertEqual(self.post({"question": Q["id"]})[0], 201)
+        self.m.LEASES[SID].state = "detached"
+
+        def unreadable(project, key, strict=False):
+            raise self.m.Unreadable("locked")
+        with mock.patch.object(self.m, "open_question", unreadable):
+            code, body = self.post({"resume": True})
+        self.assertEqual((code, body["question"]), (201, Q["id"]))
 
 
 class Instructions(Base):
@@ -189,8 +199,13 @@ class Answered(Base):
             return types.SimpleNamespace(returncode=1 if bad else 0, stderr="hubbus: not a question proj asked" if bad else "",
                                          stdout="")
         self.still_open = True
+
+        def lookup(project, key, strict=False):
+            if self.still_open is None:
+                raise self.m.Unreadable("locked")
+            return dict(Q) if self.still_open else None
         for target, attr, value in [(self.m, "hubbus", hubbus), (self.m.subprocess, "Popen", lambda *a, **k: None),
-                                    (self.m, "open_question", lambda project, key: dict(Q) if self.still_open else None)]:
+                                    (self.m, "open_question", lookup)]:
             p = mock.patch.object(target, attr, value)
             p.start()
             self.addCleanup(p.stop)
@@ -228,6 +243,16 @@ class Answered(Base):
         self.m.deliver(self.lease, h, 2)
         self.assertEqual([a for a in self.sent if a[:1] == ("send",) and "--question" in a], [])
         self.assertIsNone(self.lease.question)
+        self.assertEqual((h["answered"]["closed"], h["answered"]["already_closed"]), (False, True))
+        report = next(a for a in self.sent if "--type" in a and a[a.index("--type") + 1] == "info")
+        self.assertIn("not sent", report[report.index("--text") + 1])
+
+    def test_a_mailbox_that_can_t_be_read_doesn_t_lose_the_answer(self):
+        self.still_open = None
+        h = self.h()
+        self.m.deliver(self.lease, h, 1)
+        self.assertEqual(len([a for a in self.sent if a[:1] == ("send",) and "--question" in a]), 1)
+        self.assertTrue(h["answered"]["closed"])
 
     def test_a_failed_close_is_said_and_the_question_stays_open(self):
         self.fail = True

@@ -178,19 +178,28 @@ QUESTION_FIELDS = ("id", "project", "ts", "text", "options", "default")   # a pe
 QUESTION_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~-]{0,159}")   # an id as the bus has them; never a leading -
 
 
-def open_question(project: str, key: str) -> dict | None:
+class Unreadable(Exception):
+    """The project's open questions couldn't be read: nothing is known about whether one is open."""
+
+
+def open_question(project: str, key: str, strict: bool = False) -> dict | None:
     """The open question with this id that project asked the owner (hubbus open-questions: open, not withdrawn, asked by
-    it), as the lease keeps it; None when there is none or the mailbox can't be read (logged)."""
+    it), as the lease keeps it; None when there is none. The mailbox can't be read (logged): None, or Unreadable when
+    strict (a caller that would otherwise take "can't tell" for "closed")."""
     try:
         r = subprocess.run([PY, str(HUB / "bin" / "hubbus"), "open-questions", "--project", project, "--json"],
                            cwd=str(HUB), capture_output=True, text=True, timeout=60)
         rows = json.loads(r.stdout) if r.returncode == 0 else None
     except (OSError, ValueError, subprocess.TimeoutExpired) as e:
         log(_("{project}: its open questions could not be read: {e!r}", project=project, e=e))
+        if strict:
+            raise Unreadable(repr(e)) from None
         return None
     if not isinstance(rows, list):
         log(_("{project}: its open questions could not be read: {why}", project=project,
               why=(r.stderr or "").strip()[-300:] or f"exit {r.returncode}"))
+        if strict:
+            raise Unreadable(f"exit {r.returncode}")
         return None
     for q in rows:
         if isinstance(q, dict) and q.get("id") == key:
@@ -832,10 +841,16 @@ def deliver(lease: Lease, h: dict, n: int, earlier: list[dict] | None = None) ->
     for i, q in enumerate(h.get("open_questions") or []):
         hubbus("send", "--from", proj, "--to", owner, "--type", "question", "--id", handover_id(sid, n, f"q-{i}"), "--text", q,
                "--context", f"lease:{sid}")
-    if (ans := h.get("answered")) and open_question(proj, ans["question"]) is None:
+    still = True
+    if (ans := h.get("answered")):
+        try:
+            still = open_question(proj, ans["question"], strict=True) is not None
+        except Unreadable:   # can't tell: sent, and hubbus checks it is the project's own open question
+            still = True
+    if ans and not still:
         # answered elsewhere meanwhile, or already closed by an earlier handover of this lease: not answered twice
         log(_("{id}: {question} is no longer open; the answer is not sent again", id=sid, question=ans["question"]))
-        ans["closed"] = True
+        ans["closed"], ans["already_closed"] = False, True
         lease.question = None
     elif ans:
         # the owner's confirmed answer closes the question the lease was opened about, as the project would (hubbus checks
@@ -863,7 +878,9 @@ def deliver(lease: Lease, h: dict, n: int, earlier: list[dict] | None = None) ->
     body += [_("- Open question: {q}", q=q) for q in h.get("open_questions") or []]
     if (ans := h.get("answered")):
         body += [_("- {owner} answered question {question}: {answer}", owner=hubconf.owner_tag(), question=ans["question"],
-                   answer=ans["answer"]) + ("" if ans.get("closed") else _(" (closing it failed; it is still open)"))]
+                   answer=ans["answer"]) + ("" if ans.get("closed") else
+                                            _(" (it was already closed; this answer was not sent)") if ans.get("already_closed")
+                                            else _(" (closing it failed; it is still open)"))]
     hubbus("send", "--from", hubconf.hub_project(), "--to", proj, "--type", "info", "--id", handover_id(sid, n, "report"),
            "--text", "\n".join(body))
     # notes written into the project's memory (registered in managed-files); the task keys sent are attached, so the
@@ -1569,6 +1586,14 @@ class H(http.server.BaseHTTPRequestHandler):
             refuse_folder(str(ws))
         except FolderRefused as e:
             return self.err(409, "folder_refused", str(e))
+        # a resume keeps the question it was opened about while it is open: asked before the runner-wide lock (a
+        # subprocess); one that can't be read is kept
+        kept = getattr(LEASES.get(sid), "question", None) if question is None else None
+        if kept:
+            try:
+                kept = kept if open_question(proj, kept.get("id"), strict=True) else None
+            except Unreadable:
+                pass
         with _lock:
             if sid in LEASES and live(LEASES[sid]):
                 return self.reply(200, {"v": 1, **LEASES[sid].public()})
@@ -1587,8 +1612,8 @@ class H(http.server.BaseHTTPRequestHandler):
                            "handovers": prev.handovers if prev else 0,
                            "version": prev.version if prev else None,
                            # a lease resumed without a question keeps the one it was opened about, while it is open
-                           "question": question or (prev.question if prev and prev.question and open_question(
-                               proj, prev.question.get("id")) else None)})
+                           "question": question or (kept if prev and kept and prev.question
+                                                    and prev.question.get("id") == kept.get("id") else None)})
             LEASES[sid] = lease
             lease.emit("state", state="attaching", project=proj)
             try:

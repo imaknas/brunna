@@ -139,7 +139,7 @@ def verdict(got, f: dict, open_qs: list[tuple[str, str]]) -> Verdict:
     shown = open_qs[-OPEN_MAX:]
     ids = {label(i): qid for i, (qid, _t) in enumerate(shown)}
     repeats = []
-    for lab in got["repeats"]:
+    for lab in sorted(x for x in got["repeats"] if isinstance(x, str)):   # their order is the platform's, not the model's
         if isinstance(lab, str) and lab in ids and ids[lab] not in repeats and ids[lab] not in f["replaces"]:
             repeats.append(ids[lab])
     lines, seen = [], set()
