@@ -91,6 +91,26 @@ class AutoPrune(unittest.TestCase):
         self.assertIn("uv sync", (gd / worktrees.MARKER).read_text())
         self.assertEqual(len(r["deps"]), 1)
 
+    def test_tier1_finds_dependencies_one_folder_down(self):
+        """backend/.venv beside backend/uv.lock goes (11-26: a repo split into folders kept 73 GB of them); one
+        without its recipe beside it, one two folders down and one behind a symlinked folder stay."""
+        p = self.add("split", idle=3, venv=False)
+        for rel in ("backend/.venv", "nolock/.venv", "a/b/.venv", "real/.venv"):
+            (p / rel).mkdir(parents=True)
+            (p / rel / "x").write_text("x")
+        for rel in ("backend/uv.lock", "a/b/uv.lock", "real/uv.lock"):
+            (p / rel).write_text("lock\n")
+        (p / "linked").symlink_to(p / "real")
+        r = worktrees.auto_prune(dry_run=False)
+        self.assertFalse((p / "backend/.venv").exists())
+        for kept in ("nolock/.venv", "a/b/.venv"):
+            self.assertTrue((p / kept / "x").exists(), kept)
+        self.assertEqual(len(r["deps"]), 2, r["deps"])   # backend and real; the folder reached through a symlink isn't
+        self.assertTrue(any("backend/.venv" in d for d in r["deps"]), r["deps"])
+        self.assertFalse(any("linked" in d for d in r["deps"]), r["deps"])
+        gd = pathlib.Path(git(p, "rev-parse", "--absolute-git-dir").strip())
+        self.assertIn("cd backend && uv sync", (gd / worktrees.MARKER).read_text())
+
     def test_tier1_needs_recipe(self):
         p = self.add("norecipe", idle=3, recipe=False)
         worktrees.auto_prune(dry_run=False)

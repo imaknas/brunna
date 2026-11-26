@@ -19,7 +19,8 @@ and a worktree on the base branch, wherever they are (project-git-job.py lists n
   at commits would count "chatting yesterday, no commit for three days" as idle for three days.
   Level 1 (idle ≥ 2 days): only deletes dependencies that can be rebuilt: `.venv` (with uv.lock or pyproject.toml
     next to it), `node_modules` (with a lock file next to it; without a lock file it's not deleted, since a reinstall
-    isn't guaranteed identical). Folder, branch and files all stay, and the session can still be resumed;
+    isn't guaranteed identical), at the worktree's top or one folder down (`backend/.venv`: a repo split into folders
+    kept 73 GB of them while only the top was looked at, 11-26). Folder, branch and files all stay, and the session can still be resumed;
     the marker is written in that worktree's git directory (.git/worktrees/<name>/brunna-deps-pruned, which
     doesn't make the worktree dirty), and worktree-memory.sh reminds how to rebuild when a session starts. One muninn
     worktree is about 190 MB, 90% of it .venv.
@@ -72,6 +73,25 @@ LINK = ".agent-memory"   # what worktree-memory.sh links into a worktree besides
 REGENERABLE = {".venv", "node_modules", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".DS_Store"}
 MARKER = "agent-hub-deps-pruned"
 UNGATED_DAYS = 7
+
+
+def _dep_folders(p: pathlib.Path) -> list[tuple[str, str]]:
+    """(dependency name, its path in the worktree) for each dependency folder level 1 may delete: at the top, or one
+    folder down (a repo with backend/.venv and frontend/node_modules), each only with its rebuild recipe beside it and
+    nothing on the way a symlink. Deeper ones are not looked for: a dependency's own nested folders are not the
+    project's."""
+    out = []
+    try:
+        subs = [""] + sorted(c.name + "/" for c in p.iterdir()
+                             if c.is_dir() and not c.is_symlink() and not c.name.startswith(".") and c.name not in DEPS)
+    except OSError:   # gone, or not readable: nothing in it to delete
+        return []
+    for sub in subs:
+        for dep, recipes in DEPS.items():
+            d = p / sub / dep
+            if d.is_dir() and not d.is_symlink() and any((p / sub / r).exists() for r in recipes):
+                out.append((dep, sub + dep))
+    return out
 
 
 def facts(project: str | None, repo: pathlib.Path) -> dict:
@@ -398,24 +418,21 @@ def auto_prune(dry_run: bool) -> dict:
                                             mb=mb))
                     res["freed_mb"] += mb
                     continue
-            for dep, recipes in DEPS.items():
-                d = p / dep
-                if not d.is_dir() or d.is_symlink():
-                    continue
-                if not any((p / r).exists() for r in recipes):
-                    continue
+            for dep, rel in _dep_folders(p):
+                d = p / rel
                 mb = _size_mb(d)
                 if not dry_run:
                     # deleted, and the marker written into its git dir, as the project (a symlink planted there only
                     # reaches what the project can write itself)
-                    line = _("{date} {dep} → rebuild: {cmd}", date=res['at'][:10], dep=dep, cmd=REBUILD[dep])
-                    r = project_git.job(as_project(name), p, "remove-dep", p, dep, MARKER, line,
+                    cmd = REBUILD[dep] if rel == dep else f"cd {rel[:-len(dep) - 1]} && {REBUILD[dep]}"
+                    line = _("{date} {dep} → rebuild: {cmd}", date=res['at'][:10], dep=rel, cmd=cmd)
+                    r = project_git.job(as_project(name), p, "remove-dep", p, rel, MARKER, line,
                                         timeout=project_git.BUNDLE_TIMEOUT_S)
                     if r.returncode != 0:
-                        res["skipped"].append(_("{label}: removing {dep} failed: {err}", label=label, dep=dep,
+                        res["skipped"].append(_("{label}: removing {dep} failed: {err}", label=label, dep=rel,
                                                 err=r.stderr.strip()[:200]))
                         continue
-                res["deps"].append(_("{label} {dep} (idle {days} {days:day|days}, {mb} MB)", label=label, dep=dep, days=idle, mb=mb))
+                res["deps"].append(_("{label} {dep} (idle {days} {days:day|days}, {mb} MB)", label=label, dep=rel, days=idle, mb=mb))
                 res["freed_mb"] += mb
     res["freed_mb"] = round(res["freed_mb"], 1)
     if not dry_run:

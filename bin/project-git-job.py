@@ -360,9 +360,15 @@ def op_branch_delete(repo: str, branch: str) -> int:
 
 
 def op_remove_dep(wt: str, dep: str, marker: str, line: str) -> int:
-    d = pathlib.Path(wt) / dep
-    if "/" in dep or d.is_symlink() or not d.is_dir():
+    # <dep> or <folder>/<dep> (worktrees.py _dep_folders): no step a symlink, no step leaving the worktree
+    parts = dep.split("/")
+    if len(parts) > 2 or any(x in ("", ".", "..") for x in parts):
         return 1
+    d = pathlib.Path(wt)
+    for x in parts:
+        d = d / x
+        if d.is_symlink() or not d.is_dir():
+            return 1
     shutil.rmtree(d)
     gd = out(wt, "rev-parse", "--absolute-git-dir").strip()
     if gd and "/" not in marker:
