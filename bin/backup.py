@@ -277,7 +277,18 @@ def cmd_run() -> int:
                 "--exclude", str(hubconf.secrets_dir() / "git-push")]
         for x in excludes():
             args += ["--exclude", x]
-        r = restic(*args, *paths, capture=True)
+        r = restic(*args, *paths, capture=True, check=False)
+        # exit 3: the snapshot was made but some files couldn't be read (a project's declared folder holding one it
+        # can't read, a disk not granted): the rest of the night still runs, and what was missed is said
+        partial = r.returncode == 3
+        if r.returncode not in (0, 3):
+            detail = (r.stderr or "")[-400:]
+            raise RuntimeError(_("restic {cmd} failed (exit {code}): {detail}", cmd="backup", code=r.returncode,
+                                 detail=detail) if detail else _("restic {cmd} failed (exit {code})", cmd="backup",
+                                                                 code=r.returncode))
+        if partial:
+            say(_("Some files could not be read and are not in this snapshot: {detail}",
+                  detail=(r.stderr or "").strip()[-400:]))
         summary = next((json.loads(l) for l in r.stdout.splitlines() if '"message_type":"summary"' in l), {})
         if retention_due(now().date(), last_retention()):   # Sundays, or the first backup after a missed one
             k = CFG.get("keep") or {}
@@ -290,7 +301,8 @@ def cmd_run() -> int:
         (OUT / "last.json").write_text(json.dumps({
             "ok": True, "at": now().isoformat(), "snapshot": summary.get("snapshot_id"),
             "files": summary.get("total_files_processed"), "bytes": summary.get("total_bytes_processed"),
-            "added_bytes": summary.get("data_added"), "manifest": m}, ensure_ascii=False, indent=1))
+            "added_bytes": summary.get("data_added"), "manifest": m,
+            **({"unreadable": (r.stderr or "").strip()[-2000:]} if partial else {})}, ensure_ascii=False, indent=1))
         say(_("Done: snapshot {snapshot}, {files} {files:file|files}, {mb} MB added", snapshot=str(summary.get("snapshot_id"))[:8],
               files=summary.get("total_files_processed"), mb=round((summary.get("data_added") or 0) / 1e6, 1)))
         return 0

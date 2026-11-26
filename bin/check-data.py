@@ -117,27 +117,43 @@ def main(argv: list[str]) -> int:
     sizes = state.setdefault("sizes", {})
     asked = state.setdefault("asked", {})
     problems: dict[str, list[str]] = {}
+    ids: dict[str, list[str]] = {}   # one stable id per problem: a size that changes daily is the same problem
+
+    def problem(project: str, pid: str, text: str) -> None:
+        problems.setdefault(project, []).append(text)
+        ids.setdefault(project, []).append(pid)
+
     for e in entries:
         where = f"data {e.raw}"
         if e.problem:
-            problems.setdefault(e.project, []).append(_("{where}: skipped by the backup: {why}", where=where, why=e.problem))
+            problem(e.project, f"skipped:{e.raw}", _("{where}: skipped by the backup: {why}", where=where, why=e.problem))
             continue
         if not e.path.exists():
-            problems.setdefault(e.project, []).append(_("{where}: missing (moved? change the declaration)", where=where))
+            problem(e.project, f"missing:{e.raw}", _("{where}: missing (moved? change the declaration)", where=where))
             continue
         if not e.backup:
             print(_("{project}: {path} declared, not backed up", project=e.project, path=e.raw))
             continue
-        n = project_data.size(e.path, e.patterns())
+        unreadable: list[str] = []
+        n = project_data.size(e.path, e.patterns(), unreadable=unreadable)
+        if unreadable:
+            problem(e.project, f"unreadable:{e.raw}",
+                    _("{where}: {count} {count:path|paths} in it can't be read, so the backup misses them (first: "
+                      "{first}): make them readable, or exclude them", where=where, count=len(unreadable),
+                      first=unreadable[0]))
         hist = sizes.setdefault(f"{e.project}:{e.path}", {})
         if grew(hist, today, n):
-            problems.setdefault(e.project, []).append(
-                _("{where}: what the backup takes of it grew to {gb} GB in a week: did something that can be made again "
-                  "land in it without an exclude?", where=where, gb=round(n / GB, 1)))
-        hist[today] = n
+            problem(e.project, f"grew:{e.raw}",
+                    _("{where}: what the backup takes of it grew to {gb} GB in a week: did something that can be made "
+                      "again land in it without an exclude?", where=where, gb=round(n / GB, 1)))
+        else:   # a ballooned size is not kept as the baseline, so the warning stays until it is dealt with
+            hist[today] = n
         for d in [d for d in hist if d < (datetime.date.today() - datetime.timedelta(days=KEEP_DAYS)).isoformat()]:
             del hist[d]
         print(_("{project}: {path} backed up, {mb} MB", project=e.project, path=e.raw, mb=round(n / (1 << 20))))
+    live = {f"{e.project}:{e.path}" for e in entries if e.path}
+    for k in [k for k in sizes if k not in live]:
+        del sizes[k]
     found = candidates(projects, entries)
     for project, path in found:
         if str(path) in asked:
@@ -163,7 +179,7 @@ def main(argv: list[str]) -> int:
         for x in probs:
             print(f"⚠️ {project}: {x}")
         told &= alert.once(alert.DATA_KEY + project, probs,
-                           _("{project}'s declared data is fine again", project=project))
+                           _("{project}'s declared data is fine again", project=project), ids=ids[project])
     print(_("Checked {count} declared {count:folder|folders}; {problems} {problems:project|projects} with problems",
             count=len(entries), problems=len(problems)))
     if not problems:

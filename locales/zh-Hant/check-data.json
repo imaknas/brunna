@@ -7,5 +7,6 @@
  "{project}: {path} declared, not backed up": "{project}:{path} 已宣告,不備份",
  "{where}: missing (moved? change the declaration)": "{where}:不見了(搬走了?請改宣告)",
  "{where}: skipped by the backup: {why}": "{where}:備份跳過它:{why}",
- "{where}: what the backup takes of it grew to {gb} GB in a week: did something that can be made again land in it without an exclude?": "{where}:備份要收的部分一週內長到 {gb} GB:是不是有可以重新產生的東西放進去、卻沒排除?"
+ "{where}: what the backup takes of it grew to {gb} GB in a week: did something that can be made again land in it without an exclude?": "{where}:備份要收的部分一週內長到 {gb} GB:是不是有可以重新產生的東西放進去、卻沒排除?",
+ "{where}: {count} {count:path|paths} in it can't be read, so the backup misses them (first: {first}): make them readable, or exclude them": "{where}:裡面有 {count} 個路徑讀不到,備份會漏掉(第一個:{first}):讓它們可讀,或排除它們"
 }

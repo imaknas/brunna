@@ -1,6 +1,6 @@
 # A project's data outside its folder
 
-Status: design after one blind review, 11-26. Asked by the owner through breezyvoice (letter m11261618-0e71): "If you don't declare it, how
+Status: built 11-26, after a blind review of the design and one of the code. Asked by the owner through breezyvoice (letter m11261618-0e71): "If you don't declare it, how
 will the platform know in future what to back up? I mean things kept outside the project folder. Do I have to remind
 every project?"
 
@@ -49,11 +49,16 @@ glob, bracket, brace or control character (`SECRET_PATH`: `<path>/<pattern>` bec
 - is the project's own: under its workspace or runtime but not equal to either (the whole workspace stays out of the
   backup), or a path one of whose folder names is the project's name (`~/voice-data/breezyvoice`, `~/.cache/breezyvoice`);
 - is not inside or around a denied place: another project's workspace or runtime, the hub checkout, the instance
-  directory, the bus directory, the memory copies, git-origin, the services root, and the owner's tool, credential
-  and personal folders (`~/.ssh`, `~/.gnupg`, `~/Library`, `~/.claude`, `~/.codex`, `~/.config`, `~/.aws`, `~/.docker`,
-  `~/.kube`, `~/.netrc`, `~/.local/state`, `~/.nvm`, `~/.password-store`, `~/Documents`, `~/Desktop`, `~/Downloads`);
-- overlaps neither another entry of any project nor anything in the owner's `backup.include` (restic applies every
-  exclude to the whole run: a project's excludes on a folder the owner included would drop the owner's data).
+  directory, the bus directory, the memory copies, git-origin, the services root, the coding agents' folders their
+  adapters name, and the owner's tool, credential and personal folders (`~/.ssh`, `~/.gnupg`, `~/Library`, `~/.config`,
+  `~/.aws`, `~/.docker`, `~/.kube`, `~/.netrc`, `~/.local/state`, `~/.nvm`, `~/.password-store`, `~/Documents`,
+  `~/Desktop`, `~/Downloads`); a hidden folder at the top of home is a tool's, so only `~/.cache/…` and
+  `~/.local/share/…` are allowed among them (`~/.claude`, `~/.codex` and the rest are refused without naming them);
+- the name rule counts only folders below home (or below the disk): a project named like the account gets nothing;
+- overlaps nothing in the owner's `backup.include` (restic applies every exclude to the whole run: a project's
+  excludes on a folder the owner included would drop the owner's data), and isn't inside another project's entry.
+  Across projects only the inner entry is refused: the outer one has its own project's name at or above it, so a
+  project can't knock another's entry out by declaring a folder inside it (code review, 11-26).
 - `exclude` patterns are relative, no `..`, no leading `/`.
 
 **Where the disk is read, on the resolved path** (the backup, the daily check): the path is resolved (symlinks
@@ -75,14 +80,19 @@ everything below, a pattern with no `/` matches any path component), tested agai
 owner's and the projects' excludes (it fixes `covers()` saying a file under an excluded `node_modules` is backed up).
 `backup.include` stays for what is the owner's and no project's; breezyvoice's entry moves to its declaration.
 
+A file restic can't read makes it exit 3 with the snapshot made: the backup carries on (retention, check,
+`last.json`, which records what was missed) instead of failing the whole night over one project's folder.
+
 ## The daily check
 
 `bin/check-data.py`, a platform job (`brunna/data`, daily, `found_exit`), per declared entry:
 
 - the resolved path passes the place rules and exists (a missing one: moved without telling the registry);
+- everything in it can be read (what can't is missed by the backup: make it readable or exclude it);
 - size: what the backup would take (excludes applied, symlinks not followed), recorded per day in
   `.state/project-data.json`; more than double and over 1 GB more than a week before is reported ("did something that
-  can be made again land in it without an exclude?").
+  can be made again land in it without an exclude?"). Each problem carries a stable id (a size changes daily), and a
+  ballooned size is never kept as the baseline, so the warning stays one problem until it is dealt with.
 
 Whether the backup ran is not this check's: the backup's own failure alert covers it once, to the right place.
 Problems go through `alert.once` with key `project-data:<project>`; `alert.route` gets a case sending that prefix to

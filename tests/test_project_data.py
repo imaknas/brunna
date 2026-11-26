@@ -58,10 +58,16 @@ class Places(Base):
         self.assertIsNone(self.problem("~/services/voice/models", doc=self.doc(runtime={})))
 
     def test_what_a_project_may_not_point_the_backup_at(self):
-        for bad in ("~/data", "~/.ssh/voice", "~/Library/voice", "~/.config/voice/x", "~/workspace/voice",
+        for bad in ("~/data", "~/.claude/voice", "~/.codex/x/voice", "~/.ollama/voice", "~/.ssh/voice", "~/Library/voice", "~/.config/voice/x", "~/workspace/voice",
                     "~/workspace/other/voice", "~/services/other/voice", "~/.brunna/voice", "/tmp/voice",
                     "/Volumes/voice"):
             self.assertIsNotNone(self.problem(bad), bad)
+
+    def test_a_project_named_like_the_home_folder_gets_nothing_from_that(self):
+        """The name rule counts only folders below home: a project named like the account isn't given all of home."""
+        name = self.home.name
+        self.assertIsNotNone(self.problem("~/Pictures", name=name))
+        self.assertIsNone(self.problem(f"~/data/{name}", name=name))
 
     def test_the_text_rules(self):
         self.assertIsNone(pd.expand("~/a/../voice"))
@@ -101,7 +107,8 @@ class Entries(Base):
         got = {(e.project, e.raw): e for e in pd.entries(projects)}
         self.assertIsNotNone(got[("voice", "~/vlink/voice")].problem, "a symlink into ~/.ssh is refused once resolved")
         self.assertIsNotNone(got[("other", "~/voice-data/voice/other")].problem)
-        self.assertIsNotNone(got[("voice", "~/voice-data/voice")].problem, "both overlapping entries are skipped")
+        self.assertIsNone(got[("voice", "~/voice-data/voice")].problem,
+                          "a project declaring a folder inside another's never knocks the outer one out (review 11-26)")
         alone = pd.entries({"voice": projects["voice"]})
         ok = [e for e in alone if e.path]
         self.assertEqual([e.path for e in ok], [real.resolve()])
@@ -144,6 +151,54 @@ class Excludes(unittest.TestCase):
 
 
 class Check(Base):
+    def test_unreadable_files_are_found(self):
+        d = self.home / "voice-data" / "voice"
+        d.mkdir(parents=True)
+        (d / "ok").write_text("x")
+        locked = d / "locked"
+        locked.write_text("x")
+        locked.chmod(0)
+        self.addCleanup(locked.chmod, 0o600)
+        found: list[str] = []
+        pd.size(d, [], unreadable=found)
+        self.assertEqual(found, [str(locked)])
+        found = []
+        pd.size(d, [f"{d}/locked"], unreadable=found)
+        self.assertEqual(found, [], "an excluded one is not the backup's problem")
+
+    def test_a_ballooned_folder_stays_one_problem_until_dealt_with(self):
+        """The growth warning carries a stable id (its size changes daily) and the ballooned size never becomes the
+        baseline, so it is neither re-sent as new each day nor called fixed a week later (code review, 11-26)."""
+        import datetime
+        cd = load_check()
+        d = self.home / "voice-data" / "voice"
+        d.mkdir(parents=True)
+        projects = {"voice": self.doc(data=[{"path": "~/voice-data/voice", "what": "rec"}])}
+        key = f"voice:{d.resolve()}"
+        calls = []
+        sizes = iter([6 << 30, 7 << 30])
+        now = [datetime.date(2026, 11, 18)]
+
+        class Day(datetime.date):
+            @classmethod
+            def today(cls):
+                return now[0]
+        state = self.tmp / "state.json"
+        state.write_text('{"sizes": {"%s": {"2026-11-10": %d}}}' % (key, 2 << 30))
+        with mock.patch.object(cd, "STATE", state), mock.patch.object(cd.hubconf, "projects", return_value=projects), \
+                mock.patch.object(cd.backup, "owner_included", return_value=[]), \
+                mock.patch.object(cd, "candidates", return_value=[]), \
+                mock.patch.object(cd.project_data, "size", side_effect=lambda *a, **k: next(sizes)), \
+                mock.patch.object(cd.alert, "open_keys", return_value=[]), \
+                mock.patch.object(cd.alert, "once", side_effect=lambda *a, **k: calls.append((a, k)) or True), \
+                mock.patch.object(cd.datetime, "date", Day):
+            cd.main([])
+            now[0] = datetime.date(2026, 11, 19)
+            cd.main([])
+        self.assertEqual([k["ids"] for _a, k in calls], [["grew:~/voice-data/voice"]] * 2)
+        import json
+        self.assertEqual(list(json.loads(state.read_text())["sizes"][key]), ["2026-11-10"])
+
     def test_growth(self):
         cd = load_check()
         hist = {"2026-11-10": 2 << 30}

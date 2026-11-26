@@ -29,7 +29,8 @@ FIELDS = {"path", "what", "backup", "why", "exclude"}
 # no glob, bracket, brace or control character: <path>/<pattern> becomes a restic exclude pattern
 PLAIN = re.compile(r"[^\x00-\x1f\x7f()\[\]{}*?]+")
 # the owner's tool, credential and personal folders under home: never a project's data, nor around one
-# (the coding agents' own folders come from their adapters: runtime_ports.user_controls())
+# A hidden folder at the top of home is a tool's (an agent's settings, ~/.ssh…): only these hold projects' data
+HIDDEN_OK = (".cache", ".local/share")
 DENY_HOME = (".ssh", ".gnupg", "Library", ".config", ".aws", ".docker", ".kube", ".netrc",
              ".local/state", ".nvm", ".password-store", "Documents", "Desktop", "Downloads")
 EXTERNAL = pathlib.Path("/Volumes")
@@ -78,10 +79,15 @@ def place_problem(name: str, doc: dict, p: pathlib.Path) -> str | None:
     home = _home()
     if not ((home in p.parents) or (EXTERNAL in p.parents and len(p.relative_to(EXTERNAL).parts) > 1)):
         return _("it must be under the home folder (not the home folder itself) or on an external disk under /Volumes")
+    under = p.relative_to(home).parts if home in p.parents else p.relative_to(EXTERNAL).parts[1:]
+    if home in p.parents and under[0].startswith(".") and not any(_within(p, home / x) and p != home / x
+                                                                  for x in HIDDEN_OK):
+        return _("a hidden folder at the top of home is a tool's: use ~/.cache/{project} or ~/.local/share/{project}, "
+                 "or a plain folder", project=name)
     own = _own_folders(name, doc)
     if any(p == o for o in own):
         return _("it is the project's whole folder: declare a folder inside it (the backup never takes whole workspaces)")
-    if not (any(o in p.parents for o in own) or name.lower() in (x.lower() for x in p.parts)):
+    if not (any(o in p.parents for o in own) or name.lower() in (x.lower() for x in under)):
         return _("it must be inside the project's own folder, or have a folder named {project} in it", project=name)
     for root in _platform_roots():
         if _within(p, root) or _within(root, p):
@@ -188,11 +194,13 @@ def entries(projects: dict[str, dict] | None = None, include: list[pathlib.Path]
                 else:
                     ent.path = real
             out.append(ent)
+    # Across projects only the one inside is refused: the outer one has its own project's name at or above it (the
+    # place rules), so a project can't knock out another's entry by declaring a folder inside it (code review, 11-26)
     taken = [e for e in out if e.path]
     for e in taken:
         for o in taken:
-            if o is not e and o.project != e.project and (_within(e.path, o.path) or _within(o.path, e.path)):
-                e.problem = _("it overlaps {project}'s declared data ({path})", project=o.project, path=o.raw)
+            if o is not e and o.project != e.project and _within(e.path, o.path):
+                e.problem = _("it is inside {project}'s declared data ({path})", project=o.project, path=o.raw)
     for e in out:
         if e.problem:
             e.path = None
@@ -223,10 +231,12 @@ def excluded(path: str | pathlib.Path, pattern: str) -> bool:
     return any(_match_parts(pat, parts[i:]) for i in range(len(parts)))
 
 
-def size(root: pathlib.Path, patterns: list[str], cap: int | None = None) -> int:
-    """Bytes of what the backup would take under root (excludes applied, symlinks not followed); stops past cap."""
+def size(root: pathlib.Path, patterns: list[str], cap: int | None = None, unreadable: list[str] | None = None) -> int:
+    """Bytes of what the backup would take under root (excludes applied, symlinks not followed); stops past cap.
+    unreadable, when given, collects what the backup couldn't read (a folder or file the owner can't read)."""
     total = 0
-    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+    onerror = (lambda err: unreadable.append(str(err.filename))) if unreadable is not None else None
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False, onerror=onerror):
         dirnames[:] = [d for d in dirnames if not any(excluded(os.path.join(dirpath, d), x) for x in patterns)]
         for f in filenames:
             fp = os.path.join(dirpath, f)
@@ -237,6 +247,8 @@ def size(root: pathlib.Path, patterns: list[str], cap: int | None = None) -> int
             except OSError:
                 continue
             total += st.st_size
+            if unreadable is not None and not os.access(fp, os.R_OK, follow_symlinks=False):
+                unreadable.append(fp)
             if cap is not None and total > cap:
                 return total
     return total

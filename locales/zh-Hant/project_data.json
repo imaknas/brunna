@@ -8,7 +8,6 @@
  "it must be inside the project's own folder, or have a folder named {project} in it": "它必須在專案自己的資料夾裡,或路徑中有一層叫 {project} 的資料夾",
  "it must be under the home folder (not the home folder itself) or on an external disk under /Volumes": "它必須在家目錄底下(不能是家目錄本身),或在 /Volumes 底下的外接磁碟",
  "it overlaps a folder the owner's backup settings list (backup.include): ask brunna to move that folder to this declaration": "它和擁有者備份設定列的資料夾(backup.include)重疊:請 brunna 把那個資料夾移到這個宣告",
- "it overlaps {project}'s declared data ({path})": "它和 {project} 宣告的資料重疊({path})",
  "services": "服務",
  "the path is not one a project may declare": "這個路徑不是專案能宣告的",
  "workspace": "workspace",
@@ -22,5 +21,7 @@
  "{where}: path {path} overlaps another entry of this project": "{where}:path {path} 和這個專案的另一筆重疊",
  "{where}: path {path}: {why}": "{where}:path {path}:{why}",
  "{where}: unknown field {key}": "{where}:不認得的欄位 {key}",
- "{where}: what is required (one line: what this data is)": "{where}:what 必填(一行說明這是什麼資料)"
+ "{where}: what is required (one line: what this data is)": "{where}:what 必填(一行說明這是什麼資料)",
+ "it is inside {project}'s declared data ({path})": "它在 {project} 宣告的資料裡({path})",
+ "a hidden folder at the top of home is a tool's: use ~/.cache/{project} or ~/.local/share/{project}, or a plain folder": "家目錄最上層的隱藏資料夾是工具用的:請用 ~/.cache/{project} 或 ~/.local/share/{project},或一般資料夾"
 }
