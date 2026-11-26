@@ -56,5 +56,14 @@
  "a lease in a turn or waiting for the owner's answer": "有租約正在回答或等主人回覆",
  "no runtime for leases: {e}": "租約沒有可用的 runtime:{e}",
  "{id}: a turn's usage could not be recorded: {e!r}": "{id}:這一輪的用量記不下來:{e!r}",
- "leases don't run on an API key yet": "借對話還不能用 API key 跑"
+ "leases don't run on an API key yet": "借對話還不能用 API key 跑",
+ "{project}: its open questions could not be read: {e!r}": "{project}:讀不到它還開著的問題:{e!r}",
+ "{project}: its open questions could not be read: {why}": "{project}:讀不到它還開著的問題:{why}",
+ "{id}: the answer to {question} could not be sent, the question stays open: {why}": "{id}:{question} 的回答送不出去,問題還開著:{why}",
+ "{project}: the owner's answer to {question} could not close it: {why}": "{project}:擁有者對 {question} 的回答沒能把它收掉:{why}",
+ "- {owner} answered question {question}: {answer}": "- {owner} 回答了問題 {question}:{answer}",
+ " (closing it failed; it is still open)": "(收掉失敗,它還開著)",
+ "{id}: the handover's answered isn't an answer to the lease's own question; ignored": "{id}:交接裡的 answered 不是這個 lease 自己那個問題的回答,不採用",
+ "question must be a question's id": "question 要是一個問題的 id",
+ "{id} is not an open question {project} asked": "{id} 不是 {project} 問過、還開著的問題"
 }

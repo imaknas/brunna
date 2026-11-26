@@ -3,8 +3,11 @@
 script: the only merge point.
 
 Run in the session's own worktree:
-  merge-branch [--project P] [--branch B] [--note "what was done"] [--question "something for the owner to decide"]...
-               [--dry-run]
+  merge-branch [--project P] [--branch B] [--note "what was done"] [--dry-run]
+
+  A question for the owner isn't taken here: it is asked on its own, with `brunna send --type question`, before merging
+  (docs/design/owner-questions.md); --question is refused before anything is done, and --note is read by no one as a
+  question.
 
   0. What is merged is the branch checked out in this folder (--branch, if given, must name it), and the folder must be
      a linked worktree of the project's repo: not its main checkout, not its .agent-memory worktree. A project's
@@ -32,8 +35,7 @@ Run in the session's own worktree:
   5. **Push only when the registry has `push_on_merge: true`** (no push by default: some repos are public, and
      merging ≠ publishing). A sandboxed project asks the platform to push its default branch instead (`brunna push`'s
      request, docs/design/platform-push.md); the outcome comes as a letter, and a request still pending is no failure.
-  6. Record merge.done and session.report on the bus (branch, commits, files, tests, questions, pushed or not);
-     with --question, also send it to the owner (→ the personal assistant).
+  6. Record merge.done and session.report on the bus (branch, commits, files, tests, pushed or not).
 
 The report's format is in contracts/hubbus.v1.schema.json (the session.report event).
 """
@@ -148,6 +150,12 @@ def main() -> int:
     ap.add_argument("--question", action="append", default=[])
     ap.add_argument("--dry-run", action="store_true")
     a = ap.parse_args()
+    if a.question:   # asked after a merge, a refused or failed send had no one left to fix it
+        sys.exit(_("merge-branch: a question for the owner isn't sent from a merge any more; nothing was merged. Ask it "
+                   "first with `brunna send --to {alias} --type question --text \"…\" --context \"…\"` (it is checked while "
+                   "you are there to fix it), then merge without --question. What the owner should only read goes on the "
+                   "review list (`brunna send --to {alias} --type review`); --note is read by no one as a question",
+                   alias=hubconf.owner_alias()))
     if hubconf.MAIN != hubconf.ROOT:   # a worktree's own copy of the hub: only the main checkout's merge-branch merges
         os.execv(sys.executable, [sys.executable, str(hubconf.MAIN / "bin" / "merge-branch"), *sys.argv[1:]])
 
@@ -196,7 +204,7 @@ def main() -> int:
         sys.exit(_("merge-branch: the worktree has uncommitted changes; commit (or discard) them before merging"))
 
     eid = f"merge-{proj}-{branch.replace('/', '_')}-{head0[:10]}"
-    report = {"project": proj, "branch": branch, "base": base, "note": a.note, "open_questions": a.question,
+    report = {"project": proj, "branch": branch, "base": base, "note": a.note, "open_questions": [],
               "merged": False, "pushed": False}
 
     def fail(stage: str, detail: str) -> int:
@@ -345,9 +353,6 @@ def main() -> int:
     # 6. record
     publish("merge.done", proj, f"{eid}:done", {"project": proj, "branch": branch, "head": head, "commits": full})
     publish("session.report", proj, f"{eid}:report", report)
-    for q in a.question:
-        subprocess.run([*HUBBUS, "send", "--from", proj, "--to", hubconf.owner_address(), "--type", "question",
-                        "--text", f"[{proj} · {branch}] {q}"], capture_output=True)
     push = _("pushed") if report["pushed"] else \
         _("push requested ({id}); its outcome comes as a letter", id=report["push_requested"]) \
         if report.get("push_requested") else \

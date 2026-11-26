@@ -291,6 +291,13 @@ Built: steps 0–2 and step 4, the waiting report. Left:
 
   Out of scope, recorded there: where a sensitive answer persists, and the context a question carries to the
   answering project.
+- **Questions the owner can answer** (`owner-questions.md`, design 11-26 after three blind review rounds, built 11-26).
+  The owner knew questions were waiting and couldn't tell how to answer them. A question is checked before it is sent
+  (judgment point `question-check`, from the session that asks, refused once with what is missing or sent `--as-is`);
+  merge-branch takes no question; what is only to look at goes on one review list per project (`--type review`);
+  `--replaces` closes the questions a new one asks again; a discuss lease can take a question and close it with the
+  owner's confirmed answer; `brunna question <id>` shows one whole. Left: the assistant's side (showing the context,
+  opening a lease with `question`), asked by letter; the questions open on 11-26 are as they were.
 - **Agent surface** (`agent-surface.md`, design 11-18, r1 after a blind review with nothing blocking; the owner took
   all four recommendations on 11-18; **slice 1 built 11-18**: `brunna surface` and its contract, glance's
   `prompt`/`command`, the display-only mod in `integrations/claude-code/`). The owner asked whether brunna's Claude Code
@@ -388,6 +395,9 @@ Built: steps 0–2 and step 4, the waiting report. Left:
   as before the field existed).
 
 ### 7. Not verified on a real run
+
+- `owner-questions.md`: a sandboxed project's question checked through the capability runner, and a lease opened with a
+  question, on a real session. The check itself was scored on real questions (the design's numbers).
 
 - Project agent calls from a sandboxed project, at the daily cap, and on timeout. The unsandboxed path ran 11-13.
 - herdr in the Linux container: the rules block and letter delivery. Only the macOS hook was checked.

@@ -47,6 +47,11 @@ class SendRecords(unittest.TestCase):
         self.c = m.db()
         m.db = lambda *a, **k: self.c
         self.owner = m.hubconf.owner_address()
+        # sent from no session (a run from inside one would be a person's question: checked and composed, owner-questions.md)
+        import runtime_ports
+        session = mock.patch.object(runtime_ports, "current_session", lambda env=None: None)
+        session.start()
+        self.addCleanup(session.stop)
 
     def send(self, *argv, records=True):
         self.m.RECORDS = records

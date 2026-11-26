@@ -53,7 +53,7 @@ class Resume(unittest.TestCase):
         m.deny_settings = lambda project: self.tmp / "deny.json"
         m.mcp_config = lambda lease: self.tmp / "mcp.json"
         m.env_for = lambda lease: {}
-        m.preamble = lambda project, mode="discuss": "p"
+        m.preamble = lambda project, mode="discuss", question=None: "p"
         m.reader = lambda lease, proc: None
         self.cmds = []
         # m.subprocess is the global subprocess module: once swapped it must be restored in tearDown, or every

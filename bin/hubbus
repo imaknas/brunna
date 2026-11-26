@@ -190,7 +190,7 @@ LOG = hubconf.BUS_LOG
 # the owner's address: new letters use owner, old aliases are still accepted (hub.json's owner.address/aliases)
 OWNER_ADDRESS = hubconf.owner_address()
 OWNERS = hubconf.owner_addresses()
-TYPES = ("request", "question", "info", "progress", "done", "task", "drop", "manifest.update")
+TYPES = ("request", "question", "info", "progress", "done", "task", "review", "drop", "manifest.update")
 # manifest.update: a project sends registry YAML to the platform (--to agent-hub), its whole entry or the part that
 # changes; registry.py apply-updates validates the result, then applies or rejects it
 OWNER = hubconf.owner_tag()                         # the name people see (the to-do tag), here hub.json owner.tag
@@ -199,7 +199,9 @@ OWNER_ALIAS = hubconf.owner_alias()                 # the address agents mail th
 # id prefix of letters taken in from handoffs (the bus already holds this format: can't change, or a resend would be
 # taken twice)
 HANDOFF_ID_PREFIX = "muninn-handoff-"
-OWNER_ONLY = ("task", "drop")   # the assistant's task registry: things only the owner can do, sent only to the owner
+OWNER_ONLY = ("task", "review", "drop")   # the assistant's task registry: things only the owner can do, sent only to the owner
+# review: what the owner should look at in one project, one list sent whole (an owner to-do under review-<project>[-n];
+# docs/design/owner-questions.md, Review list)
 # type sent to the owner → type the assistant receives. request = asks the owner to go do something = a task; only
 # ones he's to answer in words are question
 TO_MUNINN = {"request": "task", "task": "task", "question": "question", "info": "progress",
@@ -285,8 +287,9 @@ OUTBOX_ID = re.compile(r"^m\d{8}-[0-9a-f]{12}$")
 OUTBOX_PUBLISH = ("merge.done", "merge.failed", "session.report")
 EVENT_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 SEND_FIELDS = ("to", "type", "text", "reply_to", "task", "question", "due", "context", "new_reason", "inferred",
-               "options", "default")
-NOT_TEXT = ("inferred", "options")   # the send fields that are no text in an outbox file
+               "options", "default", "see", "replaces", "as_is", "rev")
+NOT_TEXT = ("inferred", "options", "see", "replaces", "rev")   # the send fields that are no text in an outbox file
+SEE_PATH = re.compile(r"[^\s\x00-\x1f]{1,300}")   # a file in the project named for the owner: relative, inside it
 
 
 class Refused(Exception):
@@ -2315,7 +2318,7 @@ def fork_result(c, r) -> tuple[bool, str]:
     return handled, "\n  ".join(parts)
 
 
-CONFINED_TYPES = ("manifest.update", "task", "drop")
+CONFINED_TYPES = ("manifest.update", "task", "review", "drop")
 # The letters a mailbox run was started for, a JSON list (an id is free text for an unsandboxed sender, a comma included)
 LETTERS_ENV = "MAILBOX_LETTERS"
 FORK_REPLIES = ("request", "question", "info", "progress", "done")
@@ -2419,7 +2422,7 @@ def confined_refusal(a, here) -> str | None:
     if a.cmd == "send" and ((a.type in CONFINED_TYPES and not own_question) or getattr(a, "task", None)):
         return _("hubbus: a confined run can't send {type} (registry changes and the owner's to-dos need a person)",
                  type=a.type)
-    if a.cmd in ("inbox", "open-questions") and getattr(a, "project", None) and now_named(a.project) != here:
+    if a.cmd in ("inbox", "open-questions", "review") and getattr(a, "project", None) and now_named(a.project) != here:
         return _("hubbus: a confined run reads only its own project's mailbox")
     if a.cmd in ("publish", "record-publish", "bridge", "dispatch", "reconcile-questions", "pass"):
         return _("hubbus: a confined run can't use {cmd}", cmd=a.cmd)
@@ -3499,7 +3502,13 @@ def take(c, proj: str, entry, live=None) -> None:
         a = argparse.Namespace(cmd="send", sender=proj, id=None,
                                **{k: entry.get(k) for k in SEND_FIELDS if k != "inferred"},
                                inferred=entry.get("inferred") is True)
-        send_letter(c, a, proj, session, proj, boxed=True, mid=entry["id"])
+        try:
+            send_letter(c, a, proj, session, proj, boxed=True, mid=entry["id"])
+        except ReviewStale as e:
+            # not lost when its session has ended: a request, to that session first, with the list as it stands
+            publish(c, f"{entry['id']}:review-stale", "message", hubconf.hub_project(), proj, None,
+                    {"type": "request", "text": _("{project}'s review list was not sent: {why}", project=proj, why=str(e)),
+                     **({"to_session": session} if session else {})})
     elif op in ("ack", "done"):
         ids = entry.get("ids")
         if not isinstance(ids, list) or not 0 < len(ids) <= 50 or not all(isinstance(i, str) for i in ids):
@@ -4062,7 +4071,7 @@ def cmd_status(as_json: bool) -> None:
 
 # ---------- the mail commands (the bus, or a sandboxed project's outbox and view) ----------
 
-MAIL_COMMANDS = ("send", "inbox", "show", "thread", "ack", "pass", "done", "open-questions", "publish")
+MAIL_COMMANDS = ("send", "inbox", "show", "thread", "ack", "pass", "done", "open-questions", "review", "publish")
 
 
 def mail_box(a, here) -> str | None:
@@ -4104,7 +4113,126 @@ def reply_fields(orig, to: str) -> dict:
 def send_letter(c, a, sender: str, session, here, boxed: bool = False, mid: str | None = None) -> str:
     """send's checks and write, for the CLI and for a letter taken from a sandboxed project's outbox (boxed: sender =
     that project, never a name in the file; a reply only in its own threads). mid: the letter id (else --id, else a
-    new one); --id stays what it is to a task, its key. Returns the id to print."""
+    new one); --id stays what it is to a task, its key. Returns the id to print. A question with --replaces closes
+    each open question it names after it is sent, as a drop --question saying which replaced it."""
+    replaced = list(getattr(a, "replaces", None) or [])
+    out = send_one(c, a, sender, session, here, boxed, mid)
+    for i, old in enumerate(replaced):
+        drop = argparse.Namespace(cmd="send", sender=sender, to=OWNER_ADDRESS, type="drop", question=old,
+                                  text=_("replaced by {id}", id=out), **{k: None for k in SEND_FIELDS
+                                                                         if k not in ("to", "type", "question", "text")})
+        drop.inferred, drop.id = False, None
+        send_one(c, drop, sender, session, here, boxed, f"{out}-r{i + 1}" if boxed else None)
+    return out
+
+
+def owner_extras(c, a, sender: str) -> None:
+    """--see, --replaces, --as-is and --rev: what each is for, checked before anything is written
+    (docs/design/owner-questions.md)."""
+    see, reps = getattr(a, "see", None) or [], getattr(a, "replaces", None) or []
+    as_is, rev = getattr(a, "as_is", None), getattr(a, "rev", None)
+    for v in (see, reps):
+        if not isinstance(v, list) or len(v) > 20 or not all(isinstance(x, str) for x in v):
+            refuse(_("hubbus: --see and --replaces are lists of at most 20 texts"))
+    to_owner = a.to == OWNER_ADDRESS
+    if see and not (to_owner and a.type in ("question", "task", "review")):
+        refuse(_("hubbus: --see is for a question, task or review to {alias}", alias=OWNER_ALIAS))
+    for s in see:
+        parts = pathlib.PurePosixPath(s).parts
+        if not SEE_PATH.fullmatch(s) or s.startswith(("/", "~")) or ".." in parts:
+            refuse(_("hubbus: --see {path!r} must name a file inside the project, relative to its folder", path=s[:80]))
+    if reps:
+        if not (to_owner and a.type == "question"):
+            refuse(_("hubbus: --replaces is for a question to {alias}", alias=OWNER_ALIAS))
+        mine = {q["id"] for q in open_questions(c, sender)}
+        for r in reps:
+            if r not in mine:
+                refuse(_("hubbus: {id} is not an open question {sender} asked {owner}", id=r, sender=sender, owner=OWNER))
+    if as_is is not None and (not isinstance(as_is, str) or not as_is.strip() or not to_owner
+                              or a.type not in ("question", "task")):
+        refuse(_("hubbus: --as-is \"why\" is for a question or task to {alias}, with why it goes as it is",
+                 alias=OWNER_ALIAS))
+    if rev is not None and (a.type != "review" or isinstance(rev, bool) or not isinstance(rev, int)):
+        refuse(_("hubbus: --rev <n> is for a review list: the revision it replaces"))
+
+
+def owner_text(a) -> str:
+    """What the owner reads of a question or task a session asked: its text, then for a question its context (some owner
+    sides show only the text), the files it points to, and that it went without passing the check. Composed where the
+    session sends it (mail_command), once: the platform's own senders keep context for what they mark there (a lease's
+    handover: lease:<id>)."""
+    out = [a.text]
+    if a.type == "question" and (a.context or "").strip():
+        out += ["", a.context.strip()]
+    if getattr(a, "see", None):
+        out.append(_("Detail: {paths}", paths=", ".join(a.see)))
+    if getattr(a, "as_is", None):
+        out.append(_("(sent without passing the check: {why})", why=" ".join(a.as_is.split())))
+    return "\n".join(out)
+
+
+class ReviewStale(Refused):
+    """A review list sent over one that changed since the sender saw it: the list as it stands, to say back."""
+
+    def __init__(self, project: str, key: str, rev: int, text: str):
+        super().__init__(_("the review list changed since you saw it (now revision {rev}); send the whole list again with "
+                           "--rev {rev}. As it stands:\n{text}", rev=rev, text=text))
+        self.project, self.key, self.rev, self.text = project, key, rev, text
+
+
+def review_n(key: str, project: str) -> int | None:
+    """Which of this project's review lists a key names (review-<name> is 1, review-<name>-<n> is n, under any name the
+    project had); None: none of them."""
+    for name in own_names(project):
+        if key == f"review-{name}":
+            return 1
+        m = re.fullmatch(rf"review-{re.escape(name)}-(\d+)", key)
+        if m:
+            return int(m[1])
+    return None
+
+
+def review_lists(c, project: str) -> list[dict]:
+    """This project's review lists, oldest first: {key, n, open, rev, text}. open as the settlement view says (the
+    owner side settles one; the project never withdraws it)."""
+    import ph_records
+    groups: dict[str, list] = {}
+    for r in records(c, project):
+        rec = r["record"]
+        if ph_wire.family(rec.get("ext")) == "acts" and review_n(str(rec.get("key") or ""), project):
+            groups.setdefault(rec["key"], []).append(rec)
+    cfg, out = ph_records.config(), []
+    for key, recs in groups.items():
+        need = need_state(c, project, key)
+        if need is None:
+            continue
+        view = ph_records.settlement_view(recs, cfg)
+        out.append({"key": key, "n": review_n(key, project), "open": view["state"] == "open",
+                    "rev": need["rev"], "text": need["terms"].get("text") or ""})
+    return sorted(out, key=lambda x: x["n"])
+
+
+def prepare_review(c, a, sender: str) -> None:
+    """A review list goes as the owner to-do it is: the open list's key (amended when --rev is its revision, refused
+    with the list as it stands otherwise), or the next key once the owner side settled the last."""
+    lists = review_lists(c, sender)
+    now_open = [x for x in lists if x["open"]]
+    if now_open:
+        cur = now_open[-1]
+        if getattr(a, "rev", None) != cur["rev"]:
+            raise ReviewStale(sender, cur["key"], cur["rev"], cur["text"])
+        key = cur["key"]
+    else:
+        n = max((x["n"] for x in lists), default=0) + 1
+        key = f"review-{sender}" if n == 1 else f"review-{sender}-{n}"
+    lines = [_("To look at in {project} (its review list):", project=sender), a.text]
+    if a.see:
+        lines.append(_("Detail: {paths}", paths=", ".join(a.see)))
+    a.type, a.id, a.text = "task", key, "\n".join(lines)
+
+
+def send_one(c, a, sender: str, session, here, boxed: bool = False, mid: str | None = None) -> str:
+    """One letter (send_letter's, or one --replaces closes)."""
     a.to = canon(a.to)
     if a.to not in OWNERS:
         a.to = now_named(a.to)   # a former name reaches the project it is now (docs/design/rename-brunna.md)
@@ -4134,6 +4262,13 @@ def send_letter(c, a, sender: str, session, here, boxed: bool = False, mid: str 
                      sender=sender, owner=OWNER))
     if a.inferred and not (a.type in ("done", "drop") and a.task):
         refuse(_("hubbus: --inferred is only for a done/drop with --task"))
+    owner_extras(c, a, sender)
+    if a.type == "review":
+        if not RECORDS:
+            refuse(_("hubbus: a review list needs records to {alias} (mailbox.records), which are off here: say it in "
+                     "your notes instead", alias=OWNER_ALIAS))
+        prepare_review(c, a, sender)
+    p |= {"type": a.type, "text": a.text}
     terms = question_terms(a)
     p |= terms   # on the bus only: a letter to the assistant carries TASK_FIELDS, so these go in its text (below)
     for k in TASK_FIELDS:
@@ -4227,6 +4362,36 @@ def close_refusal(c, r, here, session, withdraw: bool, note) -> str | None:
              id=r["id"], to=to, project=here)
 
 
+def asked_by_person(a, session, letters) -> bool:
+    """Whether this send is a question or task to the owner from a session someone is in, which can read a refusal
+    (docs/design/owner-questions.md, Where it runs): not a platform run, a confined one or a run's letters. It can be
+    forged: the check is no boundary."""
+    return (a.type in ("question", "task") and canon(a.to) == OWNER_ADDRESS
+            and bool(session or names.env("MCP_ASKER")) and not platform_run() and letters is None
+            and not names.env("CONFINED"))
+
+
+def ask_check(c, a, sender: str, session, box) -> None:
+    """The question read as the owner will read it, before anything is written: refused with what is missing (a
+    question), or said (a task, which asks to be done: only one that asks to decide is told it is a question)."""
+    import question_check
+    f = question_check.fields(a.text, a.context, a.options, a.default, getattr(a, "see", None),
+                              getattr(a, "replaces", None))
+    if box:
+        v = question_check.via_runner(hubconf.workspace(box), f, session)
+    else:
+        v = question_check.check(sender, f, [(q["id"], q["text"]) for q in open_questions(c, sender)], session)
+    if a.type == "task":
+        if v.decisions:
+            print(_("This task asks {owner} to decide ({quote}): that is a question (--type question), which {owner} "
+                    "answers.", owner=OWNER, quote=v.decisions[0]), file=sys.stderr)
+        return
+    if not v.sent:
+        refuse(question_check.explain(v, ["brunna", *sys.argv[1:]]))
+    for line in v.lines:
+        print(line, file=sys.stderr)
+
+
 def mail_command(a) -> None:
     """send / inbox / show / thread / ack / pass / done / open-questions / publish. For a sandboxed project the reads come
     from its view and the writes go into its outbox, after the same checks against the view that the platform makes
@@ -4276,12 +4441,49 @@ def mail_command(a) -> None:
             if a.id and not OUTBOX_ID.fullmatch(a.id):   # $ lets a final newline through .match
                 refuse(_("hubbus: a letter id from an outbox has the form m<MMDDhhmm>-<12 hex digits>"))
             mid, a.id = a.id or outbox_id(), None
-        out = send_letter(c, a, a.sender or here, session, here, boxed=bool(box), mid=mid)
+        sender = a.sender or here
+        if asked_by_person(a, session, letters):
+            if not getattr(a, "as_is", None):
+                ask_check(c, a, sender, session, box)
+            a.text = owner_text(a)
+            if a.type == "question":
+                a.context = None   # in the text now: an owner side that shows both would say it twice
+        given = {k: getattr(a, k, None) for k in SEND_FIELDS}   # before send_letter rewrites a review's text and type
+        review = a.type == "review" and not box
+        if review:   # its revision is compared and the amend written under the bus's write lock
+            c.execute("BEGIN IMMEDIATE")
+        try:
+            out = send_letter(c, a, sender, session, here, boxed=bool(box), mid=mid)
+        except BaseException:
+            if review and c.in_transaction:
+                c.execute("ROLLBACK")
+            raise
+        if review:
+            c.execute("COMMIT")
+            cur = next((x for x in reversed(review_lists(c, sender)) if x["open"]), None)
+            if cur:
+                print(_("{project}'s review list: {key}, revision {rev}", project=sender, key=cur["key"], rev=cur["rev"]),
+                      file=sys.stderr)
         if box:
-            outbox_put(box, {"op": "send", "id": mid, "session": session, **{k: getattr(a, k) for k in SEND_FIELDS}})
+            given["options"] = a.options   # as send_letter checked them: objects
+            outbox_put(box, {"op": "send", "id": mid, "session": session, **given})
             queued(box)
             out = mid
         print(out)
+    elif a.cmd == "review":
+        project = now_named(a.project) if a.project else here
+        if not project:
+            refuse(_("hubbus: not in a project folder, add --project <name>"))
+        cur = next((x for x in reversed(review_lists(c, project)) if x["open"]), None)
+        if cur is None:
+            print(_("{project} has no review list open: the next `brunna send --to {alias} --type review` starts one",
+                    project=project, alias=OWNER_ALIAS))
+        else:
+            print(_("{project}'s review list ({key}), revision {rev}; send the whole list again with --rev {rev}:",
+                    project=project, key=cur["key"], rev=cur["rev"]))
+            print(cur["text"])
+            if box:
+                print(_("(as this project's mailbox view had it a minute ago at most)"), file=sys.stderr)
     elif a.cmd == "inbox":
         project = now_named(a.project) if a.project else here
         if not project:
@@ -4439,7 +4641,15 @@ def cli() -> None:
     s.add_argument("--default", help=_("a question to the owner: what this project proceeds on until the answer comes "
                                        "(an option id, or a text); never taken as the answer"))
     s.add_argument("--due", help="YYYY-MM-DD")
-    s.add_argument("--context")
+    s.add_argument("--context", help=_("a question to the owner: the background in plain words (what the work is, why it "
+                                       "needs the owner)"))
+    s.add_argument("--see", action="append", help=_("a question, task or review to the owner: a file in this project "
+                                                    "with the detail (repeat for each)"))
+    s.add_argument("--replaces", action="append", help=_("a question to the owner: an open question of this project it "
+                                                         "asks again, closed once this one is sent (repeat for each)"))
+    s.add_argument("--as-is", dest="as_is", help=_("a question or task to the owner: send it without the check, saying "
+                                                   "why; the owner sees that it didn't pass"))
+    s.add_argument("--rev", type=int, help=_("a review list: the revision it replaces (brunna review shows it)"))
     s.add_argument("--new-reason", help=_("why it is a new task although it looks like one closed in the last 14 days"))
     s.add_argument("--inferred", action="store_true",
                    help=_("done/drop with --task: only inferred (nobody saw the owner do it); the assistant asks the owner before closing"))
@@ -4459,6 +4669,7 @@ def cli() -> None:
     sub.add_parser("dispatch")
     sub.add_parser("thread").add_argument("id")
     sub.add_parser("open-handoffs")
+    sub.add_parser("review").add_argument("--project")
     oq = sub.add_parser("open-questions")
     oq.add_argument("--project")
     oq.add_argument("--json", action="store_true")

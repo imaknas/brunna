@@ -32,5 +32,6 @@
  "html {rel} is not inside the project folder": "html {rel} 不在專案資料夾裡",
  "html {rel} is not a file": "html {rel} 不是檔案",
  "a page prints only from the project's workspace folder": "頁面只能從專案的工作資料夾印",
- "jobs running or queued": "還有工作在跑或排隊"
+ "jobs running or queued": "還有工作在跑或排隊",
+ "Only a sandboxed project's question is checked here": "這裡只檢查沙箱專案的問題"
 }

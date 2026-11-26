@@ -159,7 +159,7 @@ class ResumeTruthfully(unittest.TestCase):
         fake = type("FP", (), {"pid": 1, "stdout": io.StringIO(""), "stdin": io.StringIO()})()
         with mock.patch.object(m, "deny_settings", lambda p: m.DIR / "d.json"), \
                 mock.patch.object(m, "mcp_config", lambda l: m.DIR / "m.json"), \
-                mock.patch.object(m, "preamble", lambda p, mode="discuss": "p"), \
+                mock.patch.object(m, "preamble", lambda p, mode="discuss", question=None: "p"), \
                 mock.patch.object(m, "env_for", lambda l: {}), mock.patch.object(m, "reader", lambda l, p: None), \
                 mock.patch.object(m.subprocess, "Popen", lambda *a, **k: fake), \
                 mock.patch.object(m.rt(), "resumable", lambda sid: False):

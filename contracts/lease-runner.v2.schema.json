@@ -39,6 +39,10 @@
         "max_turns": {
           "type": "integer",
           "minimum": 1
+        },
+        "question": {
+          "type": "string",
+          "description": "The id of an open question the lease's project asked the owner: the discussion is about it (its whole text and where its detail is go into the session's instructions), and an answer the owner confirms closes it at the handover (docs/design/owner-questions.md). question_unknown (409) when it isn't one"
         }
       }
     },
@@ -204,7 +208,7 @@
         },
         "detail": {
           "type": "string",
-          "description": "A message for people; agent_login = the agent that runs the session is not logged in or its credentials expired (detail says which); folder_refused = the agent won't start a session in the project's folder, since it would load code the folder holds that runs as the owner (detail names it)"
+          "description": "A message for people; agent_login = the agent that runs the session is not logged in or its credentials expired (detail says which); folder_refused = the agent won't start a session in the project's folder, since it would load code the folder holds that runs as the owner (detail names it); question_unknown = create's question isn't an open question the project asked"
         },
         "error": {
           "enum": [
@@ -232,7 +236,8 @@
             "file_refused",
             "rename_failed",
             "runtime_unsupported",
-            "folder_refused"
+            "folder_refused",
+            "question_unknown"
           ]
         },
         "limit": {

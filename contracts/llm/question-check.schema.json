@@ -1,0 +1,39 @@
+{
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "decisions",
+  "reviews",
+  "defects",
+  "repeats"
+ ],
+ "properties": {
+  "decisions": {
+   "type": "array",
+   "items": {"type": "string"},
+   "description": "spans of the question that ask the owner to decide, copied exactly"
+  },
+  "reviews": {
+   "type": "array",
+   "items": {"type": "string"},
+   "description": "spans that ask the owner only to look at or know something, copied exactly"
+  },
+  "defects": {
+   "type": "array",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["kind"],
+    "properties": {
+     "kind": {"type": "string", "description": "no_work, no_choice, no_detail, unexplained or no_consequence"},
+     "quote": {"type": "string", "description": "for unexplained and no_consequence: the span, copied exactly"}
+    }
+   }
+  },
+  "repeats": {
+   "type": "array",
+   "items": {"type": "string"},
+   "description": "labels of open questions (q1, q2…) this one asks again"
+  }
+ }
+}

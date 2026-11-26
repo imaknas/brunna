@@ -38,6 +38,11 @@ Checks (failing one → rejected + reason):
   can't be redirected into another project); the request is a regular file, ≤ 64 KB, within 10 minutes; id is a
   plain file name; cap is one this project declares; argv is a list of strings;
   cwd, resolved to its real path, is inside the project folder; timeout_s ≤ {settings} cap_runner.max_timeout_s.
+A question for the owner ({"v": 1, "id", "kind": "question-check", "fields": {text, context, options, default, see,
+replaces}, "session"?}, from a sandboxed project's `brunna send`; docs/design/owner-questions.md, Where it runs): any
+sandboxed project, whatever it declares. Answered here on a thread of its own, one at a time per project, taking no job
+slot: the prompt is built here from the fields and the project's open questions on the bus (bin/question_check.py),
+never from the project's folder, and stdout is the platform's verdict as JSON. The day's checks are counted here.
 The profile is computed fresh every time (seatbelt.py) and put in .state/cap-runner/<project>/<id>.sb: a place the
 session can't write.
 argv is exec'd directly (`sandbox-exec -f <profile> <argv>`), no shell string in between; the environment gets only
@@ -66,6 +71,7 @@ import signal
 import stat
 import subprocess
 import sys
+import threading
 import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -86,7 +92,7 @@ MAX_REQ = 512 * 1024      # a model call's prompt can be long; a cap request is 
 STALE_S = 600
 # platform modules this file imports inside functions: imported at start (code_watch.preload; docs/design/service-code.md
 # D4)
-PRELOAD = ("pdf_renderer", "policy", "project_git", "registry", "seatbelt")
+PRELOAD = ("pdf_renderer", "policy", "project_git", "question_check", "registry", "seatbelt")
 KEEP_S = 7 * 86400
 DIRFLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
 TERMINAL = ("done", "rejected", "lost")
@@ -117,7 +123,7 @@ def eligible() -> dict[str, dict]:
         caps = list(enf.get("capabilities") or []) if enf.get("sandbox") is True else []
         models = doc.get("models") or {}
         agents = {k: v for k, v in (doc.get("agents") or {}).items() if isinstance(v, dict)}
-        if not caps and not models and not agents:
+        if not caps and not models and not agents and enf.get("sandbox") is not True:   # a sandbox's questions are checked here
             continue
         d = registry.dirs(doc)
         dirs = []
@@ -236,6 +242,17 @@ def read_json(dir_fd: int, name: str):
         raise ValueError(f"{name} is not a regular file")
     with os.fdopen(fd, "rb") as f:
         return json.loads(f.read(MAX_REQ + 1).decode())
+
+
+def open_questions_of(project: str) -> list[tuple[str, str]]:
+    """The project's open questions to the owner, from the bus (never from its folder): (id, text), oldest first."""
+    r = subprocess.run([sys.executable, str(hubconf.ROOT / "bin" / "hubbus"), "open-questions", "--project", project,
+                        "--json"], capture_output=True, text=True, timeout=30, cwd=hubconf.ROOT)
+    try:
+        got = json.loads(r.stdout) if r.returncode == 0 else []
+    except ValueError:
+        got = []
+    return [(q["id"], q.get("text") or "") for q in got if isinstance(q, dict) and isinstance(q.get("id"), str)]
 
 
 def check(req, stem: str, ws: pathlib.Path, caps: list[str], models: dict | None = None,
@@ -474,6 +491,8 @@ class Runner:
         self.last_prune = 0.0
         self.minutes = Minutes()
         self.served: dict[tuple[str, str], float] = {}   # (pool, project) → when its last job started
+        self.threads: list = []    # questions being checked (answer_question)
+        self.qlocks: dict = {}     # project → its lock: one question at a time per project
 
     # ---------- taking requests ----------
 
@@ -534,6 +553,9 @@ class Runner:
         os.rename(name, "request.json", src_dir_fd=req_fd, dst_dir_fd=job_fd)
         try:
             req = read_json(job_fd, "request.json")
+            if isinstance(req, dict) and req.get("kind") == "question-check":
+                self.question(project, stem, job_fd, req, st)   # owns job_fd from here
+                return
             reason, clean = check(req, stem, ws, caps, models, agents)
         except (OSError, ValueError) as e:
             reason, clean = _("Cannot read the request: {err}", err=e), {}
@@ -555,6 +577,57 @@ class Runner:
             self.minutes.settle(clean.get("ledger", ""), 0)   # never queued: nothing was spent
             raise
         self.queue.append(Job(project, stem, job_fd, clean))
+
+    def question(self, project: str, stem: str, job_fd: int, req: dict, st) -> None:
+        """A sandboxed project's question for the owner, checked on a thread of its own (no job slot, one at a time per
+        project). Refused here: not a sandboxed project's (an unsandboxed one's send checks itself), malformed, too old."""
+        doc = hubconf.projects().get(project) or {}
+        fields = req.get("fields")
+        if req.get("v") != 1 or req.get("id") != stem or not isinstance(fields, dict) \
+                or not all(isinstance(fields.get(k), (str, type(None))) for k in ("text", "context", "default")):
+            reason = _("Malformed request (must be a JSON object with v: 1)")
+        elif (doc.get("enforce") or {}).get("sandbox") is not True:
+            reason = _("Only a sandboxed project's question is checked here")
+        elif time.time() - st.st_mtime > STALE_S:
+            reason = _("Request too old (nobody took it within 10 minutes)")
+        else:
+            reason = ""
+        if reason:
+            try:
+                write_state(job_fd, state="rejected", reason=reason)
+            finally:
+                os.close(job_fd)
+            log(project=project, id=stem, event="rejected", detail=reason)
+            return
+        write_state(job_fd, state="running")
+        t = threading.Thread(target=self.answer_question, args=(project, stem, job_fd, fields, req.get("session")),
+                             daemon=True)
+        self.threads = [x for x in getattr(self, "threads", []) if x.is_alive()] + [t]
+        t.start()
+
+    def answer_question(self, project: str, stem: str, job_fd: int, fields: dict, session) -> None:
+        import dataclasses
+        import question_check as qc
+        lock = self.qlocks.setdefault(project, threading.Lock())
+        with lock:
+            try:
+                f = qc.fields(*(fields.get(k) for k in ("text", "context", "options", "default", "see", "replaces")))
+                v = qc.check(project, f, open_questions_of(project), session if isinstance(session, str) else None)
+                fd = os.open("stdout", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=job_fd)
+                try:
+                    os.write(fd, json.dumps(dataclasses.asdict(v), ensure_ascii=False).encode())
+                finally:
+                    os.close(fd)
+                write_state(job_fd, state="done", exit=0)
+                log(project=project, id=stem, event="question_checked", sent=v.sent, unchecked=v.unchecked)
+            except Exception as e:   # noqa: BLE001  the asker then sends it unchecked
+                try:
+                    write_state(job_fd, state="done", exit=1)
+                except OSError:
+                    pass
+                log(project=project, id=stem, event="question_check_error", detail=repr(e)[:300])
+            finally:
+                os.close(job_fd)
 
     def admit_agent(self, project: str, job_id: str, clean: dict, per_day: int | None) -> str:
         """One agent call per project at a time, and its minutes reserved (A5); '' when admitted."""
@@ -829,6 +902,8 @@ def main() -> int:
             time.sleep(0.2)
             r.start_ready()
             r.poll()
+        for t in r.threads:
+            t.join()
         return 0
     log(event="service_start", pid=os.getpid())
     watch = code_watch.Watch("cap-runner", on_error=lambda e: log(event="code_check_error", detail=repr(e)[:300]))

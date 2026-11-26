@@ -105,6 +105,33 @@ class Builtin(unittest.TestCase):
         inbox = self.run_("hubbus", "inbox", "--project", "agent-hub").stdout
         self.assertIn("Use SQLite", inbox)
 
+    def test_a_question_whole(self):
+        """brunna question <id> (docs/design/owner-questions.md, part 3): what the list cuts to a line, whole, with the
+        options and the default, and how to talk it through or answer it; the list points at it"""
+        for records in (False, True):
+            with self.subTest(records=records):
+                self.cfg["mailbox"] = {"records": records}
+                self.write_cfg()
+                r = self.run_("hubbus", "send", "--from", "agent-hub", "--to", "owner", "--type", "question", "--text",
+                              "Which cache for the index?\nThe second line says why.", "--option", "sqlite", "SQLite file",
+                              "--option", "mem", "in memory", "--default", "sqlite")
+                self.assertEqual(r.returncode, 0, r.stderr)
+                qid = r.stdout.strip().split()[-1]
+                listed = self.run_("owner.py", "list").stdout
+                self.assertIn("Which cache for the index?", listed)
+                self.assertNotIn("The second line", listed, "the list shows the first line")
+                self.assertIn("brunna question <id>", listed)
+                r = self.run_("owner.py", "question", qid)
+                self.assertEqual(r.returncode, 0, r.stderr)
+                for part in ("asked Alex on", qid, "Which cache for the index?\nThe second line says why.", "sqlite = SQLite file",
+                             "mem = in memory", "proceeds with: sqlite", f"brunna owner answer {qid}"):
+                    self.assertIn(part, r.stdout)
+                self.assertEqual(self.run_("owner.py", "answer", qid, "SQLite").returncode, 0)
+                self.assertIn("closed", self.run_("owner.py", "question", qid).stdout, "what was asked stays readable")
+        r = self.run_("owner.py", "question", "m00000000-0000")
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("no question with id", r.stderr)
+
     def test_answer_with_records_on(self):
         self.cfg["mailbox"] = {"records": True}
         self.write_cfg()

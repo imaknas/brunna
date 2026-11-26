@@ -85,6 +85,8 @@ scheduling:
 owner (you; not commands for project sessions):
   brunna owner list | done/drop/already-done <key> | answer <question id> "answer"
                         = bin/owner.py: the built-in owner side ({settings} owner_side: builtin; with an assistant, list only)
+  brunna question <question id>
+                        a question a project asked you, whole: its text, context, options, default, where its detail is
   brunna credentials status | grant <project> <name> | set <project> <name> | revoke <project> <name> | check-published
                         the platform's own grants for the remote MCP servers unattended jobs use (bin/credentials.py,
                         docs/design/platform-credentials.md): a to-do tells you when one is needed, with the command
@@ -109,8 +111,8 @@ owner (you; not commands for project sessions):
                         session (a guard against routine use; a sandboxed project's sessions are meant not to reach
                         gh's credentials at all, pending a check of the Keychain)
 for project sessions (these are what the rules files name; the permission rules allow only these, not the admin commands above):
-  brunna send | inbox | show | ack | pass | done | thread | open-questions …   = the project mailbox (bin/hubbus subcommands of the
-                        same name)
+  brunna send | inbox | show | ack | pass | done | thread | open-questions | review …   = the project mailbox (bin/hubbus
+                        subcommands of the same name)
   brunna merge-branch …    = bin/merge-branch (the merge gate for parallel sessions)
   brunna test [--tier T] [--when M] [--force] [--rev R | --index]
                         = bin/test-runner.py: the project's declared test tiers in an exported tree, a recorded pass
@@ -2985,7 +2987,8 @@ def cmd_push_setup(argv: list[str]) -> int:
 
 # subcommands for project sessions (any coding agent): the same list as policy.platform_cli() (the permission rules
 # allow only these)
-SESSION_COMMANDS = {**{c: ("hubbus", c) for c in ("send", "inbox", "show", "ack", "pass", "done", "thread", "open-questions")},
+SESSION_COMMANDS = {**{c: ("hubbus", c) for c in ("send", "inbox", "show", "ack", "pass", "done", "thread", "open-questions",
+                                                   "review")},
                     "merge-branch": ("merge-branch", None), "test": ("test-runner.py", None),
                     "cap-run": ("hub-run", None),
                     "complete": ("hub-run", "--complete"), "agent": ("hub-run", "--agent"), "pdf": ("hub-run", "--pdf")}
@@ -3062,6 +3065,8 @@ COMMANDS = {
     # stdio is the protocol: exec into the server process, no extra layer
     "mcp": lambda argv: os.execv(sys.executable, [sys.executable, str(BIN / "mcp_server.py"), *argv]),
     "owner": lambda argv: subprocess.run([*hubconf.launch(BIN / "owner.py"), *argv]).returncode,
+    # the owner reads one question whole (docs/design/owner-questions.md); never a session command
+    "question": lambda argv: subprocess.run([*hubconf.launch(BIN / "owner.py"), "question", *argv]).returncode,
     # the owner's review of a project's skills (docs/design/skills-sync.md); never a session command
     "skills": passthrough("skills_sync.py"),
     "credentials": passthrough("credentials.py"),

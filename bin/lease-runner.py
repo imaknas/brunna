@@ -9,7 +9,12 @@ runtime: actions use kind, quota uses quota.windows, the error code is agent_log
 assistant had switched over (the schema is in contracts/retired/); events stored before the change are sent as they are.
 How Claude Code's output becomes neutral events is in the runtime's parse_stream (rt()).
 API:
-  POST /v1/leases                     {v, project, mode: discuss, session_id, thread, resume?, max_turns?} → 201
+  POST /v1/leases                     {v, project, mode: discuss, session_id, thread, resume?, max_turns?, question?}
+                                      → 201; question: an open question the project asked the owner, which the
+                                      discussion is about (docs/design/owner-questions.md, part 3): its whole text goes
+                                      into the session's instructions, kept with the lease, and an answer the owner
+                                      confirmed in the handover's answered closes it (done --question, as the project);
+                                      409 question_unknown when it isn't one
   POST /v1/leases/<id>/messages       {v, text, client_msg_id, attachments?} → 202 (a client_msg_id is sent only once;
                                       a stopped process is resumed automatically)
                                       attachments: [{name, media_type, data(base64)}], at most 8, each ≤ 10 MB; stored
@@ -152,6 +157,70 @@ HINT_SERVICES = """
   the project's session declares it under services: in its registry entry (a manifest.update to agent-hub, internal
   to the platform, no owner approval needed) and the platform runs it as a service."""
 
+# A lease opened about a question (create's question): the header and the steps, filled; the question itself goes between
+# them as it was sent, never through prompts.fill (its text is the project's, and could hold a placeholder)
+HINT_QUESTION = """
+
+This conversation is about a question this project asked {{owner}} (id {{question_id}}, asked {{asked}}). {{owner}} wants
+to understand it before answering. The question as it was sent:
+"""
+
+HINT_QUESTION_STEPS = """
+- First read what it points to: the files it names, and this project's memory note of the day it was asked
+  ({{note}}), for the work it came from.
+- Explain it in plain words: what the work is, what is to be decided, what each option leads to, and what you recommend
+  and why. Don't assume {{owner}} remembers the details or the terms.
+- When {{owner}} decides, say the answer back in one sentence and ask whether that is right. Only an answer {{owner}}
+  confirmed goes into the handover's answered; the platform then closes the question with it."""
+
+QUESTION_FIELDS = ("id", "project", "ts", "text", "context", "options", "default", "see")
+QUESTION_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:~-]{0,159}")   # an id as the bus has them; never a leading -
+
+
+def open_question(project: str, key: str) -> dict | None:
+    """The open question with this id that project asked the owner (hubbus open-questions: open, not withdrawn, asked by
+    it), as the lease keeps it; None when there is none or the mailbox can't be read (logged)."""
+    try:
+        r = subprocess.run([PY, str(HUB / "bin" / "hubbus"), "open-questions", "--project", project, "--json"],
+                           cwd=str(HUB), capture_output=True, text=True, timeout=60)
+        rows = json.loads(r.stdout) if r.returncode == 0 else None
+    except (OSError, ValueError, subprocess.TimeoutExpired) as e:
+        log(_("{project}: its open questions could not be read: {e!r}", project=project, e=e))
+        return None
+    if not isinstance(rows, list):
+        log(_("{project}: its open questions could not be read: {why}", project=project,
+              why=(r.stderr or "").strip()[-300:] or f"exit {r.returncode}"))
+        return None
+    for q in rows:
+        if isinstance(q, dict) and q.get("id") == key:
+            return {k: q[k] for k in QUESTION_FIELDS if q.get(k)}
+    return None
+
+
+def question_block(q: dict) -> str:
+    """The question as it was sent, for the session's instructions (English, as the rest of them): its text quoted, then
+    what came with it."""
+    lines = ["> " + line for line in str(q.get("text") or "").splitlines() or [""]]
+    if q.get("context"):
+        lines += ["", f"Context: {q['context']}"]
+    if q.get("options"):
+        lines += ["Options: " + "; ".join(f"{o.get('id')} = {o.get('label')}" for o in q["options"] if isinstance(o, dict))]
+    if q.get("default"):
+        lines += [f"Until answered, the project proceeds with: {q['default']}"]
+    if q.get("see"):
+        see = q["see"] if isinstance(q["see"], list) else [q["see"]]
+        lines += ["Detail: " + ", ".join(str(s) for s in see)]
+    return "\n".join(lines)
+
+
+def question_preamble(q: dict) -> str:
+    import prompts
+    day = str(q.get("ts") or "")[:10]
+    note = f".agent-memory/memory/{day}.md" if re.fullmatch(r"\d{4}-\d{2}-\d{2}", day) else ".agent-memory/memory/"
+    return (prompts.fill(HINT_QUESTION, question_id=q.get("id", ""), asked=day or "?") + "\n" + question_block(q) + "\n"
+            + prompts.fill(HINT_QUESTION_STEPS, note=note))
+
+
 HINT_IDEA = """
 - This project is an idea sandbox: {{assistant}} opened it to explore one of {{owner}}'s ideas. The idea: "{{purpose}}".
   The goal is to help {{owner}} get this idea clear (is it feasible, what does it need, the risks, the next step); the
@@ -220,6 +289,9 @@ class Lease:
         # the version of the tool its session was last run with: what lease-resume resumes it with must have passed
         # resuming one (docs/design/runtime-versions.md section 5)
         self.version = d.get("version") if isinstance(d.get("version"), str) else None
+        # the question the lease was opened about (create's question): what open_question read when it opened, kept so a
+        # resume after a runner restart says the same thing and the handover can close it
+        self.question = d.get("question") if isinstance(d.get("question"), dict) else None
         self.recent: list[dict] = []          # recent events (text_delta included), for SSE replays
         self.cond = threading.Condition(_lock)
 
@@ -228,7 +300,8 @@ class Lease:
                 "state": self.state, "started_once": self.started_once, "max_turns": self.max_turns,
                 "last_activity": self.last_activity, "idle_warned_at": self.idle_warned_at, "warned_at": self.warned_at,
                 "seq": self.seq, "seen_msgs": self.seen_msgs[-200:], "handovers": self.handovers,
-                **({"version": self.version} if self.version else {})}
+                **({"version": self.version} if self.version else {}),
+                **({"question": self.question} if self.question else {})}
 
     def public(self) -> dict:
         return {"lease_id": self.id, "project": self.project, "mode": self.mode, "thread": self.thread,
@@ -352,9 +425,10 @@ def work_projects() -> list[str]:
     return sorted(n for n in hubconf.projects() if work_ready(n)[0])
 
 
-def preamble(project: str, mode: str = "discuss") -> str:
+def preamble(project: str, mode: str = "discuss", question: dict | None = None) -> str:
     """The lease instructions (discuss is read-only / work can make changes, asking for every write); idea sandboxes
-    (registry type: idea) get an extra section: which idea is being explored."""
+    (registry type: idea) get an extra section: which idea is being explored; a lease opened about a question, the question
+    whole and how to go about it."""
     import prompts
     doc = hubconf.projects().get(project) or {}
     caps = (doc.get("enforce") or {}).get("capabilities") or []
@@ -366,8 +440,9 @@ def preamble(project: str, mode: str = "discuss") -> str:
         text += HINT_SERVICES
     if doc.get("type") == "idea":
         text += HINT_IDEA
-    return prompts.fill(text, capabilities=", ".join(caps), hub_run=hubconf.ROOT / "bin" / "hub-run",
+    text = prompts.fill(text, capabilities=", ".join(caps), hub_run=hubconf.ROOT / "bin" / "hub-run",
                         purpose=doc.get("purpose", ""))
+    return text + question_preamble(question) if question else text
 
 
 class FolderRefused(RuntimeError):
@@ -405,7 +480,7 @@ def start_proc(lease: Lease, resume: bool) -> None:
     cmd = [PY, str(HUB / "bin" / "llm.py"), "exec", point, "--cwd", lease.cwd, "--",
            *flag, "--strict-mcp-config", "--mcp-config", str(mcp_config(lease)),
            "--permission-prompt-tool", runtime_claude.APPROVE_TOOL,
-           "--settings", str(deny_settings(lease.project)), "--append-system-prompt", preamble(lease.project, lease.mode),
+           "--settings", str(deny_settings(lease.project)), "--append-system-prompt", preamble(lease.project, lease.mode, lease.question),
            "--max-turns", str(lease.max_turns)]
     if not can_resume or (lease.version and pair in ("same", "pass")):
         # the version that wrote it: a fresh conversation's, or one the copy now has been checked resuming. A resume of a
@@ -636,16 +711,19 @@ def empty_handover() -> dict:
             "decisions": [], "open_questions": [], "tasks_for_owner": [], "notes_markdown": ""}
 
 
-def handover_prompt(earlier: list[dict] | None = None, **names) -> str:
+def handover_prompt(earlier: list[dict] | None = None, question: dict | None = None, **names) -> str:
     """judgment point lease-handover's prompt, said to the resumed session (templates/prompts/lease-handover.md, in
     English; the handover is written in the content language). names: owner= / lang= pinned by an eval. With earlier
     items (earlier_tasks) it also lists them (templates/prompts/lease-handover-earlier.md), so the handover can name
-    them by ref instead of raising them again."""
+    them by ref instead of raising them again. A lease opened about a question asks for its confirmed answer
+    (templates/prompts/lease-handover-question.md)."""
     import prompts
     text = prompts.render("lease-handover", **names)
     if earlier:
         items = "\n".join(f"- {e['ref']}: {' '.join(e['text'].split())}" for e in earlier)
         text += "\n\n" + prompts.render("lease-handover-earlier", items=items, **names)
+    if question:
+        text += "\n\n" + prompts.render("lease-handover-question", question_id=question.get("id", ""), **names)
     return text
 
 
@@ -689,7 +767,7 @@ def run_handover(lease: Lease, earlier: list[dict] | None = None) -> tuple[dict 
            "--resume", lease.id, "--strict-mcp-config", "--settings", str(deny_settings(lease.project))]
     why = ""
     for attempt in (1, 2):  # retry once if invalid
-        r = subprocess.run(cmd, input=handover_prompt(earlier), cwd=lease.cwd, env=env_for(lease), capture_output=True, text=True,
+        r = subprocess.run(cmd, input=handover_prompt(earlier, lease.question), cwd=lease.cwd, env=env_for(lease), capture_output=True, text=True,
                            timeout=900)
         try:
             out = json.loads(r.stdout)
@@ -755,12 +833,30 @@ def deliver(lease: Lease, h: dict, n: int, earlier: list[dict] | None = None) ->
     for i, q in enumerate(h.get("open_questions") or []):
         hubbus("send", "--from", proj, "--to", owner, "--type", "question", "--id", handover_id(sid, n, f"q-{i}"), "--text", q,
                "--context", f"lease:{sid}")
+    if (ans := h.get("answered")):
+        # the owner's confirmed answer closes the question the lease was opened about, as the project would (hubbus checks
+        # it is that project's own open question); a failure leaves it open and is said
+        r = hubbus("send", "--from", proj, "--to", owner, "--type", "done", "--question", ans["question"], "--id",
+                   handover_id(sid, n, "answered"), "--text", ans["answer"], "--context", f"lease:{sid}")
+        ans["closed"] = r.returncode == 0
+        if not ans["closed"]:
+            why = (getattr(r, "stderr", "") or getattr(r, "stdout", "") or "").strip()[-300:] or f"exit {r.returncode}"
+            log(_("{id}: the answer to {question} could not be sent, the question stays open: {why}", id=sid,
+                  question=ans["question"], why=why))
+            hubbus("publish", "job.failed", "--source", "lease-runner", "--payload",
+                   json.dumps({"job": "lease-runner:answered", "detail": _("{project}: the owner's answer to {question} "
+                                                                           "could not close it: {why}", project=proj,
+                                                                           question=ans["question"], why=why)[:500]},
+                              ensure_ascii=False))
     hubbus("send", "--from", proj, "--to", owner, "--type", "progress", "--id", handover_id(sid, n, "progress"),
            "--text", _("[{project} lease detached] {summary}", project=proj, summary=h.get("summary", "")),
            "--context", f"lease:{sid}")
     body = [_("Handover from the detached lease ({id}):", id=sid[:8]), h.get("summary", "")]
     body += [_("- Decision: {what} ({why})", what=d.get("what"), why=d.get("why", "")) for d in h.get("decisions") or []]
     body += [_("- Open question: {q}", q=q) for q in h.get("open_questions") or []]
+    if (ans := h.get("answered")):
+        body += [_("- {owner} answered question {question}: {answer}", owner=hubconf.owner_tag(), question=ans["question"],
+                   answer=ans["answer"]) + ("" if ans.get("closed") else _(" (closing it failed; it is still open)"))]
     hubbus("send", "--from", hubconf.hub_project(), "--to", proj, "--type", "info", "--id", handover_id(sid, n, "report"),
            "--text", "\n".join(body))
     # notes written into the project's memory (registered in managed-files); the task keys sent are attached, so the
@@ -785,6 +881,22 @@ def deliver(lease: Lease, h: dict, n: int, earlier: list[dict] | None = None) ->
                               stderr=subprocess.DEVNULL, start_new_session=True)  # send right away, don't wait 15 minutes
     with _lock:   # waited for before exiting for new code: systemd ends what is left in the unit's group when it restarts
         CHILDREN[:] = [c for c in CHILDREN if c.poll() is None] + ([bridge] if bridge is not None else [])
+
+
+ANSWER_CHARS = 2000
+
+
+def answered(lease: Lease, got) -> dict | None:
+    """The handover's answered, taken only for the question the lease was opened about, with an answer: {question,
+    answer}; None otherwise (anything else is logged and dropped: a handover is the model's, and could name any id)."""
+    if got is None:
+        return None
+    q = (lease.question or {}).get("id")
+    if not (q and isinstance(got, dict) and got.get("question") == q and isinstance(got.get("answer"), str)
+            and got["answer"].strip()):
+        log(_("{id}: the handover's answered isn't an answer to the lease's own question; ignored", id=lease.id))
+        return None
+    return {"question": q, "answer": got["answer"].strip()[:ANSWER_CHARS]}
 
 
 def detach(lease: Lease, reason: str) -> None:
@@ -814,6 +926,8 @@ def detach(lease: Lease, reason: str) -> None:
          "ended": [] if fallback else so.get("ended", []),
          "notes_markdown": "" if fallback else so.get("notes_markdown", ""),
          "notes_written": False, "fallback": fallback, "branch": None, "commits": [], "tests": None}
+    if not fallback and (ans := answered(lease, so.get("answered"))):
+        h["answered"] = ans
     try:
         # which handover this is: recorded before sending, so a resend of the same handover gets the same ids (the bus
         # and the assistant both dedupe by id)
@@ -1423,6 +1537,9 @@ class H(http.server.BaseHTTPRequestHandler):
             return self.err(409, "runtime_unsupported", _("leases don't run on an API key yet"))
         if mode not in ("discuss", "work"):
             return self.err(400, "bad_request", _("mode must be discuss or work"))
+        qkey = b.get("question")
+        if qkey is not None and not (isinstance(qkey, str) and QUESTION_KEY.fullmatch(qkey)):
+            return self.err(400, "bad_request", _("question must be a question's id"))
         try:
             uuid.UUID(sid)
         except ValueError:
@@ -1436,6 +1553,9 @@ class H(http.server.BaseHTTPRequestHandler):
             ok, why = work_ready(proj)
             if not ok:
                 return self.err(400, "work_not_allowed", why)
+        question = None
+        if qkey is not None and (question := open_question(proj, qkey)) is None:
+            return self.err(409, "question_unknown", _("{id} is not an open question {project} asked", id=qkey, project=proj))
         try:   # said here, not as a crash after the lease opened: the assistant shows why it didn't open
             refuse_folder(str(ws))
         except FolderRefused as e:
@@ -1456,7 +1576,9 @@ class H(http.server.BaseHTTPRequestHandler):
                            "max_turns": int(b.get("max_turns") or DEFAULT_MAX_TURNS),
                            "seq": prev.seq if prev else 0, "seen_msgs": prev.seen_msgs if prev else [],
                            "handovers": prev.handovers if prev else 0,
-                           "version": prev.version if prev else None})
+                           "version": prev.version if prev else None,
+                           # a lease resumed without a question keeps the one it was opened about
+                           "question": question or (prev.question if prev else None)})
             LEASES[sid] = lease
             lease.emit("state", state="attaching", project=proj)
             try:

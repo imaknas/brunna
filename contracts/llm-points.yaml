@@ -314,6 +314,21 @@ points:
     # a label of the candidates it listed; anything else, or no answer in two ticks, and the most recently active session
     # gets it
     on_failure: default
+  question-check:
+    caller: "bin/hubbus send (a question or task to the owner from a session, through llm.answer), bin/cap-runner.py for a sandboxed project's session (bin/question_check.py)"
+    shape: completion
+    model_group: fast
+    purpose: "a question for the owner, read as the owner will read it: what it asks to decide, what only to look at, what keeps it from being answered, which open question it repeats (docs/design/owner-questions.md, The check)"
+    # Its input is what a project's agent wrote, a sandboxed one's included: the platform builds the prompt from the
+    # question's fields alone, and takes back only quotes of them, fixed kinds and labels (question_check.verdict), so
+    # nothing the model writes reaches the asker. One request a call; llm.answer prints and publishes nothing. No answer:
+    # the question is sent unchecked, and the sender is told so in fixed words
+    tools: ""
+    output: {format: json, schema: llm/question-check.schema.json}
+    max_tokens: 800
+    max_attempts: 1
+    timeout_s: 45
+    on_failure: default
   mailbox-conversation:
     caller: bin/hubbus (dispatch → llm.py run, with runtime_claude.resume_args)
     shape: agent

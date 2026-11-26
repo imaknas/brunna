@@ -8,6 +8,8 @@ the owner's to-dos as `raised` records and applies the `settled` ones it gets ba
 other side.
 
   owner.py list [--project P]                 open to-dos (Acts) and questions
+  owner.py question <id>                      one question whole: its text, context, options, default, where its detail
+                                              is, who asked and when (also `brunna question <id>`); any owner side
   owner.py done | drop | already-done <key> [--note "…"]
                                               close a to-do: write `settled` (authority principal = the owner said so),
                                               the registrar deletes that line by key tonight
@@ -82,6 +84,46 @@ def open_items(only: str | None = None) -> list[dict]:
         out.append({"kind": "question", "project": q["project"], "id": q["id"], "text": q["text"], "since": q.get("ts") or "",
                     **{k: q[k] for k in ("options", "default") if k in q}})
     return out
+
+
+QUESTION_FIELDS = ("context", "options", "default", "see")
+
+
+def show_question(qid: str) -> int:
+    """A question to the owner, whole (docs/design/owner-questions.md, part 3, "Without the assistant"): what
+    open-questions and the list cut to a line. Open or closed: what was asked doesn't change."""
+    hb = _hubbus()
+    q = hb.question_asked(hb.db(), qid)
+    if q is None:
+        print(_("no question with id {id} (`brunna owner list` shows the open ones)", id=qid), file=sys.stderr)
+        return 1
+    open_ = next((o for o in hb.open_questions(hb.db(), q["project"]) if o["id"] == qid), None)
+    whole = {**q, **(open_ or {})}   # the open view carries what the question was sent with
+    print(_("{project} asked {owner} on {when} ({id}, {state}):", project=whole["project"], owner=hubconf.owner_tag(),
+            when=str(whole.get("ts") or "")[:16].replace("T", " "), id=qid,
+            state=_("open") if open_ else _("closed")))
+    print()
+    print(whole.get("text") or "")
+    if whole.get("context"):
+        print()
+        print(_("Context: {context}", context=whole["context"]))
+    if whole.get("options"):
+        print(_("Options:"))
+        for o in whole["options"]:
+            if isinstance(o, dict):
+                print(f"  {o.get('id')} = {o.get('label')}")
+    if whole.get("default"):
+        print(_("Until answered, the project proceeds with: {default}", default=whole["default"]))
+    if whole.get("see"):
+        see = whole["see"] if isinstance(whole["see"], list) else [whole["see"]]
+        print(_("Detail in the project: {paths}", paths=", ".join(str(s) for s in see)))
+    print()
+    print(_("To talk it through, open a discussion about it with {assistant} (a lease with this question), or a session "
+            "in {project}'s folder.", assistant=hubconf.get("assistant.name") or _("the assistant"), project=whole["project"])
+          if hubconf.owner_side() != "builtin" else
+          _("To talk it through, open a session in {project}'s folder and ask about question {id}; to answer: brunna owner "
+            "answer {id} \"…\"", project=whole["project"], id=qid))
+    return 0
 
 
 def _now() -> str:
@@ -208,16 +250,22 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("answer")
     s.add_argument("id")
     s.add_argument("text")
+    sub.add_parser("question").add_argument("id")
     sub.add_parser("notify")
     a = ap.parse_args(argv)
     if a.cmd == "list":
         items = open_items(a.project)
         for it in items:
             ref = it.get("key") or it.get("id")
-            print(f"{'❓' if it['kind'] == 'question' else '☐'} {it['project']:<24} {ref}  {it['text'][:100]}"
+            first = (it["text"].splitlines() or [""])[0]
+            print(f"{'❓' if it['kind'] == 'question' else '☐'} {it['project']:<24} {ref}  {first[:100]}"
                   f"{_hubbus().assumed(it)}")
         print(_("({n} open)", n=len(items)))
+        if any(it["kind"] == "question" for it in items):
+            print(_("A question whole, with its context and options: brunna question <id>"))
         return 0
+    if a.cmd == "question":
+        return show_question(a.id)
     if hubconf.owner_side() != "builtin":
         print(_("the owner side is {assistant} ({settings} owner_side: assistant): settle and answer there; "
                 "here you can only list (two principal sides would conflict)",

@@ -396,16 +396,24 @@ TOOLS = [
          "ids": _ids(), "note": _str("how they were handled, or why they are taken back"),
          "withdraw": {"type": "boolean", "description": "take back letters this project sent"}}}},
     {"name": "ask_owner", "description": "Ask the owner (the person this platform belongs to) about something they need "
-                                         "to decide. In the text, say in a sentence or two which work it is about and "
-                                         "what each option leads to. List the options when there are some; when this "
-                                         "project goes on with one of them while it waits, give it as default (it is "
-                                         "never taken as the answer).",
+                                         "to decide. They read it later, without your context: text is the decision "
+                                         "alone; context says in plain words what the work is and why it needs them, "
+                                         "with every term of your own explained. List the options when there are some; "
+                                         "when this project goes on with one of them while it waits, give it as default "
+                                         "(it is never taken as the answer). Something only to look at is no question. "
+                                         "From a session, the platform checks it first and says what is missing: fix it, "
+                                         "or send it with as_is saying why.",
      "inputSchema": {"type": "object", "required": ["text"], "properties": {
-         "text": _str("the question, with its background"),
+         "text": _str("the decision, readable on its own"),
+         "context": _str("the background in plain words: what the work is, why it needs the owner"),
          "options": {"type": "array", "description": "the choices",
                      "items": {"type": "object", "required": ["id", "label"], "properties": {
-                         "id": _str("a short id, no spaces, unique in this question"), "label": _str("what it means")}}},
-         "default": _str("what this project proceeds on until the answer comes: an option id, or a text")}}},
+                         "id": _str("a short id, no spaces, unique in this question"), "label": _str("what it leads to")}}},
+         "default": _str("what this project proceeds on until the answer comes: an option id, or a text"),
+         "see": {"type": "array", "items": {"type": "string"}, "description": "files in this project with the detail"},
+         "replaces": {"type": "array", "items": {"type": "string"},
+                      "description": "open questions of this project it asks again (their ids), closed once it is sent"},
+         "as_is": _str("send it without the check, saying why")}}},
     {"name": "note", "description": "Add an entry to this project's memory notes for today (what was done, what was "
                                     "decided, what is unfinished; one matter per entry).",
      "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": _str("the entry")}}},
@@ -534,7 +542,10 @@ def hubbus_cli(project: str, *args: str, run: "Run | None" = None) -> tuple[bool
     else:
         ws = hubconf.workspace(project)
         cwd, env = (ws if _hubbus().outboxed(project) or (ws and pathlib.Path(ws).is_dir()) else os.getcwd()), None
-    r = subprocess.run([sys.executable, str(BIN / "hubbus"), *args], capture_output=True, text=True, timeout=60,
+    if run is None:   # a person's session through MCP, which has no session id: its questions are checked like a CLI's
+        env = names.env_set(dict(os.environ), "MCP_ASKER", "1")
+    # a question's check (question_check: 45 s, or 75 s waiting on the runner for a sandboxed project) runs inside
+    r = subprocess.run([sys.executable, str(BIN / "hubbus"), *args], capture_output=True, text=True, timeout=150,
                        cwd=cwd, env=env)
     out = (r.stdout + ("\n" + r.stderr if r.stderr.strip() else "")).strip()
     return r.returncode == 0, out or (_("done") if r.returncode == 0 else f"exit {r.returncode}")
@@ -652,8 +663,18 @@ def mail_args(project: str, name: str, args: dict, run: "Run | None" = None) -> 
         default = args.get("default")
         if default is not None and not isinstance(default, str):
             raise BadArgs(_("default must be text"))
-        return ["send", f"--from={project}", f"--to={hubconf.owner_address()}", "--type=question",
-                f"--text={_text(args, 'text')}", *_options(args), *([f"--default={default}"] if default is not None else [])]
+        out = ["send", f"--from={project}", f"--to={hubconf.owner_address()}", "--type=question",
+               f"--text={_text(args, 'text')}", *_options(args), *([f"--default={default}"] if default is not None else [])]
+        if (ctx := _text(args, "context", required=False)):
+            out.append(f"--context={ctx}")
+        for key, flag in (("see", "--see"), ("replaces", "--replaces")):
+            vals = args.get(key) or []
+            if not isinstance(vals, list) or not all(isinstance(v, str) for v in vals):
+                raise BadArgs(_("{key} must be a list of texts", key=key))
+            out += [f"{flag}={v}" for v in vals]
+        if (why := _text(args, "as_is", required=False)):
+            out.append(f"--as-is={why}")
+        return out
     raise BadArgs(_("no such tool: {name}", name=name))
 
 

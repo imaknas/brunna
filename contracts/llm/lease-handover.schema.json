@@ -15,6 +15,9 @@
    "properties": {"ref": {"type": "string", "pattern": "^T\\d+$"}, "outcome": {"enum": ["done", "not_needed"]},
     "basis": {"type": "string", "minLength": 1}}},
    "description": "earlier items (listed in the prompt) this conversation shows have ended, and how it shows it"},
+  "answered": {"type": "object", "additionalProperties": false, "required": ["question", "answer"],
+   "properties": {"question": {"type": "string"}, "answer": {"type": "string", "minLength": 1}},
+   "description": "only when the prompt names a question and the owner confirmed the answer read back to them: its id, and the answer (in the content language named in the prompt)"},
   "notes_markdown": {"type": "string", "description": "raw notes (markdown) for the project's memory: what was discussed, the decisions, the problems run into; uncertain wording kept (in the content language named in the prompt)"}
  }
 }

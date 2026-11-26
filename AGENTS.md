@@ -203,6 +203,11 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
   is not: sessions still see it. At most 4 rounds per thread (then the owner is asked once and the platform starts nothing
   more for it, the letter stays open) and 6 dispatches per project per day (brunna.json `mailbox`). Everything specific to Claude Code is
   only in `bin/runtime_claude.py`. Handoffs do not go through this.
+  A question to the owner from a session is checked first, by what the owner will see (`bin/question_check.py`,
+  judgment point `question-check`; a sandboxed project's through the capability runner), and refused once with what
+  is missing; `merge-branch` takes no question; what is only to look at is one review list per project
+  (`--type review`, `brunna review`), and `--replaces` closes the questions a new one asks again
+  (docs/design/owner-questions.md). `brunna question <id>` shows one whole, and a discuss lease can take one.
   When a project's question to the owner is resolved inside the project session:
   `brunna send --to owner --type done|drop --question <id>`, and the owner side closes it; opening a session lists the
   questions still open for that project (❓), and every night after the librarian the `assistant/reconcile-questions`

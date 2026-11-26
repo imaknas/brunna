@@ -280,6 +280,13 @@
         }
       }
     },
+    "questions": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "check": {"enum": ["refuse", "advise", "off"], "description": "a question for the owner, sent from a session, is read first as the owner will read it (judgment point question-check, docs/design/owner-questions.md): refuse = refused with what is missing until it is fixed or sent --as-is; advise = sent, with what is missing said to the asker; off = not checked. Default refuse"}
+      }
+    },
     "mailbox": {
       "type": "object",
       "properties": {

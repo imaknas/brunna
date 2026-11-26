@@ -34,7 +34,9 @@ worktree/branch (Claude Desktop's worktree mode); the main checkout is kept for 
 interactive session. When you are done in a worktree, merge back into main through the merge gate; don't commit
 directly to main:
 
-    brunna merge-branch --note "what you did" [--question "what {{owner}} needs to decide"]
+    brunna merge-branch --note "what you did"
+
+The note is read by no one as a question: something for {{owner}} to decide is asked on its own, before merging (below).
 
 It rebases onto main, runs this project's tests, fast-forwards main and records a completion report; **it does not
 push** (pushing waits until {{owner}} says so). In a sandboxed project, push with `brunna push [<branch>]` from this
@@ -114,12 +116,21 @@ line**; don't remove, copy or move keys.
 To have {{owner}} do something new: `brunna send --to {{owner_alias}} --type task --text "…" [--due YYYY-MM-DD]`.
 
 To ask {{owner}} something only they can decide:
-`brunna send --to {{owner_alias}} --type question --text "…" [--option <id> "<label>"]... [--default <id|text>]`.
-In the text, say in a sentence or two which work it is about and what each option leads to. When there are options,
-list them with `--option` (a short id without spaces, then what it means). When you go on with one of them while you
-wait, always give it with `--default` (an option's id, or a text when there are no options): it is your working
-assumption, recorded so {{owner}} can see what you proceeded on; it is never taken as the answer, and nothing closes the
-question by it.
+`brunna send --to {{owner_alias}} --type question --text "…" --context "…" [--option <id> "<label>"]... [--default <id|text>]
+[--see <path>]... [--replaces <id>]...`.
+{{owner}} reads it later, away from this session, knowing nothing of what you know now. `--text` is the decision alone,
+readable on its own. `--context` says in plain words what the work is and why it needs {{owner}}; explain every term of
+your own. List options with `--option` (a short id without spaces, then what it leads to). When you go on with one of
+them while you wait, give it with `--default` (an option's id, or a text when there are no options): your working
+assumption, recorded so {{owner}} can see what you proceeded on; it is never taken as the answer. `--see` names a file in
+this project with the detail. When it asks again what an open question of yours asked, `--replaces <id>` closes that one.
+The platform checks the question before sending it, by what {{owner}} will see, and says what is missing; fix it and send
+again, or add `--as-is "why"` to send it as it is ({{owner}} sees that it didn't pass, and why).
+
+What {{owner}} should only look at, not decide (a change to read, a threshold you set yourself), is not a question: keep
+one review list for this project with `brunna send --to {{owner_alias}} --type review --text "…" [--see <path>]...`,
+the whole list each time (drop what is no longer needed). While one is open, send it with `--rev <n>`: `brunna review`
+shows the list as it stands and its revision.
 
 When {{owner}} has answered, directly in this session, a question this project asked with `--type question` (or it is
 no longer needed), close it, or {{assistant}} keeps showing it as "waiting for you":
