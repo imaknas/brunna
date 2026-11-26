@@ -108,7 +108,8 @@ fine.
 
 `brunna send --to <owner> --type review --text "…" [--see <path>]... [--rev <n>]`: the **whole** current list of
 what the owner should look at in this project, each time (the agent rewrites it; old lines drop off). It is an owner
-to-do, key `review-<project>[-<n>]`: sent again it amends the open one (terms_rev + 1, as `send_record` does for a task
+to-do, key `review-<project>[-<n>]`, whose text is one line naming the list and its revision (an Acts item's text has
+no line break) and whose record context is the list: sent again it amends the open one (terms_rev + 1, as `send_record` does for a task
 sent under its key). While one is open, a send must name its revision with `--rev`: one without it, or with an older
 one, is refused with the list as it stands and its revision, so a session never drops lines it hasn't seen; the
 revision is compared and the amend written under the bus's write lock. `brunna review` prints the open list and its

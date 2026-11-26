@@ -399,7 +399,8 @@ class Send(unittest.TestCase):
         keys = {r["key"] for r in self.recs()}
         self.assertEqual(keys, {"review-proj"})
         amended = [r for r in self.recs() if r["type"] == "amended"]
-        self.assertIn("- docs/cut.md\n- docs/slots.md", amended[-1]["terms"]["text"], "its lines kept")
+        self.assertIn("- docs/cut.md\n- docs/slots.md", amended[-1]["context"], "its lines kept, in the context")
+        self.assertTrue(all("\n" not in r["terms"]["text"] for r in self.recs()), "an Acts item's text is one line")
         out = io.StringIO()
         with mock.patch.object(sys, "argv", ["hubbus", "review", "--project", "proj"]), redirect_stdout(out):
             self.m.main()

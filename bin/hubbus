@@ -596,7 +596,7 @@ def send_record(c, a, sender: str, mid: str, p: dict) -> str | None:
     need = need_state(c, sender, key)
     if need:   # an item raised under a name this project had before a rename stays filed under it
         rec["project"] = need["record"]["project"]
-    text = a.text.strip() if getattr(a, "review", False) else " ".join(a.text.split())   # a review list keeps its lines
+    text = " ".join(a.text.split())   # an Acts item's text is one line (acts §2); a review list's lines are its context
     if kind == "raised" and need:
         terms = {"text": text, **({"due": a.due} if a.due else {})}
         if terms == {k: v for k, v in need["terms"].items() if k in ("text", "due")}:
@@ -4217,26 +4217,18 @@ def review_lists(c, project: str) -> list[dict]:
             continue
         view = ph_records.settlement_view(recs, cfg)
         out.append({"key": key, "n": review_n(key, project), "open": view["state"] == "open",
-                    "rev": need["rev"], "text": review_body(need["terms"].get("text") or "", project)})
+                    "rev": need["rev"], "text": review_body(need["record"].get("context") or "")})
     return sorted(out, key=lambda x: x["n"])
 
 
-REVIEW_HEAD = "To look at in {project} (its review list):"
 DETAIL = "Detail: {paths}"
 
 
-def review_body(text: str, project: str) -> str:
-    """A review list as its session wrote it: the header and the files line the platform adds taken off, in any language
-    (the session sends the list whole again; nothing piles up)."""
-    heads = {REVIEW_HEAD.format(project=n) for n in own_names(project)}
-    details = {DETAIL.split("{")[0]}
-    for lang in i18n.languages():
-        for n in own_names(project):
-            heads.add(i18n.translate("hubbus", REVIEW_HEAD, {"project": n}, lang))
-        details.add(i18n.translate("hubbus", DETAIL, {"paths": ""}, lang))
-    lines = text.splitlines()
-    if lines and lines[0].strip() in heads:
-        lines = lines[1:]
+def review_body(context: str) -> str:
+    """A review list as its session wrote it: its record's context, without the files line the platform adds, in any
+    language (the session sends the list whole again; nothing piles up)."""
+    details = {DETAIL.split("{")[0], *(i18n.translate("hubbus", DETAIL, {"paths": ""}, lang) for lang in i18n.languages())}
+    lines = context.splitlines()
     if lines and any(lines[-1].startswith(d) for d in details if d):
         lines = lines[:-1]
     return "\n".join(lines).strip()
@@ -4244,21 +4236,24 @@ def review_body(text: str, project: str) -> str:
 
 def prepare_review(c, a, sender: str) -> None:
     """A review list goes as the owner to-do it is: the open list's key (amended when --rev is its revision, refused
-    with the list as it stands otherwise), or the next key once the owner side settled the last."""
+    with the list as it stands otherwise), or the next key once the owner side settled the last. Its text is one line
+    naming the list and its revision (an Acts item's text has no line break); the list itself is the record's context."""
     lists = review_lists(c, sender)
     now_open = [x for x in lists if x["open"]]
     if now_open:
         cur = now_open[-1]
         if getattr(a, "rev", None) != cur["rev"]:
             raise ReviewStale(sender, cur["key"], cur["rev"], cur["text"])
-        key = cur["key"]
+        key, rev = cur["key"], cur["rev"] + 1
     else:
         n = max((x["n"] for x in lists), default=0) + 1
-        key = f"review-{sender}" if n == 1 else f"review-{sender}-{n}"
-    lines = [_("To look at in {project} (its review list):", project=sender), a.text.strip()]
+        key, rev = (f"review-{sender}" if n == 1 else f"review-{sender}-{n}"), 1
+    lines = [a.text.strip()]
     if a.see:
         lines.append(_("Detail: {paths}", paths=", ".join(a.see)))
-    a.type, a.id, a.text, a.review = "task", key, "\n".join(lines), True
+    a.type, a.id, a.review = "task", key, True
+    a.text = _("To look at in {project}: its review list, revision {rev}", project=sender, rev=rev)
+    a.context = "\n".join(lines)
 
 
 def send_one(c, a, sender: str, session, here, boxed: bool = False, mid: str | None = None) -> str:

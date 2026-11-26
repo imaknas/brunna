@@ -239,7 +239,6 @@
  "the owner could not be told that bus.db was moved aside: {e!r}": "bus.db 被搬開這件事沒能通知 {owner}:{e!r}",
  "letters wait: {reason}": "信等著:{reason}",
  "another letter's run has just started": "另一封信的執行剛開始",
- "To look at in {project} (its review list):": "{project} 待你看的(它的審閱清單):",
  "hubbus: --see is for a question, task or review to {alias}": "hubbus:--see 用在給 {alias} 的問題、待辦或審閱清單",
  "hubbus: --as-is \"why\" is for a question or task to {alias}, with why it goes as it is": "hubbus:--as-is \"理由\" 用在給 {alias} 的問題或待辦,寫明為什麼照原樣寄",
  "hubbus: --rev <n> is for a review list: the revision it replaces": "hubbus:--rev <n> 用在審閱清單:它取代的版本",
@@ -264,5 +263,6 @@
  "{project}'s review list ({key}), revision {rev}; send the whole list again with --rev {rev}:": "{project} 的審閱清單({key}),第 {rev} 版;要改就用 --rev {rev} 把整份清單重寄:",
  "(as this project's mailbox view had it a minute ago at most)": "(這是專案信箱檢視裡的內容,最多晚一分鐘)",
  "{project}: {id} was closed before its replacement came in; the new question goes": "{project}:{id} 在取代它的問題送進來之前就關了;新問題照樣寄出",
- "not checked: the platform can't tell which session this is, so nobody would read a refusal": "沒有檢查:平台認不出這是哪個 session,退回了也沒人看得到"
+ "not checked: the platform can't tell which session this is, so nobody would read a refusal": "沒有檢查:平台認不出這是哪個 session,退回了也沒人看得到",
+ "To look at in {project}: its review list, revision {rev}": "{project} 待你看的:它的審閱清單,第 {rev} 版"
 }
