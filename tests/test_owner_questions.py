@@ -24,6 +24,17 @@ import question_check as qc  # noqa: E402
 import runtime_ports  # noqa: E402
 
 
+_LANG = mock.patch.dict(os.environ, {"AGENT_HUB_LANG_UI": "en"})   # the assertions read the English texts
+
+
+def setUpModule():
+    _LANG.start()
+
+
+def tearDownModule():
+    _LANG.stop()
+
+
 def load(name, file):
     loader = importlib.machinery.SourceFileLoader(name, str(ROOT / "bin" / file))
     spec = importlib.util.spec_from_loader(name, loader)

@@ -896,7 +896,7 @@ class Runner:
     def note_active(self) -> None:
         """ACTIVE when the number of jobs in flight changed: a restart now would mark them lost (render-services
         changes this service's unit only while it is 0)."""
-        n = len(self.running) + len(self.queue) + sum(1 for t in self.threads if t.is_alive())
+        n = len(self.running) + len(self.queue) + sum(1 for t in getattr(self, "threads", []) if t.is_alive())
         procs = sorted([j.proc.pid, j.started] for j in self.running if j.proc is not None)
         if (n, procs) != self.noted:
             hubconf.write_atomic(ACTIVE, json.dumps({"pid": os.getpid(), "jobs": n, "procs": procs}))
@@ -938,7 +938,7 @@ def main() -> int:
         # manager starts the new code. It keeps taking requests meanwhile: one left waiting 10 minutes is refused as too
         # old, and an agent call may run an hour
         if watch.stale():
-            if not r.running and not r.queue and not any(t.is_alive() for t in r.threads):
+            if not r.running and not r.queue and not any(t.is_alive() for t in getattr(r, "threads", [])):
                 log(event="code_changed_restart")
                 return 0
             watch.draining(_("jobs running or queued"))

@@ -27,6 +27,15 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "bin"))
 
 SID = "88888888-8888-4888-8888-888888888888"
+_LANG = mock.patch.dict("os.environ", {"AGENT_HUB_LANG_UI": "en"})   # the assertions read the English texts
+
+
+def setUpModule():
+    _LANG.start()
+
+
+def tearDownModule():
+    _LANG.stop()
 Q = {"id": "m11251913-dfd4", "project": "proj", "ts": "2026-11-25T19:13:45+08:00",
      "text": "Hand over by state now, or wait for the numbers of two machines?\nIt changes how {{owner}} reads it.",
      "options": [{"id": "now", "label": "hand over by state now"}, {"id": "wait", "label": "wait for the numbers"}],
@@ -191,11 +200,11 @@ class Answered(Base):
     def setUp(self):
         super().setUp()
         self.lease = self.m.Lease({"lease_id": SID, "project": "proj", "cwd": "/nonexistent", "question": Q})
-        self.sent, self.fail = [], False
+        self.sent, self.failing = [], False
 
         def hubbus(*a):
             self.sent.append(a)
-            bad = self.fail and a[:1] == ("send",) and "--question" in a
+            bad = self.failing and a[:1] == ("send",) and "--question" in a
             return types.SimpleNamespace(returncode=1 if bad else 0, stderr="hubbus: not a question proj asked" if bad else "",
                                          stdout="")
         self.still_open = True
@@ -255,7 +264,7 @@ class Answered(Base):
         self.assertTrue(h["answered"]["closed"])
 
     def test_a_failed_close_is_said_and_the_question_stays_open(self):
-        self.fail = True
+        self.failing = True
         h = self.h()
         self.m.deliver(self.lease, h, 1)
         self.assertFalse(h["answered"]["closed"])
