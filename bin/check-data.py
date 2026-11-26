@@ -39,6 +39,9 @@ ASK_MIN = 50 << 20
 KEEP_DAYS = 30
 SCAN_PARENTS = ("", ".cache", ".local/share")
 DOWNLOAD_CACHES = (".cache/huggingface", ".ollama", ".cache/uv", ".cache/pip", ".npm", ".cache/torch")
+# home folders never looked into: the owner's (project_data.DENY_HOME) and the ones macOS guards (reading one from a
+# job blocks on its access check: the first scheduled runs hung until the 30-minute limit, 11-26)
+NEVER_SCAN = set(project_data.DENY_HOME) | {"Pictures", "Music", "Movies", "Public", "Applications", "Library"}
 
 
 def _load() -> dict:
@@ -78,11 +81,14 @@ def candidates(projects: dict, entries: list) -> list[tuple[str, pathlib.Path]]:
     taken = _taken(projects, entries)
     parents = [home / x for x in SCAN_PARENTS]
     try:
-        parents += [c for c in home.iterdir() if c.is_dir() and not c.is_symlink() and not c.name.startswith(".")]
+        parents += [c for c in home.iterdir() if c.name not in NEVER_SCAN and not c.name.startswith(".")
+                    and c.is_dir() and not c.is_symlink()]
     except OSError:
         pass
     seen, out = set(), []
     for parent in parents:
+        if parent.name in NEVER_SCAN:
+            continue
         try:
             kids = [c for c in parent.iterdir() if c.is_dir() and not c.is_symlink()]
         except OSError:

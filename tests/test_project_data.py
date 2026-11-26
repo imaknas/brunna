@@ -222,6 +222,24 @@ class Check(Base):
             self.assertEqual(cd.candidates(projects, declared), [], "a declared folder isn't asked about")
 
 
+class Scan(Base):
+    def test_guarded_home_folders_are_never_read(self):
+        """macOS blocks a job reading ~/Documents & co. on its access check (the first scheduled runs hung, 11-26)."""
+        cd = load_check()
+        for d in ("Documents/voice", "Pictures/voice", "Library/voice"):
+            (self.home / d).mkdir(parents=True)
+        read = []
+        real = pathlib.Path.iterdir
+
+        def spy(self):
+            read.append(self.name)
+            return real(self)
+        with mock.patch.object(pathlib.Path, "iterdir", spy), \
+                mock.patch.object(cd.backup, "owner_included", return_value=[]):
+            self.assertEqual(cd.candidates({"voice": self.doc()}, []), [])
+        self.assertFalse({"Documents", "Pictures", "Library"} & set(read), read)
+
+
 class Backup(Base):
     def test_the_backup_takes_declared_data_with_its_excludes(self):
         import backup
