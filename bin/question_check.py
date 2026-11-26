@@ -40,6 +40,10 @@ DAILY = 20            # checks per project per day; past it, sent unchecked
 OPEN_MAX = 30         # the newest open questions shown to the model
 OPEN_CHARS = 200      # of each
 FIELD_CHARS = 4000    # of any one field
+MAX_ITEMS = 20        # options, see, replaces
+MIN_QUOTE = 2         # a quote shorter than this is no span of the question (one character at a time would spell anything)
+MIN_DECISION = 8      # what a decision quote must be at least
+MAX_LINES = 6         # defect lines told at most
 ABSENT = ("no_work", "no_choice", "no_detail")       # a part that isn't there: no quote
 SPAN = ("unexplained", "no_consequence")              # a span of the question: quoted
 KEEP_DAYS = 2         # what the count file keeps
@@ -63,13 +67,13 @@ def fields(text, context=None, options=None, default=None, see=None, replaces=No
     """The question's fields as the check reads them: strings cut to FIELD_CHARS, options as [{id, label}]."""
     cut = lambda s: str(s or "")[:FIELD_CHARS]   # noqa: E731
     opts = []
-    for o in options or []:
+    for o in (options or [])[:MAX_ITEMS]:
         if isinstance(o, dict):
             opts.append({"id": cut(o.get("id")), "label": cut(o.get("label"))})
         elif isinstance(o, (list, tuple)) and len(o) == 2:
             opts.append({"id": cut(o[0]), "label": cut(o[1])})
     return {"text": cut(text), "context": cut(context), "options": opts, "default": cut(default),
-            "see": [cut(s) for s in (see or [])][:20], "replaces": [cut(r) for r in (replaces or [])][:20]}
+            "see": [cut(s) for s in (see or [])][:MAX_ITEMS], "replaces": [cut(r) for r in (replaces or [])][:MAX_ITEMS]}
 
 
 def _said(f: dict) -> str:
@@ -82,11 +86,26 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s).strip()
 
 
-def quoted(q, f: dict) -> str | None:
-    """q when it is a span of the question (spaces aside), else None."""
-    if not isinstance(q, str) or not _norm(q):
+# the double ones (curly, low, guillemets, CJK corner brackets) and the single ones, as plain quotation marks
+QUOTE_MARKS = str.maketrans({c: '"' for c in "\u201c\u201d\u201e\u00ab\u00bb\u300c\u300d\u300e\u300f"}
+                            | {c: "'" for c in "\u2018\u2019\u201a"})
+
+
+def _fold(s: str) -> str:
+    """For telling whether a quote is the question's: spaces, case and the kind of quotation mark aside."""
+    return _norm(s).translate(QUOTE_MARKS).casefold()
+
+
+def quoted(q, f: dict, least: int = MIN_QUOTE) -> str | None:
+    """q when it is a span of the question (spaces, case and quotation marks aside) at least least characters long,
+    else None."""
+    if not isinstance(q, str) or len(_norm(q)) < least:
         return None
-    return _norm(q)[:300] if _norm(q) in _norm(_said(f)) else None
+    return _norm(q)[:300] if _fold(q) in _fold(_said(f)) else None
+
+
+def _unique(xs) -> list:
+    return list(dict.fromkeys(x for x in xs if x))
 
 
 # ---------- the prompt ----------
@@ -115,8 +134,8 @@ def verdict(got, f: dict, open_qs: list[tuple[str, str]]) -> Verdict:
     it is only to look at."""
     if not isinstance(got, dict) or not all(isinstance(got.get(k), list) for k in ("decisions", "reviews", "defects", "repeats")):
         return Verdict(True, [_("not checked: the check gave no usable answer")], unchecked="no answer")
-    decisions = [q for q in (quoted(x, f) for x in got["decisions"]) if q]
-    reviews = [q for q in (quoted(x, f) for x in got["reviews"]) if q]
+    decisions = _unique(quoted(x, f, MIN_DECISION) for x in got["decisions"])
+    reviews = _unique(quoted(x, f, MIN_DECISION) for x in got["reviews"])
     shown = open_qs[-OPEN_MAX:]
     ids = {label(i): qid for i, (qid, _t) in enumerate(shown)}
     repeats = []
@@ -133,7 +152,8 @@ def verdict(got, f: dict, open_qs: list[tuple[str, str]]) -> Verdict:
         if (kind, q) in seen:
             continue
         seen.add((kind, q))
-        lines.append(defect_line(kind, q))
+        if len(lines) < MAX_LINES:
+            lines.append(defect_line(kind, q))
     if not decisions:
         lines.insert(0, _("It asks nothing to decide. What the owner should only look at goes on the review list "
                           "(`brunna send --to {alias} --type review`), or in your notes.", alias=hubconf.owner_alias()))
@@ -172,7 +192,8 @@ def _dir(make: bool = False) -> pathlib.Path:
 
 @contextlib.contextmanager
 def _counts():
-    """The count file, read and written under its lock: {day: {project: n}, "refused": {session hash: day}}."""
+    """The count file, read and written under its lock: {day: {project: n}, "refused": {session hash: day}}. What isn't
+    of that shape is dropped."""
     d = _dir(make=True)
     with open(d / "lock", "a") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
@@ -182,6 +203,8 @@ def _counts():
         except (OSError, ValueError):
             data = {}
         data = data if isinstance(data, dict) else {}
+        data = {k: v for k, v in data.items() if isinstance(v, dict)
+                and all(isinstance(x, (int, str)) and not isinstance(x, bool) for x in v.values())}
         yield data
         days = sorted(k for k in data if re.fullmatch(r"\d{4}-\d{2}-\d{2}", k))
         for k in days[:-KEEP_DAYS]:
@@ -197,6 +220,15 @@ def _counts():
 
 def _session_key(session) -> str:
     return hashlib.sha256(str(session).encode()).hexdigest()[:16]
+
+
+def left(project: str) -> bool:
+    """Whether the project has a check left today (nothing counted: the runner refuses a request past it at once)."""
+    try:
+        with _counts() as data:
+            return data.get(datetime.date.today().isoformat(), {}).get(project, 0) < DAILY
+    except OSError:
+        return True
 
 
 def take(project: str) -> bool:
@@ -250,8 +282,16 @@ def ask(text: str):
         return None
 
 
-def check(project: str, f: dict, open_qs: list[tuple[str, str]], session=None) -> Verdict:
-    """Count, ask, decide. Never raises: a question is never lost to the check."""
+def check(project: str, f: dict, open_qs: list[tuple[str, str]], session=None, mark: bool = True) -> Verdict:
+    """Count, ask, decide. Never raises: a question is never lost to the check. mark: a refusal counts toward the
+    session's "refused again" (a question's; a task's check only says whether it asks to decide)."""
+    try:
+        return _check(project, f, open_qs, session, mark)
+    except Exception as e:   # noqa: BLE001
+        return Verdict(True, [_("not checked: {why}", why=type(e).__name__)], unchecked="error")
+
+
+def _check(project: str, f: dict, open_qs: list[tuple[str, str]], session, mark: bool) -> Verdict:
     if (why := off()):
         return Verdict(True, [_("not checked: {why}", why=why)], unchecked="off")
     try:
@@ -265,7 +305,7 @@ def check(project: str, f: dict, open_qs: list[tuple[str, str]], session=None) -
     if v.unchecked is None and (hubconf.get("questions") or {}).get("check") == "advise" and not v.sent:
         v = Verdict(True, [*v.lines, _("(questions.check is advise here: sent as it is)")], v.repeats,
                     decisions=v.decisions)
-    if not v.sent:
+    if not v.sent and mark:
         try:
             again = refused_before(session)
         except OSError:
@@ -278,14 +318,15 @@ def check(project: str, f: dict, open_qs: list[tuple[str, str]], session=None) -
 RUNNER_WAIT_S = 75   # a sandboxed session waits this long for the runner's answer, then sends unchecked
 
 
-def via_runner(ws: pathlib.Path, f: dict, session=None, wait_s: float = RUNNER_WAIT_S) -> Verdict:
+def via_runner(ws: pathlib.Path, f: dict, session=None, wait_s: float = RUNNER_WAIT_S, mark: bool = True) -> Verdict:
     """A sandboxed session's check: a request of kind question-check in its own folder's .hub-run, answered by the
     capability runner outside the sandbox (which builds the prompt and counts). No answer in time, or no runner: sent
     unchecked, and said so."""
     import secrets
     import time
     job_id = f"q{time.strftime('%Y%m%d-%H%M%S')}-{secrets.token_hex(3)}"
-    req = {"v": 1, "id": job_id, "kind": "question-check", "fields": f, **({"session": session} if session else {})}
+    req = {"v": 1, "id": job_id, "kind": "question-check", "fields": f, "mark": mark,
+           **({"session": session} if session else {})}
     try:
         d = ws / ".hub-run" / "requests"
         d.mkdir(parents=True, exist_ok=True)
@@ -300,7 +341,9 @@ def via_runner(ws: pathlib.Path, f: dict, session=None, wait_s: float = RUNNER_W
             st = json.loads((job / "state.json").read_text())
         except (OSError, ValueError):
             st = None
-        if st and st.get("state") in ("done", "rejected", "lost"):
+        if st and st.get("state") == "rejected":
+            return Verdict(True, [_("not checked: {why}", why=str(st.get("reason") or "")[:300])], unchecked="runner")
+        if st and st.get("state") in ("done", "lost"):
             try:
                 got = json.loads((job / "stdout").read_text()) if st.get("state") == "done" and st.get("exit") == 0 else None
             except (OSError, ValueError):
@@ -325,6 +368,7 @@ def explain(v: Verdict, command: list[str]) -> str:
     """What a refused send prints: why, then the command as it was sent, ready to edit."""
     import shlex
     out = [_("Not sent: the owner, reading it later without this session's context, couldn't answer it as written."),
-           *(f"- {line}" for line in v.lines), "", _("Fix it and send again, or add --as-is \"why\" to send it as it is:"),
+           *(f"- {line}" for line in v.lines), "", _("Fix it and send again, or add --as-is \"why\" to send it as it is "
+                                                      "(through MCP: as_is). As it was sent:"),
            "  " + " ".join(shlex.quote(c) for c in command)]
     return "\n".join(out)

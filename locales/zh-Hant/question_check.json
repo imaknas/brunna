@@ -1,7 +1,6 @@
 {
   "the check is off here (questions.check)": "這台關掉了檢查(questions.check)",
   "Not sent: the owner, reading it later without this session's context, couldn't answer it as written.": "沒有寄出:{owner} 之後讀到它時沒有這個 session 的脈絡,照現在的寫法沒辦法回答。",
-  "Fix it and send again, or add --as-is \"why\" to send it as it is:": "改好再寄,或加 --as-is \"理由\" 照原樣寄:",
   "It asks nothing to decide. What the owner should only look at goes on the review list (`brunna send --to {alias} --type review`), or in your notes.": "它沒有要 {owner} 決定什麼。只要 {owner} 看的東西放審閱清單(`brunna send --to {alias} --type review`),或寫在筆記裡。",
   "It asks again what {ids} asked: add `--replaces {ids}`, which closes what it replaces, or `--as-is \"why\"` saying why it is new.": "它重問了 {ids} 問過的事:加 `--replaces {ids}`(會收掉被取代的問題),或用 `--as-is \"理由\"` 說明為什麼是新的。",
   "Sent. Part of it is only for the owner to look at ({quote}): that belongs on the review list (`brunna send --to {alias} --type review`).": "已寄出。其中有一部分只是要 {owner} 看({quote}):那應該放審閱清單(`brunna send --to {alias} --type review`)。",
@@ -15,5 +14,6 @@
   "(questions.check is advise here: sent as it is)": "(這台的 questions.check 是 advise:照原樣寄出)",
   "Refused again. If it is clear to the owner as it is, send it with --as-is \"why\".": "又被退回了。如果照現在的寫法 {owner} 就看得懂,用 --as-is \"理由\" 寄出。",
   "not checked: the platform's run service didn't answer in {s} s": "沒有檢查:平台的執行服務 {s} 秒內沒有回應",
-  "not checked: {project} has had its {n} checks today": "沒有檢查:{project} 今天的 {n} 次檢查已經用完"
+  "not checked: {project} has had its {n} checks today": "沒有檢查:{project} 今天的 {n} 次檢查已經用完",
+  "Fix it and send again, or add --as-is \"why\" to send it as it is (through MCP: as_is). As it was sent:": "改好再寄,或加 --as-is \"理由\" 照原樣寄(透過 MCP 時是 as_is)。原本寄的是:"
 }

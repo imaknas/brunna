@@ -65,5 +65,6 @@
  " (closing it failed; it is still open)": "(收掉失敗,它還開著)",
  "{id}: the handover's answered isn't an answer to the lease's own question; ignored": "{id}:交接裡的 answered 不是這個 lease 自己那個問題的回答,不採用",
  "question must be a question's id": "question 要是一個問題的 id",
- "{id} is not an open question {project} asked": "{id} 不是 {project} 問過、還開著的問題"
+ "{id} is not an open question {project} asked": "{id} 不是 {project} 問過、還開著的問題",
+ "{id}: {question} is no longer open; the answer is not sent again": "{id}:{question} 已經不是開著的問題,答案不再寄一次"
 }

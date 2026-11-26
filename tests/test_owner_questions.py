@@ -4,7 +4,6 @@ person's question carries (context, see, --as-is), --replaces, the review list, 
 
     bin/py -m unittest tests.test_owner_questions
 """
-import dataclasses
 import importlib.machinery
 import importlib.util
 import io
@@ -65,6 +64,14 @@ class Verdict(unittest.TestCase):
         real = qc.verdict(answer(defects=[{"kind": "unexplained", "quote": "fast  path"}]), F, OPEN)
         self.assertFalse(real.sent)
         self.assertIn('"fast path"', real.lines[0])
+
+    def test_quotes_match_whatever_their_case_or_quotation_marks_and_short_ones_don_t(self):
+        f = qc.fields('Ship "fast" or keep it safe?')
+        self.assertTrue(qc.verdict(answer(decisions=["SHIP \u201cFAST\u201d OR KEEP"]), f, []).sent)
+        self.assertFalse(qc.verdict(answer(decisions=["S", "h", "ip"]), f, []).sent, "one letter at a time spells nothing")
+        many = qc.verdict(answer(decisions=['Ship "fast" or keep it safe?'], defects=[{"kind": "unexplained", "quote": w} for w in ("Ship", "fast", "keep", "safe",
+                                                                                         "it", "or", "Ship fast")]), f, [])
+        self.assertEqual(len(many.lines), qc.MAX_LINES)
 
     def test_an_unknown_kind_is_ignored(self):
         self.assertTrue(qc.verdict(answer(defects=[{"kind": "rude"}]), F, OPEN).sent)
@@ -181,7 +188,10 @@ class Runner(unittest.TestCase):
                 mock.patch.object(cr, "exclude_hub_run", lambda project, ws: None), \
                 mock.patch.object(cr.hubconf, "projects", lambda: projects), \
                 mock.patch.object(cr, "open_questions_of", lambda p: OPEN), \
-                mock.patch.object(qc, "check", lambda project, f, opens, session=None: refused):
+                mock.patch.object(qc, "ask", lambda text: {"decisions": ["Ship the fast path (A) or keep the safe one (B)?",
+                                                                       "keep the safe one"],
+                                                         "reviews": [], "defects": [{"kind": "no_work"}], "repeats": ["q1"]}), \
+                mock.patch.object(qc, "_dir", lambda make=False: self._qc_dir()), mock.patch.object(qc, "off", lambda: None):
             runner = cr.Runner()
             import threading
             got = {}
@@ -192,7 +202,34 @@ class Runner(unittest.TestCase):
                 runner.tick()
                 time.sleep(0.1)
             t.join()
-        self.assertEqual(dataclasses.asdict(got["v"]), dataclasses.asdict(refused))
+        v = got["v"]
+        self.assertEqual((v.sent, v.repeats, len(v.decisions)), (False, ["m1-old"], 1), "at most one of the model's quotes")
+        self.assertIn("what the work is", v.lines[-2] + v.lines[-1] + " ".join(v.lines))
+        del refused
+
+    def _qc_dir(self):
+        d = self.ws / "qc"
+        d.mkdir(exist_ok=True)
+        return d
+
+    def test_one_question_at_a_time_per_project(self):
+        cr = load("cap_runner_q3", "cap-runner.py")
+        state = self.ws / "state"
+        state.mkdir()
+        with mock.patch.object(cr, "eligible", lambda: {"sbx": {"dirs": [self.ws], "caps": [], "models": {}}}), \
+                mock.patch.object(cr, "DIR", state), mock.patch.object(cr, "LOG", state / "log.jsonl"), \
+                mock.patch.object(cr, "exclude_hub_run", lambda project, ws: None), \
+                mock.patch.object(cr.hubconf, "projects", lambda: {"sbx": {"enforce": {"sandbox": True}}}), \
+                mock.patch.object(qc, "left", lambda project: True):
+            runner = cr.Runner()
+            runner.qbusy.add("sbx")   # one is being checked
+            d = self.ws / ".hub-run" / "requests"
+            d.mkdir(parents=True)
+            for i in range(50):
+                (d / f"q{i}.json").write_text(json.dumps({"v": 1, "id": f"q{i}", "kind": "question-check", "fields": F}))
+            runner.tick()
+        states = {json.loads((self.ws / ".hub-run" / "jobs" / f"q{i}" / "state.json").read_text())["state"] for i in range(50)}
+        self.assertEqual((states, runner.threads), ({"rejected"}, []), "refused at once, no thread, nothing held")
 
     def test_only_a_sandboxed_project_is_checked_by_the_runner(self):
         cr = load("cap_runner_q2", "cap-runner.py")
@@ -229,7 +266,9 @@ class Send(unittest.TestCase):
         p.start()
         self.addCleanup(p.stop)
         self.verdict = qc.Verdict(True)
-        p = mock.patch.object(qc, "check", lambda project, f, opens, session=None: self.verdict)
+        self.checked = []
+        p = mock.patch.object(qc, "check", lambda project, f, opens, session=None, mark=True:
+                              self.checked.append((project, f["text"])) or self.verdict)
         p.start()
         self.addCleanup(p.stop)
 
@@ -304,6 +343,27 @@ class Send(unittest.TestCase):
                 self.assertNotEqual(code, 0)
                 self.assertIn("--see", err)
 
+    def test_a_bad_flag_is_refused_before_a_check_is_spent(self):
+        code, _o, _err = self.send("--type", "question", "--text", "A?", "--see", "/etc/passwd")
+        self.assertNotEqual(code, 0)
+        self.assertEqual(self.checked, [])
+
+    def test_see_and_as_is_reach_the_owner_from_any_sender(self):
+        self.session = None
+        code, _o, err = self.send("--type", "question", "--text", "A or B?", "--see", "docs/x.md", "--as-is", "clear")
+        self.assertEqual(code, 0)
+        self.assertIn("not checked", err)
+        [r] = self.recs()
+        self.assertIn("docs/x.md", r["terms"]["text"])
+        self.assertIn("clear", r["terms"]["text"])
+
+    def test_an_mcp_session_is_checked(self):
+        self.session = None
+        self.verdict = qc.Verdict(False, ["no"])
+        with mock.patch.dict(os.environ, {"BRUNNA_MCP_ASKER": "1"}):
+            code, _o, _e = self.send("--type", "question", "--text", "A or B?")
+        self.assertNotEqual(code, 0)
+
     def test_a_task_is_only_told_when_it_asks_to_decide(self):
         self.verdict = qc.Verdict(False, ["no"], decisions=["choose A or B"])
         code, _o, err = self.send("--type", "task", "--text", "Choose A or B")
@@ -328,7 +388,12 @@ class Send(unittest.TestCase):
         keys = {r["key"] for r in self.recs()}
         self.assertEqual(keys, {"review-proj"})
         amended = [r for r in self.recs() if r["type"] == "amended"]
-        self.assertIn("docs/slots.md", amended[-1]["terms"]["text"])
+        self.assertIn("- docs/cut.md\n- docs/slots.md", amended[-1]["terms"]["text"], "its lines kept")
+        out = io.StringIO()
+        with mock.patch.object(sys, "argv", ["hubbus", "review", "--project", "proj"]), redirect_stdout(out):
+            self.m.main()
+        self.assertTrue(out.getvalue().rstrip().endswith("- docs/cut.md\n- docs/slots.md"))
+        self.assertEqual(out.getvalue().count("(its review list)"), 0, "the session gets its own text back, no header")
 
     def test_a_review_list_needs_records(self):
         self.m.RECORDS = False
@@ -340,6 +405,10 @@ class Send(unittest.TestCase):
         self.assertEqual(self.m.review_n("review-proj-3", "proj"), 3)
         self.assertEqual(self.m.review_n("review-proj", "proj"), 1)
         self.assertIsNone(self.m.review_n("review-other", "proj"))
+        with mock.patch.object(self.m, "own_names", lambda p: [p]):
+            self.assertEqual(self.m.review_n("review-a-b-2", "a-b"), 2)
+            self.assertEqual(self.m.review_n("review-a-b-2", "a-b-2"), 1)
+            self.assertIsNone(self.m.review_n("review-a-b", "a"))
 
     def test_a_stale_review_list_from_an_outbox_comes_back_as_a_request(self):
         self.review("--text", "- first")
@@ -351,6 +420,64 @@ class Send(unittest.TestCase):
         [back] = [self.m.payload(r) for r in self.c.execute("SELECT * FROM events WHERE type='message' AND to_project='proj'")]
         self.assertEqual(back["type"], "request")
         self.assertIn("- first", back["text"])
+
+
+class Outbox(Send):
+    """A sandboxed project's send: what goes into its outbox, and what the platform does with it."""
+    # Send's tests run here too, through the outbox; a review list's revision is told at take-in, not by the session's send
+    test_the_review_list = None
+
+    def setUp(self):
+        super().setUp()
+        self.entries = []
+        for name, value in (("mail_box", lambda a, here: "proj"), ("view_db", lambda p: self.c),
+                            ("outbox_put", lambda p, e: self.entries.append(e)), ("queued", lambda p: None)):
+            p = mock.patch.object(self.m, name, value)
+            p.start()
+            self.addCleanup(p.stop)
+        p = mock.patch.object(qc, "via_runner", lambda ws, f, session=None, mark=True: self.verdict)
+        p.start()
+        self.addCleanup(p.stop)
+        p = mock.patch.object(self.m.hubconf, "workspace", lambda name: self.tmp)
+        p.start()
+        self.addCleanup(p.stop)
+
+    def take(self, entry):
+        self.c.execute("BEGIN IMMEDIATE")
+        self.m.take(self.c, "proj", {"v": 1, **entry})
+        self.c.execute("COMMIT")
+
+    def test_the_entry_carries_the_person_s_question_once(self):
+        code, _o, _e = self.send("--type", "question", "--text", "A or B?", "--context", "the cache work",
+                                 "--option", "a", "fast", "--see", "docs/x.md")
+        self.assertEqual(code, 0)
+        [e] = self.entries
+        self.assertEqual((e["context"], e["options"], e["text"]), (None, [{"id": "a", "label": "fast"}],
+                                                                  "A or B?\n\nthe cache work"))
+        self.c.execute("DELETE FROM events")   # the view's copy: the bus starts from the outbox
+        self.take(e)
+        [r] = [x for x in self.recs() if x["type"] == "raised"]
+        self.assertEqual(r["terms"]["text"], "A or B?\n\nthe cache work\nDetail: docs/x.md", "composed once")
+
+    def test_a_replaced_question_closed_meanwhile_doesn_t_lose_the_new_one(self):
+        self.session = None
+        self.m.mail_box = lambda a, here: None
+        _c, old, _e = self.send("--type", "question", "--text", "Old A or B?")
+        self.send("--type", "drop", "--question", old, "--text", "answered elsewhere")
+        self.take({"op": "send", "id": "m11260900-0123456789ab", "type": "question", "to": self.owner, "text": "New?",
+                   "replaces": [old]})
+        self.assertEqual([q["id"] for q in self.m.open_questions(self.c, "proj")], ["m11260900-0123456789ab"])
+
+    def test_replaces_through_the_outbox_closes_once(self):
+        self.session = None
+        self.m.mail_box = lambda a, here: None
+        _c, old, _e = self.send("--type", "question", "--text", "Old A or B?")
+        entry = {"op": "send", "id": "m11260901-0123456789ab", "type": "question", "to": self.owner, "text": "New?",
+                 "replaces": [old]}
+        self.take(entry)
+        self.assertEqual([q["id"] for q in self.m.open_questions(self.c, "proj")], [entry["id"]])
+        withdrawn = [r for r in self.recs() if r["type"] == "withdrawn"]
+        self.assertEqual(len(withdrawn), 1)
 
 
 class Mcp(unittest.TestCase):

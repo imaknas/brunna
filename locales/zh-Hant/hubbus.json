@@ -262,5 +262,7 @@
  "{project}'s review list: {key}, revision {rev}": "{project} 的審閱清單:{key},第 {rev} 版",
  "{project} has no review list open: the next `brunna send --to {alias} --type review` starts one": "{project} 沒有開著的審閱清單:下一次 `brunna send --to {alias} --type review` 會開一份",
  "{project}'s review list ({key}), revision {rev}; send the whole list again with --rev {rev}:": "{project} 的審閱清單({key}),第 {rev} 版;要改就用 --rev {rev} 把整份清單重寄:",
- "(as this project's mailbox view had it a minute ago at most)": "(這是專案信箱檢視裡的內容,最多晚一分鐘)"
+ "(as this project's mailbox view had it a minute ago at most)": "(這是專案信箱檢視裡的內容,最多晚一分鐘)",
+ "{project}: {id} was closed before its replacement came in; the new question goes": "{project}:{id} 在取代它的問題送進來之前就關了;新問題照樣寄出",
+ "not checked: the platform can't tell which session this is, so nobody would read a refusal": "沒有檢查:平台認不出這是哪個 session,退回了也沒人看得到"
 }

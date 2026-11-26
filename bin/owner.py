@@ -31,6 +31,7 @@ import importlib.machinery
 import importlib.util
 import json
 import pathlib
+import re
 import sys
 
 BIN = pathlib.Path(__file__).resolve().parent
@@ -86,37 +87,37 @@ def open_items(only: str | None = None) -> list[dict]:
     return out
 
 
-QUESTION_FIELDS = ("context", "options", "default", "see")
+CONTROL = re.compile(r"[\x00-\x09\x0b-\x1f\x7f-\x9f]")   # a project agent's text on the owner's terminal: no control characters
 
 
 def show_question(qid: str) -> int:
     """A question to the owner, whole (docs/design/owner-questions.md, part 3, "Without the assistant"): what
     open-questions and the list cut to a line. Open or closed: what was asked doesn't change."""
     hb = _hubbus()
-    q = hb.question_asked(hb.db(), qid)
+    c = hb.db()
+    q = hb.question_asked(c, qid)
     if q is None:
         print(_("no question with id {id} (`brunna owner list` shows the open ones)", id=qid), file=sys.stderr)
         return 1
-    open_ = next((o for o in hb.open_questions(hb.db(), q["project"]) if o["id"] == qid), None)
+    if qid.startswith("lease-"):   # a lease handover's: the assistant keeps it (open_questions leaves these out)
+        print(_("{id} came from a discussion with {assistant}, which keeps it; its text:", id=qid,
+                assistant=hubconf.get("assistant.name") or _("the assistant")))
+        print(CONTROL.sub("", q.get("text") or ""))
+        return 0
+    open_ = next((o for o in hb.open_questions(c, q["project"]) if o["id"] == qid), None)
     whole = {**q, **(open_ or {})}   # the open view carries what the question was sent with
     print(_("{project} asked {owner} on {when} ({id}, {state}):", project=whole["project"], owner=hubconf.owner_tag(),
             when=str(whole.get("ts") or "")[:16].replace("T", " "), id=qid,
             state=_("open") if open_ else _("closed")))
     print()
-    print(whole.get("text") or "")
-    if whole.get("context"):
-        print()
-        print(_("Context: {context}", context=whole["context"]))
+    print(CONTROL.sub("", whole.get("text") or ""))   # a person's context and files are in it (hubbus owner_text)
     if whole.get("options"):
         print(_("Options:"))
         for o in whole["options"]:
             if isinstance(o, dict):
-                print(f"  {o.get('id')} = {o.get('label')}")
+                print(CONTROL.sub("", f"  {o.get('id')} = {o.get('label')}"))
     if whole.get("default"):
-        print(_("Until answered, the project proceeds with: {default}", default=whole["default"]))
-    if whole.get("see"):
-        see = whole["see"] if isinstance(whole["see"], list) else [whole["see"]]
-        print(_("Detail in the project: {paths}", paths=", ".join(str(s) for s in see)))
+        print(CONTROL.sub("", _("Until answered, the project proceeds with: {default}", default=whole["default"])))
     print()
     print(_("To talk it through, open a discussion about it with {assistant} (a lease with this question), or a session "
             "in {project}'s folder.", assistant=hubconf.get("assistant.name") or _("the assistant"), project=whole["project"])

@@ -33,5 +33,7 @@
  "html {rel} is not a file": "html {rel} 不是檔案",
  "a page prints only from the project's workspace folder": "頁面只能從專案的工作資料夾印",
  "jobs running or queued": "還有工作在跑或排隊",
- "Only a sandboxed project's question is checked here": "這裡只檢查沙箱專案的問題"
+ "Only a sandboxed project's question is checked here": "這裡只檢查沙箱專案的問題",
+ "One question at a time: this project's last one is still being checked": "一次一題:這個專案上一題還在檢查",
+ "This project has had its checks for today": "這個專案今天的檢查次數已經用完"
 }

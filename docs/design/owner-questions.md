@@ -131,7 +131,7 @@ a question today (`drop --question <id>`, note "replaced by <new id>"), with rec
 
 `POST /v1/leases` takes an optional `question: <key>` (an added field of lease-runner.v2; error `question_unknown`, 409,
 when it isn't an open question of the lease's project). The lease is a fresh discuss lease as today; its preamble adds
-the question whole (text, context, options, default, see, branch and day it was asked, its id) and a fixed instruction:
+the question whole (its text, which holds a session's context and files, options, default, the day it was asked, its id), every line quoted as data, and a fixed instruction:
 read what it points to and that day's memory note, explain it to the owner in plain words with what each option leads
 to and the recommendation, and say when the owner has decided.
 
@@ -148,7 +148,7 @@ Leases don't run on an API key login yet, so neither does this.
 
 ### Without the assistant
 
-`brunna question <id>` (owner): the question whole (text, context, options, default, see, project, branch, when) and
+`brunna question <id>` (owner): the question whole (its text with context and files, options, default, project, when) and
 where its detail is. `brunna open-questions` and the owner side's list show the first line and the id.
 
 ### The assistant's side

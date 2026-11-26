@@ -18,11 +18,10 @@
  "{project} asked {owner} on {when} ({id}, {state}):": "{project} 在 {when} 問 {owner}({id},{state}):",
  "open": "還開著",
  "closed": "已經收掉",
- "Context: {context}": "背景:{context}",
  "Options:": "選項:",
  "Until answered, the project proceeds with: {default}": "回答之前,專案先照這個做:{default}",
- "Detail in the project: {paths}": "專案裡的細節:{paths}",
  "To talk it through, open a discussion about it with {assistant} (a lease with this question), or a session in {project}'s folder.": "想先談清楚:跟 {assistant} 開一個關於它的討論(帶著這個問題的 lease),或在 {project} 的資料夾開一個 session。",
  "To talk it through, open a session in {project}'s folder and ask about question {id}; to answer: brunna owner answer {id} \"…\"": "想先談清楚:在 {project} 的資料夾開一個 session,問它問題 {id};要回答:brunna owner answer {id} \"…\"",
- "A question whole, with its context and options: brunna question <id>": "看一個問題的全貌(背景、選項):brunna question <id>"
+ "A question whole, with its context and options: brunna question <id>": "看一個問題的全貌(背景、選項):brunna question <id>",
+ "{id} came from a discussion with {assistant}, which keeps it; its text:": "{id} 來自跟 {assistant} 的討論,由它保管;內容:"
 }

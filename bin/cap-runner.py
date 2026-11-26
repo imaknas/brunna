@@ -492,7 +492,7 @@ class Runner:
         self.minutes = Minutes()
         self.served: dict[tuple[str, str], float] = {}   # (pool, project) → when its last job started
         self.threads: list = []    # questions being checked (answer_question)
-        self.qlocks: dict = {}     # project → its lock: one question at a time per project
+        self.qbusy: set = set()    # projects with a question being checked: one at a time each
 
     # ---------- taking requests ----------
 
@@ -579,55 +579,74 @@ class Runner:
         self.queue.append(Job(project, stem, job_fd, clean))
 
     def question(self, project: str, stem: str, job_fd: int, req: dict, st) -> None:
-        """A sandboxed project's question for the owner, checked on a thread of its own (no job slot, one at a time per
-        project). Refused here: not a sandboxed project's (an unsandboxed one's send checks itself), malformed, too old."""
-        doc = hubconf.projects().get(project) or {}
-        fields = req.get("fields")
-        if req.get("v") != 1 or req.get("id") != stem or not isinstance(fields, dict) \
-                or not all(isinstance(fields.get(k), (str, type(None))) for k in ("text", "context", "default")):
-            reason = _("Malformed request (must be a JSON object with v: 1)")
-        elif (doc.get("enforce") or {}).get("sandbox") is not True:
-            reason = _("Only a sandboxed project's question is checked here")
-        elif time.time() - st.st_mtime > STALE_S:
-            reason = _("Request too old (nobody took it within 10 minutes)")
-        else:
-            reason = ""
-        if reason:
-            try:
-                write_state(job_fd, state="rejected", reason=reason)
-            finally:
-                os.close(job_fd)
-            log(project=project, id=stem, event="rejected", detail=reason)
-            return
-        write_state(job_fd, state="running")
-        t = threading.Thread(target=self.answer_question, args=(project, stem, job_fd, fields, req.get("session")),
-                             daemon=True)
-        self.threads = [x for x in getattr(self, "threads", []) if x.is_alive()] + [t]
-        t.start()
-
-    def answer_question(self, project: str, stem: str, job_fd: int, fields: dict, session) -> None:
-        import dataclasses
+        """A sandboxed project's question for the owner, checked on a thread of its own (no job slot). One in flight per
+        project: another while it runs, or one past the project's checks for the day, is refused at once (a project could
+        drop thousands of requests; none of them waits here holding a folder or a thread). Also refused: not a sandboxed
+        project's (an unsandboxed one's send checks itself), malformed, too old. Owns job_fd: closed here, or by the
+        thread it starts."""
         import question_check as qc
-        lock = self.qlocks.setdefault(project, threading.Lock())
-        with lock:
-            try:
-                f = qc.fields(*(fields.get(k) for k in ("text", "context", "options", "default", "see", "replaces")))
-                v = qc.check(project, f, open_questions_of(project), session if isinstance(session, str) else None)
-                fd = os.open("stdout", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=job_fd)
-                try:
-                    os.write(fd, json.dumps(dataclasses.asdict(v), ensure_ascii=False).encode())
-                finally:
-                    os.close(fd)
-                write_state(job_fd, state="done", exit=0)
-                log(project=project, id=stem, event="question_checked", sent=v.sent, unchecked=v.unchecked)
-            except Exception as e:   # noqa: BLE001  the asker then sends it unchecked
-                try:
-                    write_state(job_fd, state="done", exit=1)
-                except OSError:
-                    pass
-                log(project=project, id=stem, event="question_check_error", detail=repr(e)[:300])
-            finally:
+        started = False
+        try:
+            self.threads = [x for x in self.threads if x.is_alive()]
+            doc = hubconf.projects().get(project) or {}
+            fields = req.get("fields")
+            if req.get("v") != 1 or req.get("id") != stem or not isinstance(fields, dict) \
+                    or not all(isinstance(fields.get(k), (str, type(None))) for k in ("text", "context", "default")):
+                reason = _("Malformed request (must be a JSON object with v: 1)")
+            elif (doc.get("enforce") or {}).get("sandbox") is not True:
+                reason = _("Only a sandboxed project's question is checked here")
+            elif time.time() - st.st_mtime > STALE_S:
+                reason = _("Request too old (nobody took it within 10 minutes)")
+            elif project in self.qbusy:
+                reason = _("One question at a time: this project's last one is still being checked")
+            elif not qc.left(project):
+                reason = _("This project has had its checks for today")
+            else:
+                reason = ""
+            if reason:
+                write_state(job_fd, state="rejected", reason=reason)
+                log(project=project, id=stem, event="rejected", detail=reason)
+                return
+            write_state(job_fd, state="running")
+            self.qbusy.add(project)
+            t = threading.Thread(target=self.answer_question, args=(project, stem, job_fd, fields, req.get("session"),
+                                                                     req.get("mark") is not False), daemon=True)
+            self.threads.append(t)
+            t.start()
+            started = True
+        except OSError as e:   # the job folder is the project's: whatever it planted there ends this request alone
+            log(project=project, id=stem, event="question_check_error", detail=repr(e)[:300])
+            if not started:
+                self.qbusy.discard(project)
+        finally:
+            if not started:
                 os.close(job_fd)
+
+    def answer_question(self, project: str, stem: str, job_fd: int, fields: dict, session, mark: bool = True) -> None:
+        import question_check as qc
+        try:
+            f = qc.fields(*(fields.get(k) for k in ("text", "context", "options", "default", "see", "replaces")))
+            v = qc.check(project, f, open_questions_of(project), session if isinstance(session, str) else None, mark=mark)
+            # the platform's verdict, and of the model's words at most one quote of the question's own (a task's
+            # decision): nothing else it wrote goes into the project's folder
+            out = {"sent": v.sent, "lines": v.lines, "repeats": v.repeats, "unchecked": v.unchecked,
+                   "decisions": v.decisions[:1]}
+            fd = os.open("stdout", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644, dir_fd=job_fd)
+            try:
+                os.write(fd, json.dumps(out, ensure_ascii=False).encode())
+            finally:
+                os.close(fd)
+            write_state(job_fd, state="done", exit=0)
+            log(project=project, id=stem, event="question_checked", sent=v.sent, unchecked=v.unchecked)
+        except Exception as e:   # noqa: BLE001  the asker then sends it unchecked
+            try:
+                write_state(job_fd, state="done", exit=1)
+            except OSError:
+                pass
+            log(project=project, id=stem, event="question_check_error", detail=repr(e)[:300])
+        finally:
+            os.close(job_fd)
+            self.qbusy.discard(project)
 
     def admit_agent(self, project: str, job_id: str, clean: dict, per_day: int | None) -> str:
         """One agent call per project at a time, and its minutes reserved (A5); '' when admitted."""
@@ -877,7 +896,7 @@ class Runner:
     def note_active(self) -> None:
         """ACTIVE when the number of jobs in flight changed: a restart now would mark them lost (render-services
         changes this service's unit only while it is 0)."""
-        n = len(self.running) + len(self.queue)
+        n = len(self.running) + len(self.queue) + sum(1 for t in self.threads if t.is_alive())
         procs = sorted([j.proc.pid, j.started] for j in self.running if j.proc is not None)
         if (n, procs) != self.noted:
             hubconf.write_atomic(ACTIVE, json.dumps({"pid": os.getpid(), "jobs": n, "procs": procs}))
@@ -919,7 +938,7 @@ def main() -> int:
         # manager starts the new code. It keeps taking requests meanwhile: one left waiting 10 minutes is refused as too
         # old, and an agent call may run an hour
         if watch.stale():
-            if not r.running and not r.queue:
+            if not r.running and not r.queue and not any(t.is_alive() for t in r.threads):
                 log(event="code_changed_restart")
                 return 0
             watch.draining(_("jobs running or queued"))
