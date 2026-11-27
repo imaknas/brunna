@@ -30,7 +30,11 @@ class Base(unittest.TestCase):
     def setUp(self):
         self.tmp = pathlib.Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
-        self.home = self.tmp / "home"
+        # home reached through a link, as macOS's /var is /private/var (CI's temp folder): what is resolved and what
+        # isn't must still agree on what is under home
+        (self.tmp / "real").mkdir()
+        (self.tmp / "linked").symlink_to(self.tmp / "real")
+        self.home = self.tmp / "linked" / "home"
         (self.home / "workspace").mkdir(parents=True)
         (self.home / "services").mkdir()
         env = mock.patch.dict(os.environ, {"HOME": str(self.home)})

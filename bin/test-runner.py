@@ -452,18 +452,10 @@ def descendants(pid: int) -> list[int]:
 def working_in(tree: pathlib.Path) -> list[int]:
     """Processes of this user whose working folder is inside the run's tree: a server a tier started detached and whose
     parent already exited is no one's child any more, but it still works in the exported tree."""
-    try:
-        out = subprocess.run(["lsof", "-a", "-d", "cwd", "-u", str(os.getuid()), "-Fpn"], capture_output=True,
-                             text=True, timeout=20).stdout
-    except (OSError, subprocess.SubprocessError):
-        return []
-    root, found, pid = str(tree.resolve()), [], None
-    for line in out.splitlines():
-        if line.startswith("p") and line[1:].isdigit():
-            pid = int(line[1:])
-        elif line.startswith("n") and pid and pid != os.getpid() and (line[1:] == root or line[1:].startswith(root + "/")):
-            found.append(pid)
-    return found
+    # hubconf asks lsof where there is one, else /proc (a Linux machine often has no lsof)
+    root = str(tree.resolve())
+    return [pid for pid, _name, cwd in hubconf.process_cwds()
+            if pid and pid != os.getpid() and (cwd == root or cwd.startswith(root + "/"))]
 
 
 def sweep(tree: pathlib.Path) -> None:

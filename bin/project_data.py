@@ -40,6 +40,17 @@ def _home() -> pathlib.Path:
     return pathlib.Path(os.path.expanduser("~"))
 
 
+def home_spelling(p: pathlib.Path) -> pathlib.Path:
+    """A resolved path written under home as home is written: where home itself is reached through a link (macOS's
+    /var is /private/var), what resolves under the link's target is under home all the same, and is compared with the
+    platform's and the projects' folders, which are written that way too."""
+    home = _home()
+    real_home = pathlib.Path(os.path.realpath(home))
+    if real_home != home and (p == real_home or real_home in p.parents):
+        return home / p.relative_to(real_home)
+    return p
+
+
 def expand(raw) -> pathlib.Path | None:
     """`~/…` or absolute, with no `..` step: the path, normalised; None for anything else."""
     if not isinstance(raw, str) or not raw.startswith(("~/", "/")) or not PLAIN.fullmatch(raw):
@@ -182,10 +193,11 @@ def entries(projects: dict[str, dict] | None = None, include: list[pathlib.Path]
                 ent.problem = _("the path is not one a project may declare")
             else:
                 real = pathlib.Path(os.path.realpath(p))
-                why = place_problem(name, doc, real)
+                spelled = home_spelling(real)   # the place rules compare it with folders written under home
+                why = place_problem(name, doc, spelled)
                 if why:
-                    ent.problem = _("{path} leads to {real}: {why}", path=ent.raw, real=real, why=why) if real != p else why
-                elif any(_within(real, f) or _within(f, real) for other, odoc in projects.items() if other != name
+                    ent.problem = _("{path} leads to {real}: {why}", path=ent.raw, real=real, why=why) if spelled != p else why
+                elif any(_within(spelled, f) or _within(f, spelled) for other, odoc in projects.items() if other != name
                          for f in _own_folders(other, odoc)):
                     ent.problem = _("it is inside, or holds, another project's folder")
                 elif any(_within(real, x) or _within(x, real) for x in include):
