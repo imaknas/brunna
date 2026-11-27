@@ -20,6 +20,8 @@ fixes, speed-ups and reverts are listed.
 - **backup:** What the code review of declared data found
 - **check-data:** The scan never reads the folders macOS guards
 - **test-runner:** A stopped or finished tier leaves no server running
+- **hubbus:** A question already closed isn't answered again
+- **data,test-runner:** Declared data under a home reached through a link, and leftover servers found on Linux
 
 ## v0.24.0 (2026-11-25)
 
