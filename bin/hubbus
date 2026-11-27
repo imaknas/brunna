@@ -4285,6 +4285,11 @@ def send_one(c, a, sender: str, session, here, boxed: bool = False, mid: str | N
         if q is None or q["project"] != sender:
             refuse(_("hubbus: {question} is not a question {sender} asked {owner}", question=a.question,
                      sender=sender, owner=OWNER))
+        if not a.question.startswith("lease-") and a.question not in {x["id"] for x in open_questions(c, sender)}:
+            # closed already (answered elsewhere, or closed by an earlier send): a second answer would reach the owner
+            # side as another one. A discussion's own questions (lease-…) are the assistant's to keep, not counted open
+            print(_("{question} is already closed; nothing more is sent", question=a.question), file=sys.stderr)
+            return a.question
     if a.inferred and not (a.type in ("done", "drop") and a.task):
         refuse(_("hubbus: --inferred is only for a done/drop with --task"))
     owner_extras(c, a, sender, boxed)

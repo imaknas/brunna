@@ -340,6 +340,15 @@ class Send(unittest.TestCase):
         withdrawn = [r for r in self.recs() if r["type"] == "withdrawn"]
         self.assertEqual((withdrawn[0]["key"], withdrawn[0]["note"]), (old, f"replaced by {new}"))
 
+    def test_a_question_closed_already_is_not_answered_again(self):
+        self.session = None
+        _c, q, _e = self.send("--type", "question", "--text", "A or B?")
+        self.assertEqual(self.send("--type", "done", "--question", q, "--text", "A")[0], 0)
+        code, _o, err = self.send("--type", "done", "--question", q, "--text", "B, said later elsewhere")
+        self.assertEqual(code, 0)
+        self.assertIn("already closed", err)
+        self.assertEqual(len([r for r in self.recs() if r["type"] == "claimed"]), 1, "one answer reaches the owner side")
+
     def test_replaces_only_this_project_s_open_questions(self):
         _c, theirs, _e = self.send("--type", "question", "--text", "Their question?", frm="other")
         code, _o, err = self.send("--type", "question", "--text", "Mine?", "--replaces", theirs)
