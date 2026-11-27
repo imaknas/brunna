@@ -3,6 +3,24 @@
 What changed in each version, generated from the commit messages (git cliff) when it is tagged; only new features,
 fixes, speed-ups and reverts are listed.
 
+## v0.25.0 (2026-11-27)
+
+### New
+
+- **questions:** A question for the owner is checked before it is sent, and carries what answers it
+- **backup:** A project declares its data outside its folder, and the backup and a daily check follow
+
+### Fixed
+
+- **questions:** The capability runner checks one question at a time per project, and what a send names reaches the owner
+- **lease:** A question whose state can't be read is answered, and one closed meanwhile says its answer wasn't sent
+- **questions:** The Claude Code mod blanks MCP_ASKER, and a runner built without question threads drains
+- **questions:** A review list's text is one line, and the list is its record's context
+- **worktrees:** The nightly cleanup finds dependencies one folder down
+- **backup:** What the code review of declared data found
+- **check-data:** The scan never reads the folders macOS guards
+- **test-runner:** A stopped or finished tier leaves no server running
+
 ## v0.24.0 (2026-11-25)
 
 ### Security
