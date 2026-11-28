@@ -601,7 +601,10 @@ session of an unsandboxed project of the owner's calls the review service.
 
 ## Step 3b, in detail
 
-> r1, 11-29, before its blind review.
+> r2, 11-29, after its blind review. Its one blocking finding: "runs sandboxed" isn't "holds none of the owner's
+> authority": an installed service holds the secrets the owner granted and open egress, and a sandboxed project gives
+> itself `consumes` by manifest.update. So a sandboxed consumer is served a service **only when that service's
+> `callers` names it**, whatever its kind; the default "every project" is for unsandboxed consumers.
 
 **Measured first (11-29, on the owner's machine).** A Claude Code session opened from the desktop app (the compute
 project's): its `brunna mcp` is a child of the session's own process (`~/.claude/remote/ccd-cli/<version>`), not in
@@ -612,31 +615,49 @@ this step's done-when: the same in a sandboxed project's session (the platform's
 its permission rules let `mcp__<server>__…` tools through or ask for them.
 
 **Which runtime runs the session.** `runtime_ports.session_runtime()` (new, neutral): walking up from the server's own
-process, the first ancestor an installed runtime's `session_process` claims names the runtime; none claims one =
-unknown. Not `current_session()`: no session id reaches an MCP server's environment.
+process, the nearest ancestor an installed runtime's `session_process` claims names the runtime (Codex under Claude:
+Codex); none claims one, or the server was reparented to pid 1, = unknown. Not `current_session()`: no session id
+reaches an MCP server's environment. Claude's adapter learns the desktop app's (`~/.claude/remote/ccd-cli/<version>`)
+and the native install's (`~/.local/share/claude/versions/<version>`) command lines, anchored: a loose `/.claude/`
+would claim plugin servers and hooks. A wrong answer only refuses.
 
 **Who is served, for a sandboxed consumer** (`enforce.sandbox`, its sessions):
 
 - its session's runtime confines its sessions (`runtime_ports.sessions_confined`); an unknown runtime, or one that
   doesn't (Codex today), gets no service tools and the `services` tool says why;
-- only services that run sandboxed themselves: an installed service, or a **sandboxed** project's own service (kind
-  1, below); an unsandboxed project's service only when that project's owner-only `callers` names the consumer
-  explicitly (not the default "every project"), since it runs with the owner's rights and the consumer chooses its
-  arguments;
+- only a service whose owner-only `callers` names it explicitly (never by the default), whatever kind it is: every
+  service holds some of the owner's authority (granted secrets, open egress, or the owner's rights) and the consumer
+  chooses its arguments;
+- the probe (`isolation.platform_readable()`) still applies: it is what refuses a `brunna mcp` that the session's own
+  sandboxed shell starts (that process has a real session ancestor, so the walk alone would say "confined"); what
+  such a process could start would stay in its sandbox anyway. Accepted, as in capabilities.md 11-25: what the owner
+  approves to run unconfined (a committed `excludedCommands`, a hook, a project's own tool server) already runs as the
+  owner; none of it changes who the server serves, which is the folder;
 - the rest as for an unsandboxed consumer (consumes it at its major, among its callers).
 
 **A sandboxed project as a service** (kind 1, now admitted to the index): started through `sandboxed-run --project
 <service> --cwd <its workspace> -- <mcp.run words>`, the project's own command-job sandbox, with the environment built
-from nothing (the platform's locations, `PATH`, `HOME`, `LANG`, `BRUNNA_CALLER=<consumer>`). Its manifest is read by
-the owner's process from the project's folder, so it is read without following a link and capped at 64 KB, and a
-problem with it is never shown to a consumer in detail (only "not a valid service"): a sandboxed project could make
-it a link to another file of the owner's.
+from nothing (the platform's locations, `PATH`, `HOME`, `LANG`, `BRUNNA_CALLER=<consumer>`; `--project` keeps the
+caller's environment, so the caller hands it this one); no entry environment, port or log, as a stdio server needs
+none. Its manifest is read by the owner's process from the project's folder: without following a link, a regular
+file only (never a FIFO), at most 64 KB (`nofollow.read`), and YAML aliases refused (an alias bomb would stall every
+consumer's server); a problem with it is never shown to a consumer in detail (only "not a valid service").
 
-**Tests.** `session_runtime()` from a fake ancestor chain; a sandboxed consumer served an installed service when the
-runtime confines, refused when it doesn't or is unknown; refused an unsandboxed project's service unless its callers
-name the consumer; a sandboxed kind-1 service started in its sandbox (can't read another project's folder) with
-`BRUNNA_CALLER`; its manifest as a link refused, with no content shown. Then by hand: a session of a sandboxed
-project calls a service.
+**What a service sends the consumer** (every kind, now that a sandboxed project's reaches sessions with the owner's
+rights): tool descriptions capped, `annotations` dropped (a `readOnlyHint` is the service's claim), results passed as
+`text` and `image` items only (`resource` and `resource_link` dropped).
+
+**Permissions.** The rendered settings of a sandboxed project neither allow nor deny `mcp__<server>__…` tools, so a
+service tool asks the owner in the session the first time, unless the owner's own settings allow it. Left that way:
+an allow rule can only name the whole server, which would allow the mail tools too.
+
+**Tests.** `session_runtime()` from ancestor chains (the desktop app's, the CLI's, the native install's, a plugin
+server under `~/.claude/` not claimed, the nearest of two runtimes, pid 1 = unknown); a sandboxed consumer served only
+when callers names it, when the runtime confines, refused when it doesn't or is unknown, and refused under the
+default callers; a `brunna mcp` started inside a sandbox profile refused though a session is its ancestor; a sandboxed
+kind-1 service started in its sandbox with `BRUNNA_CALLER` and none of the server's environment; its manifest as a
+link, a FIFO, over 64 KB and an alias bomb refused, with no content shown; annotations and resource results dropped.
+Then by hand: a session of a sandboxed project calls a service.
 
 ## Steps
 
