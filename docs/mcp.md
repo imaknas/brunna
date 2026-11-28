@@ -53,7 +53,8 @@ this server, the server records presence (`docs/design/mailbox-runtimes.md` A3):
 
 The registered project the working directory belongs to (a git worktree or `.agent-memory` counts as the main
 project). If the tool does not start the MCP server inside the project folder, add `BRUNNA_PROJECT=<project name>` to
-the env in its settings. When the project cannot be recognised, the project tools return an error saying how to set it,
+the env in its settings. That name holds only in a folder outside every project: started in another project's
+folder, the server serves neither and every tool says so. When the project cannot be recognised, the project tools return an error saying how to set it,
 and the server offers two others instead:
 
 - `status`: the connected projects and the folders you named for projects;

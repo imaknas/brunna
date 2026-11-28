@@ -13,8 +13,10 @@ it only in its project's own folder), manifest_update (a manifest.update letter 
 as `brunna send --type manifest.update`; never a confined run's: hubbus refuses one there too). Everything is handed to
 bin/hubbus (the same
 implementation); the server only decides which project: environment variable AGENTHUB_PROJECT > working directory
-(hubbus.project_of: worktrees and .agent-memory count as the main project). Project not recognised -> every tool
-returns an error saying how to set it. A sandboxed project's mail goes through its outbox and view, as hubbus does
+(hubbus.project_of: worktrees and .agent-memory count as the main project), the variable only in a folder outside every
+project: named to one project in another's folder, the server serves none (that folder's session would otherwise send,
+note, close and change the registry entry as the named one). Project not recognised -> every tool returns an error
+saying how to set it. A sandboxed project's mail goes through its outbox and view, as hubbus does
 in its folder (docs/design/bus-sender.md).
 
 The `instructions` returned by `initialize` carry the platform's rules (templates/mcp-instructions.md) and the number
@@ -215,12 +217,17 @@ def run_env(run: Run) -> dict:
 
 def resolve_project() -> tuple[str | None, str]:
     """(project, the reason shown to people when it cannot be recognised)."""
-    if names.env("PROJECT"):
-        return names.env("PROJECT"), ""
     try:
         name = _hubbus().project_of(pathlib.Path.cwd())
     except Exception as e:   # initialize must still answer when the platform settings are broken
         return None, _("cannot read the project registry: {e}", e=e)
+    if (named := names.env("PROJECT")):
+        if name and name != named:
+            return None, _("this server is named to {project} ({var}) but runs in {here}'s folder: in a project's "
+                           "folder it serves only that project, so every tool is refused. Take {var} out of this "
+                           "tool's MCP settings for that folder",
+                           project=named, var=next(v for v in names.env_names("PROJECT") if os.environ.get(v)), here=name)
+        return named, ""
     if name:
         return name, ""
     return None, _("the working directory {cwd} is not inside any registered project: start this server in the project "
@@ -757,21 +764,8 @@ def call(project: str | None, why: str, name: str, args: dict, client: "Client |
         cmd = mail_args(project, name, args)
     except BadArgs as e:
         return False, _("wrong arguments: {e}", e=e)
-    if name == "manifest_update":
-        if project == hubconf.hub_project():
-            return False, _("{project}'s own entry is its file in the platform repo: change it with a commit", project=project)
-        # a server named to a project (its PROJECT variable) in another project's folder: what that folder's session sends
-        # as the named one would be run by the platform as it (its jobs, services, tests); a folder outside every project
-        # is the named one's to use (as Presence holds it)
-        if names.env("PROJECT"):
-            try:
-                here = hb().project_of(pathlib.Path.cwd())
-            except Exception:
-                here = None
-            if here and here != project:
-                return False, _("this server is named to {project} but runs in {here}'s folder: {project}'s registry entry "
-                                "is changed only from its own folder, or from one outside every project",
-                                project=project, here=here)
+    if name == "manifest_update" and project == hubconf.hub_project():
+        return False, _("{project}'s own entry is its file in the platform repo: change it with a commit", project=project)
     if name == "manifest":
         # the one command that names no project: hubbus finds it from the folder, so it runs only where that folder is
         # this project's (a server named to a project whose folder is gone would otherwise show the one it started in)

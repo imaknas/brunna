@@ -126,24 +126,38 @@ class Server(unittest.TestCase):
         self.assertEqual([(s, to, p["type"], p["text"]) for s, to, p in sent],
                          [("demo", hub, "manifest.update", "commits: conventional\n")], "only the mapping is sent, as demo")
 
-    def test_manifest_update_only_as_the_folder_s_project(self):
-        _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"})], cwd=self.tmp / "ws" / "other",
-                              env={"AGENTHUB_PROJECT": "demo"})
-        self.assertTrue(res[0][0], res)
-        self.assertIn("other", res[0][1])
+    def test_a_server_named_to_a_project_acts_as_it_only_outside_every_project(self):
+        """Named to demo in other's folder (a variable other's own MCP settings could set): nothing is sent, noted,
+        closed or read as demo. Outside every project the name holds."""
+        mid = self.hubbus("send", "--from", "other", "--to", "demo", "--type", "question", "--text", "secret?").split()[-1]
+        acts = [("send", {"to": "other", "type": "info", "text": "as demo"}), ("note", {"text": "as demo"}),
+                ("ask_owner", {"text": "as demo?"}), ("ack", {"ids": [mid]}), ("done", {"ids": [mid]}),
+                ("manifest_update", {"yaml": "commits: conventional\n"}), ("inbox", {}), ("show", {"id": mid}),
+                ("manifest", {}), ("status", {})]
+        init, res = self.session(acts, cwd=self.tmp / "ws" / "other", env={"AGENTHUB_PROJECT": "demo"},
+                                 tools={"status", "connect_project"})
+        why = T("mcp_server", "this server is named to {project} ({var}) but runs in {here}'s folder: in a project's folder it serves only that project, so every tool is refused. Take {var} out of this tool's MCP settings for that folder", project="demo", var="AGENTHUB_PROJECT", here="other")
+        self.assertIn(why, init["instructions"])
+        self.assertEqual(res, [(True, why)] * len(acts))
+        self.assertNotIn("secret", json.dumps(res))
+        self.assertEqual([s for s, *_ in self.events("message")], ["other"], "only the letter sent before")
+        self.assertEqual(self.events("message.done") + self.events("message.delivered"), [], "no ack, done or read")
+        self.assertEqual(list((self.ws / ".agent-memory" / "memory").glob("2*.md")), [])
         outside = self.tmp / "elsewhere"
         outside.mkdir()
-        _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"})], cwd=outside,
-                              env={"AGENTHUB_PROJECT": "demo"})
-        self.assertFalse(res[0][0], res)
-        self.assertEqual([(s, json.loads(p)["type"]) for s, _t, _r, p in self.events("message")],
-                         [("demo", "manifest.update")], "only the one from outside every project is sent")
+        _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"}), ("note", {"text": "outside"})],
+                              cwd=outside, env={"AGENTHUB_PROJECT": "demo"})
+        self.assertEqual([e for e, _ in res], [False, False], res)
+        self.assertEqual([(s, json.loads(p)["type"]) for s, _t, _r, p in self.events("message")][1:],
+                         [("demo", "manifest.update")])
 
     def test_manifest_never_shows_the_folder_s_entry_for_another_project(self):
         shutil.rmtree(self.ws)
+        outside = self.tmp / "elsewhere"
+        outside.mkdir()
         for named in ("demo", "dmeo"):   # its folder gone; a name no project has
             with self.subTest(named):
-                _, res = self.session([("manifest", {})], cwd=self.tmp / "ws" / "other", env={"AGENTHUB_PROJECT": named})
+                _, res = self.session([("manifest", {})], cwd=outside, env={"AGENTHUB_PROJECT": named})
                 err, text = res[0]
                 self.assertTrue(err, text)
                 self.assertNotIn("name: other", text)
