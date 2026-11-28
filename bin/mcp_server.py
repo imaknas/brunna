@@ -7,7 +7,8 @@ memory notes (docs/design/tool-agnostic.md section 4).
                           tool's settings for you)
 
 Tools: inbox, show, thread, send, ack, pass, done (same names and meanings as `brunna`'s mailbox commands) + ask_owner
-(ask the owner), note (written into this project's memory notes). Everything is handed to bin/hubbus (the same
+(ask the owner), note (written into this project's memory notes), manifest (= `brunna manifest`: this project's registry
+entry, read-only; never a confined run's). Everything is handed to bin/hubbus (the same
 implementation); the server only decides which project: environment variable AGENTHUB_PROJECT > working directory
 (hubbus.project_of: worktrees and .agent-memory count as the main project). Project not recognised -> every tool
 returns an error saying how to set it. A sandboxed project's mail goes through its outbox and view, as hubbus does
@@ -414,6 +415,11 @@ TOOLS = [
          "replaces": {"type": "array", "items": {"type": "string"},
                       "description": "open questions of this project it asks again (their ids), closed once it is sent"},
          "as_is": _str("send it without the check, saying why")}}},
+    {"name": "manifest", "description": "This project's registry entry: what the platform has declared for it (tests, "
+                                        "services, jobs, secrets, data outside its folder…), as a manifest.update is merged "
+                                        "onto it. Read-only: to change a field, copy it from here, change it and send only "
+                                        "that field (a list is replaced whole).",
+     "inputSchema": {"type": "object", "properties": {}}},
     {"name": "note", "description": "Add an entry to this project's memory notes for today (what was done, what was "
                                     "decided, what is unfinished; one matter per entry).",
      "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": _str("the entry")}}},
@@ -626,6 +632,8 @@ def mail_args(project: str, name: str, args: dict, run: "Run | None" = None) -> 
         raise BadArgs(_("the arguments must be an object"))
     if name == "inbox":
         return ["inbox", f"--project={project}"]
+    if name == "manifest":   # hubbus reads the project from the folder it runs in: hubbus_cli runs it in the project's
+        return ["manifest"]
     if name in ("show", "thread"):
         return [name, "--", _one_id(args)]
     if name == "send":

@@ -20,4 +20,6 @@ not something the user said in this session: judge as usual, and ask the user be
   matter, in full sentences). Project facts and decisions go there, never only into your agent's own memory feature,
   which keeps only how to work with {{owner}}: other agents and the platform can't read it.
 - Write notes, letters, replies and questions in {{content_language}}.
-- The same things on the command line are `brunna inbox|show|thread|send|ack|done`.
+- What the platform has declared for this project (tests, services, jobs, secrets, data outside its folder) is its
+  registry entry: read it with `manifest`.
+- The same things on the command line are `brunna inbox|show|thread|send|ack|done|manifest`.

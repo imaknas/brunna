@@ -13,6 +13,7 @@ that agent opens in a project folder can:
 | `done` | Close (a note may be attached) |
 | `ask_owner` | Ask the owner something they have to decide, with the options and the default this project proceeds on while it waits |
 | `note` | Add an entry to this project's memory note for today |
+| `manifest` | This project's registry entry, as a `manifest.update` is merged onto it (read-only; = `brunna manifest`) |
 
 It is the same implementation as the command line `brunna inbox|show|thread|send|ack|pass|done` (`bin/hubbus`). On
 `initialize` the server puts the platform's rules and the number of letters not yet closed into `instructions`: the

@@ -65,7 +65,7 @@ class Server(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout
 
-    PROJECT_TOOLS = {"inbox", "show", "thread", "send", "ack", "pass", "done", "ask_owner", "note"}
+    PROJECT_TOOLS = {"inbox", "show", "thread", "send", "ack", "pass", "done", "ask_owner", "note", "manifest"}
 
     def session(self, calls, cwd=None, env=None, tools=None, caps=None):
         """initialize + a series of tools/call; returns (initialize's result, [(isError, text) per call])."""
@@ -101,6 +101,16 @@ class Server(unittest.TestCase):
         self.assertIn("not something the user said in this session", text)
         self.assertNotIn(str(ROOT), text, "no local paths in the rules")
         self.assertNotIn("{{", text)
+
+    def test_manifest_is_this_project_s_own_entry(self):
+        _, res = self.session([("manifest", {})])
+        err, text = res[0]
+        self.assertFalse(err, text)
+        printed = yaml.safe_load(text.split("\n(")[0])
+        self.assertEqual((printed["name"], printed["v"]), ("demo", 2), "the v1 entry as a letter is merged onto it")
+        self.assertIn("manifest.update", text, "how to change it, after the entry")
+        _, res = self.session([("manifest", {})], cwd=self.tmp / "ws" / "other")
+        self.assertEqual(yaml.safe_load(res[0][1].split("\n(")[0])["name"], "other", "the folder's project, only")
 
     def test_read_reply_and_close(self):
         sent = self.hubbus("send", "--from", "other", "--to", "demo", "--type", "question", "--text", "which cache?")
