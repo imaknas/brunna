@@ -256,5 +256,6 @@
  "{where}: login must be the name of a login": "{where}:login 要是登入方式的名稱",
  "{hub}'s own registry entry is its file in the platform repo ({file}): change it with a commit; a manifest.update doesn't reach it": "{hub} 自己的登記是平台 repo 裡的檔案({file}):用 commit 改;manifest.update 改不到它",
  "{sender} is a former name of {now}: the entry is {now}'s, changed by a manifest.update sent as {now}": "{sender} 是 {now} 以前的名字:登記是 {now} 的,要以 {now} 寄 manifest.update 改",
- "{name} is an installed service's name; pick another name": "{name} 是已安裝服務的名稱;請取別的名字"
+ "{name} is an installed service's name; pick another name": "{name} 是已安裝服務的名稱;請取別的名字",
+ "callers must be a list of project names (who may call this project's service)": "callers 要是專案名稱的清單(誰可以呼叫這個專案提供的服務)"
 }

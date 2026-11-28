@@ -351,6 +351,14 @@ class Updates(Instance):
                          out.stderr)
 
 
+class Names(unittest.TestCase):
+    def test_tool_names_fit_the_clients(self):
+        import service_index
+        self.assertEqual(service_index.tool_name("echo-svc", "whoami", "brunna"), "echo-svc__whoami")
+        self.assertIsNone(service_index.tool_name("echo-svc", "a" * 60, "brunna"))
+        self.assertIsNone(service_index.tool_name("echo-svc", "has space", "brunna"))
+
+
 class Lock(Instance):
     def test_a_shared_lock_holds_off_an_exclusive_one(self):
         out = subprocess.run([sys.executable, "-c", """
@@ -365,6 +373,164 @@ with s.lock("echo-svc", shared=True):
         print("LOCKED")
 """, str(ROOT / "bin")], env=self.env, text=True, capture_output=True)
         self.assertEqual(out.stdout.strip(), "LOCKED", out.stderr)
+
+
+MCP = r"""use strict; use JSON::PP; $| = 1; my $j = JSON::PP->new->canonical;
+sub out { print $j->encode($_[0]), "\n" }
+while (my $l = <STDIN>) {
+  my $m = eval { $j->decode($l) } or next;
+  my ($id, $me) = ($m->{id}, $m->{method} // "");
+  if ($me eq "initialize") { out({jsonrpc=>"2.0", id=>$id, result=>{protocolVersion=>"2025-06-18", capabilities=>{tools=>{}},
+      serverInfo=>{name=>"echo", version=>"1"}}}) }
+  elsif ($me eq "tools/list") { out({jsonrpc=>"2.0", id=>$id, result=>{tools=>[
+      {name=>"whoami", description=>"who called", inputSchema=>{type=>"object"}},
+      {name=>"slow", description=>"sleeps", inputSchema=>{type=>"object"}},
+      {name=>"asks", description=>"asks the client first", inputSchema=>{type=>"object"}},
+      {name=>"die", description=>"exits", inputSchema=>{type=>"object"}}]}}) }
+  elsif ($me eq "tools/call") {
+    my $n = $m->{params}{name};
+    if ($n eq "slow") { sleep 3 }
+    if ($n eq "die") { exit 1 }
+    if ($n eq "asks") { out({jsonrpc=>"2.0", id=>"s1", method=>"sampling/createMessage", params=>{}}); my $r = <STDIN>; }
+    print "not json\n";
+    out({jsonrpc=>"2.0", id=>$id, result=>{content=>[{type=>"text", text=>"caller=" . ($ENV{BRUNNA_CALLER} // "")}]}}) }
+}
+"""
+
+
+@unittest.skipIf(isolation.can_sandbox(), "this machine can't sandbox")
+class Consumers(Instance):
+    """Step 3a: an unsandboxed project's session calls an installed service through brunna mcp."""
+
+    def setUp(self):
+        super().setUp()
+        (self.src / "mcp.pl").write_text(MCP)
+        (self.src / "brunna-service.yaml").write_text(MANIFEST.replace('mcp: {run: "sh cli.sh mcp"}',
+                                                                       'mcp: {run: "/usr/bin/perl mcp.pl"}'))
+        git("add", "-A", cwd=self.src)
+        git("commit", "-qm", "mcp", cwd=self.src)
+        self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 0)
+        self.ws = self.tmp / "consumer"
+        self.ws.mkdir()
+        (self.tmp / "state" / "probe").write_text("x")   # the probe reads a file in the platform's state
+
+    def register(self, consumes=True, callers=None, v=1, sandbox=False):
+        import yaml
+        doc = {"v": 2, "name": "consumer", "paths": {"workspace": str(self.ws)}}
+        if consumes:
+            doc["consumes"] = [{"contract": "service", "from": "echo-svc", "v": v}]
+        if sandbox:
+            doc["enforce"] = {"sandbox": True}
+        (self.tmp / "config" / "projects" / "consumer.yaml").write_text(yaml.safe_dump(doc))
+        subprocess.run([sys.executable, str(ROOT / "bin" / "registry.py"), "refresh"], env=self.env,
+                       capture_output=True, text=True)
+        if callers is not None:
+            r = self.cli("callers", "echo-svc", *callers)
+            self.assertEqual(r.returncode, 0, r.stderr)
+
+    def session(self, calls: list, env: dict | None = None, cwd=None) -> list[dict]:
+        msgs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}]
+        msgs += [{"jsonrpc": "2.0", "id": 10 + i, "method": "tools/call", "params": {"name": n, "arguments": {}}}
+                 for i, n in enumerate(calls)]
+        e = {**self.env, **(env or {})}
+        e.pop("CLAUDECODE", None)
+        r = subprocess.run([sys.executable, str(ROOT / "bin" / "mcp_server.py")], cwd=cwd or self.ws, env=e,
+                           input="".join(json.dumps(m) + "\n" for m in msgs), text=True, capture_output=True,
+                           timeout=120)
+        return [json.loads(x) for x in r.stdout.splitlines() if x.strip().startswith("{")]
+
+    @staticmethod
+    def tools(out) -> set[str]:
+        return {t["name"] for t in next(m for m in out if m.get("id") == 1)["result"]["tools"]}
+
+    @staticmethod
+    def text(out, i) -> str:
+        res = next(m for m in out if m.get("id") == 10 + i)["result"]
+        return " ".join(c.get("text", "") for c in res["content"])
+
+    def test_listed_called_as_the_consumer_and_recorded(self):
+        self.register()
+        out = self.session(["echo-svc__whoami", "echo-svc__asks", "echo-svc__die", "echo-svc__whoami", "services"])
+        self.assertTrue({"services", "echo-svc__whoami", "echo-svc__slow"} <= self.tools(out), out)
+        self.assertIn("caller=consumer", self.text(out, 0))
+        self.assertIn("caller=consumer", self.text(out, 1))   # its own request to the client was refused, it went on
+        self.assertIn("caller=consumer", self.text(out, 3))   # started again after it died
+        self.assertIn("echo-svc", self.text(out, 4))
+        calls = (self.tmp / "state" / "services" / "calls.jsonl").read_text().splitlines()
+        self.assertGreaterEqual(len(calls), 2)
+        self.assertEqual(json.loads(calls[0])["consumer"], "consumer")
+
+    def test_a_ping_is_answered_during_a_long_call(self):
+        self.register()
+        msgs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+                {"jsonrpc": "2.0", "id": 10, "method": "tools/call", "params": {"name": "echo-svc__slow"}},
+                {"jsonrpc": "2.0", "id": 99, "method": "ping"}]
+        r = subprocess.run([sys.executable, str(ROOT / "bin" / "mcp_server.py")], cwd=self.ws, env=self.env,
+                           input="".join(json.dumps(m) + "\n" for m in msgs), text=True, capture_output=True,
+                           timeout=120)
+        ids = [json.loads(x).get("id") for x in r.stdout.splitlines() if x.strip().startswith("{")]
+        self.assertLess(ids.index(99), ids.index(10), ids)
+
+    def test_an_unsandboxed_projects_own_service(self):
+        import yaml
+        own = self.tmp / "kind-one"
+        own.mkdir()
+        (own / "mcp.pl").write_text(MCP)
+        (own / "brunna-service.yaml").write_text(MANIFEST.replace("name: echo-svc", "name: kind-one").replace(
+            'mcp: {run: "sh cli.sh mcp"}', 'mcp: {run: "/usr/bin/perl mcp.pl"}'))
+        (self.tmp / "config" / "projects" / "kind-one.yaml").write_text(yaml.safe_dump(
+            {"v": 2, "name": "kind-one", "paths": {"workspace": str(own)},
+             "provides": [{"contract": "service", "v": 1}]}))
+        self.register()
+        import yaml as y
+        doc = y.safe_load((self.tmp / "config" / "projects" / "consumer.yaml").read_text())
+        doc["consumes"].append({"contract": "service", "from": "kind-one", "v": 1})
+        (self.tmp / "config" / "projects" / "consumer.yaml").write_text(y.safe_dump(doc))
+        subprocess.run([sys.executable, str(ROOT / "bin" / "registry.py"), "refresh"], env=self.env,
+                       capture_output=True)
+        out = self.session(["kind-one__whoami"])
+        self.assertIn("kind-one__whoami", self.tools(out))
+        self.assertIn("caller=consumer", self.text(out, 0))
+
+    @unittest.skipIf(isolation.adapter()[0] != "seatbelt", "the probe under Seatbelt")
+    def test_a_confined_server_serves_none(self):
+        self.register()
+        state = os.path.realpath(self.tmp / "state")
+        prof = f'(version 1)(allow default)(deny file-read-data (subpath "{state}"))'
+        msgs = [{"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}},
+                {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}]
+        r = subprocess.run(["/usr/bin/sandbox-exec", "-p", prof, sys.executable, str(ROOT / "bin" / "mcp_server.py")],
+                           cwd=self.ws, env=self.env, input="".join(json.dumps(m) + "\n" for m in msgs), text=True,
+                           capture_output=True, timeout=120)
+        out = [json.loads(x) for x in r.stdout.splitlines() if x.strip().startswith("{")]
+        self.assertFalse({t for t in self.tools(out) if t.startswith("echo-svc__")}, r.stderr[-500:])
+        # the probe itself: false under a profile that denies the platform's state, wherever it is found from
+        import hubconf
+        main_state = os.path.realpath(hubconf._main_checkout(ROOT) / ".state")
+        deny = f'(version 1)(allow default)(deny file-read-data (subpath "{state}") (subpath "{main_state}"))'
+        probe = "import sys; sys.path.insert(0, sys.argv[1]); import isolation; print(isolation.platform_readable())"
+        for prof, want in (("(version 1)(allow default)", "True"), (deny, "False")):
+            r = subprocess.run(["/usr/bin/sandbox-exec", "-p", prof, sys.executable, "-c", probe, str(ROOT / "bin")],
+                               env=self.env, text=True, capture_output=True)
+            self.assertEqual(r.stdout.strip(), want, r.stderr[-300:])
+
+    def test_refused(self):
+        for kw in ({"consumes": False}, {"v": 2}, {"callers": ["someone-else"]}, {"sandbox": True}):
+            with self.subTest(kw=kw):
+                if "callers" in kw:
+                    (self.tmp / "config" / "projects" / "someone-else.yaml").write_text(
+                        "v: 2\nname: someone-else\npaths:\n  workspace: /x\n")
+                self.register(**kw)
+                out = self.session(["echo-svc__whoami"])
+                self.assertFalse({t for t in self.tools(out) if t.startswith("echo-svc__")}, kw)
+                if "callers" in kw:
+                    self.cli("callers", "echo-svc", "--all")
+        self.register()
+        for env in ({"HUB_LLM_POINT": "x"}, {"HUBBUS_LEASE": "1"}):
+            with self.subTest(env=env):
+                self.assertFalse({t for t in self.tools(self.session([], env=env)) if t.startswith("echo-svc__")})
 
 
 class RegistryRefuses(Instance):

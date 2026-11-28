@@ -500,9 +500,47 @@ class Client:
     def __init__(self):
         self.elicitation, self.next_id = False, 0
         self.pending: list[str] = []   # what arrived while waiting for an answer, for serve() to handle next
+        self.current = None            # the id of the client's call being served (a cancel names it)
+        import queue
+        self.incoming: "queue.Queue[str]" = queue.Queue()
+        import threading
+        threading.Thread(target=self._read, daemon=True).start()
+
+    def _read(self) -> None:
+        """stdin on a thread of its own, so a ping or a cancel is seen during a service's long call."""
+        while (line := sys.stdin.readline()):
+            self.incoming.put(line)
+        self.incoming.put("")
+
+    def _next(self) -> str:
+        return self.incoming.get()
 
     def line(self) -> str:
-        return self.pending.pop(0) if self.pending else sys.stdin.readline()
+        return self.pending.pop(0) if self.pending else self._next()
+
+    def between(self, child, rid: str) -> None:
+        """While a service's call is out: answer pings, forward a cancel of that call; keep the rest for later."""
+        import queue
+        while True:
+            try:
+                line = self.incoming.get_nowait()
+            except queue.Empty:
+                return
+            if line == "":
+                self.incoming.put("")
+                child.cancel(rid, "the client went away")
+                return
+            try:
+                msg = json.loads(line)
+            except ValueError:
+                continue
+            if msg.get("method") == "ping" and msg.get("id") is not None:
+                send({"jsonrpc": "2.0", "id": msg["id"], "result": {}})
+            elif msg.get("method") == "notifications/cancelled" and \
+                    (msg.get("params") or {}).get("requestId") == self.current:
+                child.cancel(rid, str((msg.get("params") or {}).get("reason") or ""))
+            else:
+                self.pending.append(line)
 
     def confirm(self, message: str) -> bool | None:
         """Ask the user through the client, bypassing the model: True / False, or None when the client can't ask."""
@@ -513,7 +551,7 @@ class Client:
         send({"jsonrpc": "2.0", "id": rid, "method": "elicitation/create", "params": {
             "message": message, "requestedSchema": {"type": "object", "required": ["connect"], "properties": {
                 "connect": {"type": "boolean", "title": _("Connect it")}}}}})
-        while (line := sys.stdin.readline()):   # the client's answer; anything else is kept for serve()
+        while (line := self._next()):   # the client's answer; anything else is kept for serve()
             try:
                 msg = json.loads(line)
             except ValueError:
@@ -787,6 +825,29 @@ def call(project: str | None, why: str, name: str, args: dict, client: "Client |
     return hubbus_cli(project, *cmd)
 
 
+SERVICES_TOOL = {"name": "services", "description": "The services this project may call here (their tools are listed "
+                 "as <service>__<tool>), the ones it consumes but can't call and why, and any that didn't start.",
+                 "inputSchema": {"type": "object", "properties": {}}}
+
+
+def _services(project: str | None):
+    """What serves this session's services (bin/service_tools.py), with why it serves none where it mustn't: a
+    platform run, a lease, a gated session, a project told by the variable rather than the folder, or a process the
+    positive probe finds confined (docs/design/service-ecosystem.md, step 3a)."""
+    import isolation
+    import service_tools
+    why = None
+    if os.environ.get("HUB_LLM_POINT") or os.environ.get("HUBBUS_LEASE"):
+        why = _("this is a run the platform started")
+    elif names.env("PROJECT"):
+        why = _("the project is named by a variable, not by the folder this server runs in")
+    elif project and gated_here():
+        why = _("this session's tool version failed the platform's sandbox check")
+    elif not isolation.platform_readable():
+        why = _("this server runs inside a sandbox")
+    return service_tools.Services(project, why)
+
+
 def send(msg: dict) -> None:
     sys.stdout.write(json.dumps(msg, ensure_ascii=False) + "\n")
     sys.stdout.flush()
@@ -802,6 +863,12 @@ def serve(run_file: str | None = None) -> int:
     log(_("project: {project}", project=project or _("(unrecognized)")))
     presence = Presence(None if run is not None else project)
     client = Client()
+    services = None if run is not None else _services(project)
+    if services is not None and not services.wanted_any():
+        services = None   # a project that consumes no service: its session's tools are as before
+    if services is not None:
+        import atexit
+        atexit.register(services.stop)
     while (line := client.line()):
         try:
             msg = json.loads(line)
@@ -819,10 +886,23 @@ def serve(run_file: str | None = None) -> int:
             # outside every project: what agent-hub is, and connecting the folder (B5); a server named to a project
             # by AGENTHUB_PROJECT keeps the project tools. A run: its own
             tools = run_tool_list(run) if run is not None else TOOLS if project else TOOLS_OUTSIDE
+            if services is not None and project:
+                tools = [*tools, SERVICES_TOOL, *services.tools()]
             send({"jsonrpc": "2.0", "id": mid, "result": {"tools": tools}})
         elif method == "tools/call":
             params = msg.get("params") or {}
             presence.touch("tool")
+            tname = str(params.get("name", ""))
+            if services is not None and project and (tname == SERVICES_TOOL["name"] or services.owns(tname)):
+                client.current = mid
+                if tname == SERVICES_TOOL["name"]:
+                    result = {"content": [{"type": "text", "text": services.status()}], "isError": False}
+                else:
+                    args = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+                    result = services.call(tname, args, client)
+                client.current = None
+                send({"jsonrpc": "2.0", "id": mid, "result": result})
+                continue
             try:
                 ok, text = call(project, why, params.get("name", ""), params.get("arguments") or {}, client, run)
             except (KeyError, TypeError) as e:

@@ -665,6 +665,8 @@ def service_policy(entry: dict, phase: str, index: dict | None = None) -> dict:
     env = {"PATH": os.pathsep.join(str(p) for p in tools["path"]), "HOME": str(f["home"] if phase == "run" else f["cache"] / "home"),
            "TMPDIR": str(f["tmp"]), "LANG": os.environ.get("LANG") or "en_US.UTF-8",
            "XDG_CACHE_HOME": str(f["cache"]), "UV_PYTHON_PREFERENCE": "only-managed",
+           # its code is read-only at run time: compiled Python goes to its cache, or every start compiles again
+           "PYTHONPYCACHEPREFIX": str(f["cache"] / "pycache"),
            **{k: str(f["cache"] / v) for k, v in CACHE_ENV.items()}}
     if phase == "run":
         env[svc.STATE_ENV] = str(f["state"])

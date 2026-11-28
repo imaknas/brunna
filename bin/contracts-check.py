@@ -80,6 +80,8 @@ def cross_copies(index: dict) -> list[str]:
     # the assistant's format)
     for name, doc in [*index["projects"].items(), *(index.get("modules") or {}).items()]:
         for cons in doc["consumes"] if isinstance(doc.get("consumes"), list) else []:
+            if isinstance(cons, dict) and cons.get("contract") == registry.SERVICE_CONTRACT:
+                continue   # a service's interface is its tool list: no copy to compare (service-ecosystem.md, step 3)
             try:   # what one entry declares never stops the others (an entry accepted before its shape was checked)
                 errs += copy_errors(index, name, cons)
             except Exception as e:   # noqa: BLE001

@@ -18,11 +18,14 @@ worktree of the hub (bin/owner_terminal.py), since what it grants is the owner's
   brunna service update <name> [--ref <tag|branch|commit>] [--yes]
       take the newest release tag (or the ref asked for): what it asks beyond what was granted is shown and asked;
       the new version is set up beside the installed one and replaces it only if setup passed.
+  brunna service callers <name> <project>… | --all
+      who may call it from their sessions (through brunna mcp); --all: every registered project (the default).
   brunna service update --all
       the platform job brunna/service-updates: every service that follows release tags; a new version that asks for
       more, a tag that moved, or a failing setup is an alert, and the installed version keeps running.
 
-Other projects calling it (step 3) and its questions to you aren't built yet.
+A project whose registry entry consumes it calls its tools from its sessions through brunna mcp (unsandboxed projects
+only so far); its questions to you aren't built yet.
 """
 from __future__ import annotations
 
@@ -193,7 +196,7 @@ def _granted(m: dict) -> dict:
 
 def _entry(m: dict, url: str, ref: str | None, commit: str, granted: dict, follow: str, tags: dict,
            previous: str | None, added: str) -> dict:
-    return {"v": 1, "name": m["name"], "url": url, "ref": ref if ref and not service_fetch.HEX.match(ref) else None,
+    return {"v": 1, "name": m["name"], "what": m["what"], "url": url, "ref": ref if ref and not service_fetch.HEX.match(ref) else None,
             "commit": commit, "interface": m["interface"],
             "run": {"cli": m["cli"]["run"], "mcp": m["mcp"]["run"], "setup": list(m.get("setup") or [])},
             "granted": granted, "data": list(m.get("data") or []),
@@ -539,6 +542,32 @@ def cmd_remove(args: list[str]) -> int:
     return 0
 
 
+def cmd_callers(args: list[str]) -> int:
+    """Who may call a service: named projects, or --all (every registered project)."""
+    if len(args) < 2 or not svc.NAME.match(args[0]):
+        return err(_("usage: brunna service callers <name> <project>… | --all"))
+    name, who = args[0], args[1:]
+    try:
+        with svc.lock(name):
+            e = svc.entries().get(name)
+            if not e:
+                return err(_("{name} is not an installed service", name=name))
+            if who == ["--all"]:
+                e.pop("callers", None)
+            else:
+                unknown = [p for p in who if p not in hubconf.projects()]
+                if unknown:
+                    return err(_("not registered projects: {names}", names=", ".join(unknown)))
+                e["callers"] = sorted(set(who))
+            _write_entry(e)
+    except svc.Locked as x:
+        return err(str(x))
+    _commit(name, f"feat(services): who may call {name}")
+    say(_("{name} may be called by {who}", name=name,
+          who=_("every registered project") if who == ["--all"] else ", ".join(sorted(set(who)))))
+    return 0
+
+
 def cmd_list(args: list[str]) -> int:
     es = svc.entries()
     if "--json" in args:
@@ -546,11 +575,46 @@ def cmd_list(args: list[str]) -> int:
         return 0
     if not es:
         say(_("No installed services."))
+    calls = _calls_this_week()
     for name, e in es.items():
         say(f"{name}  {e.get('ref') or '-'}  {e['commit'][:12]}  interface {e['interface']}  {e['url']}")
+        _say_calls(calls.get(name))
+    import service_index
+    try:
+        own = {n: s for n, s in service_index.services().items() if s.kind == "project"}
+    except Exception:   # noqa: BLE001
+        own = {}
+    for name, s in sorted(own.items()):
+        say(_("{name}  your project's service (interface {v}), runs with your rights in {path}", name=name,
+              v=s.interface, path=s.cwd))
+        _say_calls(calls.get(name))
     for p in svc.check():
         err(p)
     return 0
+
+
+def _calls_this_week() -> dict[str, dict[str, int]]:
+    """{service: {consumer: calls}} over the last 7 days (<state>/services/calls.jsonl)."""
+    since = (datetime.datetime.now() - datetime.timedelta(days=7)).isoformat(timespec="seconds")
+    out: dict[str, dict[str, int]] = {}
+    try:
+        lines = (hubconf.STATE / "services" / "calls.jsonl").read_text().splitlines()
+    except OSError:
+        return out
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except ValueError:
+            continue
+        if isinstance(r, dict) and str(r.get("at", "")) >= since:
+            per = out.setdefault(str(r.get("service")), {})
+            per[str(r.get("consumer"))] = per.get(str(r.get("consumer")), 0) + 1
+    return out
+
+
+def _say_calls(per: dict[str, int] | None) -> None:
+    if per:
+        say(_("  calls this week: {calls}", calls=", ".join(f"{c} {n}" for c, n in sorted(per.items()))))
 
 
 def cmd_secret(args: list[str]) -> int:
@@ -594,7 +658,7 @@ def cmd_run(args: list[str]) -> int:
 
 
 VERBS = {"add": cmd_add, "remove": cmd_remove, "list": cmd_list, "secret": cmd_secret, "run": cmd_run,
-         "update": cmd_update}
+         "update": cmd_update, "callers": cmd_callers}
 
 
 def main(argv: list[str]) -> int:

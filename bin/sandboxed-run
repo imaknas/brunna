@@ -9,7 +9,7 @@ Design: docs/design/capabilities.md.
 
   sandboxed-run --project <name> --cwd <dir> [--port <n>] -- <argv…>
   sandboxed-run --project <name> --service <name> --cwd <dir> [--port <n>] --digest <sha256> -- <words…>
-  sandboxed-run --installed <name> --phase run|setup [--commit <40 hex>] --cwd <dir> -- <argv…>
+  sandboxed-run --installed <name> --phase run|setup [--commit <40 hex>] [--caller <project>] --cwd <dir> -- <argv…>
 
 --installed: an installed service (docs/design/service-ecosystem.md, step 2a; bin/installed_services.py), under its own
 read model (policy.service_policy, the adapters' installed mode). Its environment is built here from nothing (none of
@@ -71,13 +71,21 @@ def service_entry(svc: dict, cwd: str, platform_env: dict, git_dirs: list[str]):
     return isolation.Entry(env, there, svc.get("log"))
 
 
-def installed(name: str, phase: str | None, cwd: str, cmd: list[str], commit: str | None = None) -> int:
+def installed(name: str, phase: str | None, cwd: str, cmd: list[str], commit: str | None = None,
+              caller: str | None = None) -> int:
     """An installed service's command under its read model, in an environment of its own."""
     import installed_services as svc
     import isolation
     import policy
     if phase is None:
         return refuse("--installed needs --phase run or setup")
+    # only the owner's own unconfined processes start a service, under whatever caller they name: a process inside a
+    # sandbox could otherwise start one in another project's name (Landlock stacks sandboxes)
+    if not isolation.platform_readable():
+        return refuse("an installed service is started only by the owner's own processes, not from inside a sandbox")
+    import re
+    if caller is not None and (phase != "run" or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", caller)):
+        return refuse("--caller is for run only, and must be a project's name")
     entry = svc.entries().get(name)
     if not entry:
         return refuse(f"{name} is not an installed service")
@@ -92,6 +100,8 @@ def installed(name: str, phase: str | None, cwd: str, cmd: list[str], commit: st
         return refuse(f"{cwd} is not inside {name}'s code folder")
     pol = policy.service_policy(entry, phase)
     env = dict(pol["env"])
+    if caller is not None:
+        env[svc.CALLER_ENV] = caller
     # its folders must be what they are configured to be: real folders of the owner's, no link anywhere from its base
     # down (a run could replace state/ with a link to a folder of the owner's, which the next run's profile, resolving
     # its folders, would then allow, and the owner's mkdir here would follow); made one level at a time when missing
@@ -131,6 +141,7 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--installed")
     ap.add_argument("--phase", choices=("run", "setup"))
     ap.add_argument("--commit")
+    ap.add_argument("--caller")
     ap.add_argument("--service")
     ap.add_argument("--digest")
     ap.add_argument("--cwd", required=True)
@@ -146,7 +157,7 @@ def main(argv: list[str]) -> int:
     if (why := isolation.can_sandbox()):
         return refuse(why)
     if a.installed is not None:
-        return installed(a.installed, a.phase, a.cwd, cmd, a.commit)
+        return installed(a.installed, a.phase, a.cwd, cmd, a.commit, a.caller)
     if not a.project:
         return refuse("--project or --installed is required")
     projects = hubconf.projects()

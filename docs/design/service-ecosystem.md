@@ -5,7 +5,9 @@
 > (`bin/installed_services.py`, `bin/service_fetch.py`, `bin/service-cmd.py` = `brunna service`, `policy.service_policy`,
 > the adapters' installed mode, `sandboxed-run --installed`) **and step 2b** (`brunna service update`, the job
 > `brunna/service-updates`, the lock, `backup.services()`, the services' secrets in check-secrets, their state's size
-> in check-data); the rest not.
+> in check-data) **and step 3a** (`bin/service_index.py`, `bin/service_tools.py`, `bin/mcp_relay.py`, `brunna mcp`
+> serving consumed services' tools to unsandboxed projects, `brunna service callers`, `isolation.platform_readable`);
+> the rest not.
 > History: r2 after two blind reviews of r1 (security; fit with the
 > platform): the wiring moved into the platform's own MCP server, installed services got their own folders, outbox and
 > answer path, the manifest can't widen a grant, and egress is said plainly not to be confined yet. r3 after a third
@@ -520,6 +522,14 @@ required secret is a problem, an optional one isn't; the hard-link probe; a shar
 
 ## Step 3, in detail
 
+> **3a built 11-29.** As built: the probe writes a file in an empty state folder when it has none to read; a service's
+> compiled Python goes to its cache (`PYTHONPYCACHEPREFIX`), since its code is read-only and the review service took
+> 10 s to start without it (2 s with it); `START_S` is 20 s. The `services` tool is listed only for a project that
+> consumes a service, so every other session's tools are as before. Run for real in a throwaway instance: the review
+> service, installed from GitHub, served its 39 tools to a consumer through `brunna mcp`, and two calls answered and
+> were recorded. Not run yet: a real coding-agent session on the owner's machine (that needs the review service
+> declared as a service and a project consuming it, both registry changes of other projects).
+>
 > r2, 11-29, after its blind review. Its one blocking finding: a sandboxed consumer (which can grant itself `consumes`
 > by manifest.update) driving an unsandboxed project's service with the owner's rights. And `current_session()` most
 > likely doesn't answer inside an MCP server process, so the "the session's runtime confines" check can't be made yet.

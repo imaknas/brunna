@@ -1,9 +1,9 @@
 # Writing a service for brunna
 
 > **Draft.** The manifest format below is fixed (version 1) and can be checked today. A user can install a service,
-> run its CLI and get its new releases (`brunna service add <url> --ref <tag>`, `brunna service run <name>`, updates
-> by tag). Calling a service from other projects is designed but not built yet
-> ([docs/design/service-ecosystem.md](design/service-ecosystem.md), steps 3 to 7). This page grows as it lands.
+> run its CLI, get its new releases, and call its tools from the sessions of their other projects (unsandboxed ones
+> so far). Calls from sandboxed projects and from scripts are designed but not built yet
+> ([docs/design/service-ecosystem.md](design/service-ecosystem.md), steps 3b to 7). This page grows as they land.
 
 A brunna service is an ordinary repository with three things:
 
@@ -103,6 +103,16 @@ on a port. Its environment is built from nothing:
 - On Linux there is no `/dev/shm`, so Python's `multiprocessing` locks don't work; Linux also can't stop your code
   from writing a `.git` folder in its own folders, which macOS refuses.
 - Outbound network is open (the user is told so); list the hosts you reach in `network`.
+
+## How projects call it
+
+A project whose registry entry has `consumes: [{contract: service, from: <your service>, v: <interface major>}]` sees
+your MCP tools in its agent sessions, through the platform's own MCP server, as `<service>__<tool>`. Keep tool names
+short: the whole name the client sees (`mcp__brunna__<service>__<tool>`) must fit in 64 characters, of letters,
+digits, `_` and `-`. Your server is started once per session (start fast: it has 20 seconds to answer `initialize`
+and `tools/list`), as your service, with `BRUNNA_CALLER` the calling project. Requests your server makes to the
+client (sampling, elicitation) aren't supported; a call has 15 minutes. The user decides which projects may call it
+(`brunna service callers`).
 
 ## Releases
 

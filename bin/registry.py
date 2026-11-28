@@ -224,7 +224,7 @@ _ = i18n.domain(__file__)
 CACHE = hubconf.REGISTRY_INDEX.parent   # hubconf.SHARED: readable inside every sandbox, written only here
 TOP = {"v", "name", "type", "purpose", "paths", "memory", "privacy", "runtime", "push_on_merge", "commits", "mailbox",
        "publishes", "provides", "consumes", "services", "jobs", "enforce", "network", "allow_write", "gate", "secrets",
-       "models", "metered_models", "layout_intent", "agents", "agents_per_day", "data"}
+       "models", "metered_models", "layout_intent", "agents", "agents_per_day", "data", "callers"}
 TOP_V2 = TOP | {"tests", "code", "inputs", "commit_gate"}
 # what the index's documents are: 2 = project v2 (v1 files upgraded as they are read). Readers that need v2 fields
 # (merge-branch) refuse an index of an older format; registry.refresh never overwrites a newer one
@@ -622,7 +622,7 @@ def agent_timeout_s(decl: dict) -> int:
 
 # paths too: a manifest.update setting paths.workspace to ~ would make the whole home folder its sandbox's to write
 # (round 6, 11-01); onboarding, renaming and recovery write paths through their own scripts, not through a letter
-PLATFORM_OWNED = ("type", "enforce", "network", "allow_write", "privacy", "metered_models", "paths")
+PLATFORM_OWNED = ("type", "enforce", "network", "allow_write", "privacy", "metered_models", "paths", "callers")
 # and one key inside a field a project may otherwise change: mailbox.wake: false turns off every wake of its sessions (a woken
 # session keeps its permissions, so whether a letter may start a turn isn't the project's own letter to write)
 PLATFORM_OWNED_NESTED = (("mailbox", "wake"),)
@@ -825,6 +825,8 @@ def normalise(doc):
 # what others publish)
 LISTS = {"provides": {"contract": True, "schema": True}, "consumes": {"contract": True, "copy": True, "from": False},
          "publishes": {"kind": False, "path": False, "contract": False}}
+SERVICE_CONTRACT = "service"
+SERVICE_FIELDS = {"provides": {"contract": True}, "consumes": {"contract": True, "from": True}}
 
 
 def list_problems(doc: dict) -> list[str]:
@@ -832,6 +834,12 @@ def list_problems(doc: dict) -> list[str]:
     errs = [_("mailbox must be a mapping")] if not isinstance(doc.get("mailbox", {}), dict) else []
     for key, fields in LISTS.items():
         for i, item in enumerate(doc[key] if isinstance(doc.get(key), list) else []):
+            # a service (docs/design/service-ecosystem.md, step 3): its interface is its tool list, nothing to copy
+            # and no schema file; a consume names the service with from
+            if isinstance(item, dict) and item.get("contract") == SERVICE_CONTRACT and key in SERVICE_FIELDS:
+                fields = SERVICE_FIELDS[key]
+            else:
+                fields = LISTS[key]
             bad = ["*"] if not isinstance(item, dict) else \
                 [f for f, needed in fields.items() if (needed or f in item) and not (isinstance(item.get(f), str) and item[f]
                                                                                     and "\0" not in item[f])] + \
@@ -1017,6 +1025,8 @@ def _validate_body(doc: dict, stem: str, top: set[str], runtime_keys: tuple[str,
         errs.append(_("paths.workspace is required"))
     errs += validate_enforce(doc)
     errs += validate_models(doc)
+    if "callers" in doc and not (isinstance(doc["callers"], list) and all(isinstance(c, str) and c for c in doc["callers"])):
+        errs.append(_("callers must be a list of project names (who may call this project's service)"))
     li = doc.get("layout_intent")
     if li is not None and not (isinstance(li, dict) and (li.get("split") is True or isinstance(li.get("span"), list))):
         errs.append(_("layout_intent is split: true, or span: a list of projects (docs/design/newcomer-path.md B6)"))

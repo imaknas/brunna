@@ -7,6 +7,7 @@ has no workspace, memory or merge gate, and every walker of the registry would t
 
   v: 1
   name: <the manifest's name>
+  what: <the manifest's what>
   url: <the repository: https, ssh, or (tests) a local path>
   ref: <the tag or branch asked for> | null (a commit was)
   commit: <40 hex>
@@ -19,6 +20,7 @@ has no workspace, memory or merge gate, and every walker of the registry would t
   follow: tags | none                     tags: updated to newer release tags by brunna/service-updates
   tags: {<tag>: <commit>}                 every release tag installed, with the commit it named then
   previous: <40 hex> | null               the commit before, kept for processes still running in it
+  callers: [<project>…]                   who may call it (step 3); not set = every registered project
   added: YYYY-MM-DD
 
 Its folders, all under <services_root>/<name>/ (folders()): repo.git (the fetched commits), code/<commit>/ (read at
@@ -43,7 +45,7 @@ NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,47}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 SECRET = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
 TOP = {"v", "name", "url", "ref", "commit", "interface", "run", "granted", "added", "data", "secrets_required",
-       "follow", "tags", "previous"}
+       "follow", "tags", "previous", "callers", "what"}
 GRANTED = {"models", "secrets", "principal", "network"}
 RELEASE = re.compile(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
 CAP = 20 << 30   # what a service's state/ may hold before the backup skips it and check-data says so
@@ -116,6 +118,9 @@ def entry_problems(doc, stem: str | None = None) -> list[str]:
     if not (isinstance(tags, dict) and all(isinstance(k, str) and RELEASE.match(k) and isinstance(v, str)
                                            and COMMIT.match(v) for k, v in tags.items())):
         errs.append(_("tags must map release tags to commits"))
+    if "callers" in doc and not (isinstance(doc["callers"], list) and all(isinstance(c, str) and c
+                                                                            for c in doc["callers"])):
+        errs.append(_("callers must be a list of project names"))
     if doc.get("previous") is not None and not (isinstance(doc["previous"], str) and COMMIT.match(doc["previous"])):
         errs.append(_("previous must be 40 hex characters or null"))
     req = doc.get("secrets_required", [])

@@ -33,5 +33,6 @@
  "{path} is missing": "{path} 不見了",
  "{path} can't be made ({err})": "做不出 {path}({err})",
  "{name} is busy (another add, update, remove or run holds it)": "{name} 正在忙(另一個 add、update、remove 或 run 拿著它)",
- "{service}: secret {name} is not set: brunna service secret {service} {name}": "{service}:secret {name} 還沒設定:brunna service secret {service} {name}"
+ "{service}: secret {name} is not set: brunna service secret {service} {name}": "{service}:secret {name} 還沒設定:brunna service secret {service} {name}",
+ "callers must be a list of project names": "callers 要是專案名稱的清單"
 }

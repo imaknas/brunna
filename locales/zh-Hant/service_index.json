@@ -1,0 +1,6 @@
+{
+ "{project} is sandboxed: services are served only to unsandboxed projects for now (step 3b)": "{project} 開了 sandbox:目前服務只提供給沒開 sandbox 的專案(第 3b 步)",
+ "{service}: no such service here": "{service}:這裡沒有這個服務",
+ "{service}: consumed at interface {want}, but it is at {have}": "{service}:consumes 寫的是介面 {want},它現在是 {have}",
+ "{service}: {project} is not among its callers": "{service}:{project} 不在它的 callers 裡"
+}

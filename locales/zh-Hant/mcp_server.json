@@ -65,5 +65,9 @@
  "yaml must be a mapping of the fields that change": "yaml 要是一個 mapping,列出要改的欄位",
  "yaml is over {kib} KiB; send only the fields that change": "yaml 超過 {kib} KiB;只寄要改的欄位",
  "{project}'s own entry is its file in the platform repo: change it with a commit": "{project} 自己的登記是平台 repo 裡的檔案:用 commit 改",
- "this server is named to {project} ({var}) but runs in {here}'s folder: in a project's folder it serves only that project, so every tool is refused. Take {var} out of this tool's MCP settings for that folder": "這個 server 指定給 {project}({var}),卻在 {here} 的資料夾裡執行:在專案的資料夾裡它只服務那個專案,所以每個工具都拒絕。請把 {var} 從這個工具在那個資料夾的 MCP 設定拿掉"
+ "this server is named to {project} ({var}) but runs in {here}'s folder: in a project's folder it serves only that project, so every tool is refused. Take {var} out of this tool's MCP settings for that folder": "這個 server 指定給 {project}({var}),卻在 {here} 的資料夾裡執行:在專案的資料夾裡它只服務那個專案,所以每個工具都拒絕。請把 {var} 從這個工具在那個資料夾的 MCP 設定拿掉",
+ "this is a run the platform started": "這是平台啟動的執行",
+ "the project is named by a variable, not by the folder this server runs in": "專案是由環境變數指定的，不是由這個伺服器所在的資料夾決定",
+ "this session's tool version failed the platform's sandbox check": "這個 session 的工具版本沒通過平台的 sandbox 檢查",
+ "this server runs inside a sandbox": "這個伺服器在 sandbox 裡跑"
 }
