@@ -378,3 +378,14 @@ def exec_service(pol: dict, dirs: list, port: int | None, argv: list[str], entry
     if (why := can_sandbox() or unmet(pol)):
         raise OSError(0, why)
     adapter()[1].exec_service(pol, dirs, port, argv, entry)
+
+
+def exec_installed(pol: dict, argv: list[str]):
+    """An installed service (policy.service_policy) under its own read model: the adapter's installed mode, in this
+    process's environment, which the caller has built from nothing (docs/design/service-ecosystem.md, step 2a)."""
+    if (why := can_sandbox()):
+        raise OSError(0, why)
+    impl = adapter()[1]
+    if not hasattr(impl, "exec_installed"):
+        raise OSError(0, "this sandbox adapter has no mode for installed services")
+    impl.exec_installed(pol, argv)

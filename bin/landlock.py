@@ -203,6 +203,36 @@ def plan(pol: dict, dirs: list, port: int | None = None) -> dict:
             "bind": [int(port)] if port else []}
 
 
+# ---------- installed services (docs/design/service-ecosystem.md, step 2a) ----------
+# A stranger's code reads only these of the system (an allow-list, unlike a project's plan, which reads / minus the
+# denies): /run/systemd/resolve is where Ubuntu's resolv.conf points; /proc whole, since each child needs its own
+# /proc/self (another process's environ stays refused: ptrace rules); the CPU and cgroup files report the CPU count.
+# No /dev/shm (no shared temp): Python's multiprocessing locks don't work inside (docs/service-authors.md)
+SERVICE_SYSTEM_READ = ["/usr", "/bin", "/sbin", "/lib", "/lib64", "/lib32", "/etc", "/run/systemd/resolve", "/proc",
+                       "/sys/devices/system/cpu", "/sys/fs/cgroup"]
+
+
+def plan_installed(pol: dict) -> dict:
+    """The plan of an installed service (policy.service_policy): reads the system's folders above, its own folders and
+    its tools; writes only its writable folders (no shared temp); binds nothing."""
+    inst = pol["installed"]
+    write = [pathlib.Path(os.path.realpath(w)) for w in inst["write"]]
+    read = [pathlib.Path(os.path.realpath(r)) for r in [*inst["read"], *inst["tool_files"], *inst["tool_dirs"]]]
+    system = [pathlib.Path(s) for s in SERVICE_SYSTEM_READ if os.path.exists(s)]
+    return {"read": [*system, *read], "write": write, "devices": [pathlib.Path(d) for d in DEVICES], "bind": []}
+
+
+def exec_installed(pol: dict, argv: list[str]):
+    """Restrict this process to plan_installed and exec argv (looked up on PATH) in this process's environment (the
+    launcher's, built from nothing). Raises OSError when the sandbox can't be applied (nothing was run)."""
+    restrict(plan_installed(pol))
+    try:
+        os.execvpe(argv[0], argv, dict(os.environ))
+    except OSError as e:
+        print(f"sandboxed-run: {argv[0]}: {e.strerror}", file=sys.stderr, flush=True)
+        os._exit(127)
+
+
 # ---------- applying it ----------
 
 def _add_path(fd: int, path: pathlib.Path, access: int) -> None:

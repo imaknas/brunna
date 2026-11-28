@@ -59,5 +59,6 @@
  "this repo has a remote named {name} ({url}), the name brunna's own for the notes has: git -C {path} remote rename {name} <another name>, then run this again (nothing was done)": "這個 repo 有個 remote 叫 {name}({url}),跟 brunna 放筆記用的同名:git -C {path} remote rename {name} <別的名字>,再跑一次這個(什麼都沒做)",
  "The files in the folder stay as they are, not committed: they are yours, or an agent's session's, to commit": "資料夾裡的檔案原樣留著、沒有 commit:由你或 agent 的 session 自己 commit",
  "{path} is there and isn't a repo of brunna's notes: move it away, or give this folder another name, then run this again (nothing was done)": "{path} 已經在那裡,但不是 brunna 放筆記的 repo:把它移開,或替這個資料夾換名字,再跑一次(什麼都沒做)",
- "[10/11] The mirror backup takes no remote such as {origin}, not added to it": "[10/11] mirror-backup 不收 {origin} 這種 remote,沒有加進去"
+ "[10/11] The mirror backup takes no remote such as {origin}, not added to it": "[10/11] mirror-backup 不收 {origin} 這種 remote,沒有加進去",
+ "'{name}' is an installed service's name (brunna service list): pick another name for the project": "「{name}」是已安裝服務的名稱(brunna service list):請幫專案取別的名字"
 }

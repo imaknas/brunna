@@ -67,6 +67,7 @@ policy(name, doc, index) → {
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import sys
 
@@ -622,3 +623,58 @@ def approvals(name: str, mode: str, doc: dict | None = None) -> dict:
     return {"mode": mode, "rules": dict(APPROVALS["work" if mode == "work" else "discuss"]),
             "web_allowed": list(doc.get("network") or []),
             "no_session_domains": list(hubconf.get("lease.no_session_domains", []))}
+
+
+# ---------- installed services (docs/design/service-ecosystem.md, step 2a) ----------
+
+def service_tools() -> dict[str, list[pathlib.Path]]:
+    """The programs an installed service may run besides the system's: uv (one file) and the platform's node (its
+    version folder). {files, dirs, path}: what is read, and the PATH that finds them."""
+    import shutil
+    search = os.pathsep.join([str(hubconf.path("~/.local/bin")), hubconf.LAUNCHD_PATH])
+    files, dirs, path = [], [], []
+    uv = shutil.which("uv", path=search)
+    if uv:
+        files.append(pathlib.Path(uv))
+        path.append(pathlib.Path(uv).parent)
+    nvm = hubconf.nvm_bin()
+    if nvm:
+        dirs.append(pathlib.Path(nvm).parent)
+        path.append(pathlib.Path(nvm))
+    return {"files": files, "dirs": dirs, "path": [*path, pathlib.Path("/usr/bin"), pathlib.Path("/bin")]}
+
+
+def service_policy(entry: dict, phase: str, index: dict | None = None) -> dict:
+    """What an installed service runs under (phase run or setup): the policy dict the adapters' installed mode reads,
+    plus write (its writable folders), read (readable, not writable) and env (its whole environment: nothing of the
+    caller's). A stranger's code: an allow-list of reads (the adapters add the system's own folders), not a
+    sandboxed project's read-most-of-the-disk.
+      run    write state/ and cache/; read code/<commit>/ and the tools
+      setup  write code/<commit>/ and cache/; read the tools; no state, no secrets
+    Its secrets are not here: the launcher adds them to env at run time (never into an argument)."""
+    import installed_services as svc
+    if phase not in ("run", "setup"):
+        raise ValueError(phase)
+    name = entry["name"]
+    f = svc.folders(name, entry["commit"])
+    index = index or {"projects": hubconf.projects()}
+    base = policy(name, {"name": name, "enforce": {"sandbox": True}}, index)
+    tools = service_tools()
+    write = [f["state"], f["cache"]] if phase == "run" else [f["code"], f["cache"]]
+    read = [f["code"]] if phase == "run" else []
+    env = {"PATH": os.pathsep.join(str(p) for p in tools["path"]), "HOME": str(f["home"] if phase == "run" else f["cache"] / "home"),
+           "TMPDIR": str(f["tmp"]), "LANG": os.environ.get("LANG") or "en_US.UTF-8",
+           "XDG_CACHE_HOME": str(f["cache"]), "UV_PYTHON_PREFERENCE": "only-managed",
+           **{k: str(f["cache"] / v) for k, v in CACHE_ENV.items()}}
+    if phase == "run":
+        env[svc.STATE_ENV] = str(f["state"])
+        env[svc.CALLER_ENV] = "owner"   # from the owner's terminal; step 3 sets the consuming project
+    return {**base, "workspace": None, "write": [], "read": [], "env": env, "git_broker": None,
+            # its own fence instead (the adapter's installed mode): no git dir or HEAD file anywhere but its cache,
+            # where uv keeps a .git marker in its sdists bucket; what the owner's tools may open (code, state) never
+            # holds one
+            "git_fence": None,
+            "installed": {"phase": phase, "write": write, "read": read, "tool_files": tools["files"],
+                          "tool_dirs": tools["dirs"], "fence_names": list(GIT_FENCE_NAMES),
+                          "fence_files": list(GIT_FENCE_FILES), "fence_free": [f["cache"]]},
+            "network": DOMAINS + list((entry.get("granted") or {}).get("network") or []), "local_bind": False}

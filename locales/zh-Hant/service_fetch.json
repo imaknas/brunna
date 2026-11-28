@@ -1,0 +1,16 @@
+{
+ "only https:// or ssh addresses are accepted": "只接受 https:// 或 ssh 位址",
+ "not a repository address": "不是 repository 位址",
+ "a ref can't start with -": "ref 不能以 - 開頭",
+ "git failed: {err}": "git 失敗:{err}",
+ "{ref} is not a valid tag or branch name": "{ref} 不是合法的 tag 或分支名稱",
+ "the repository is over {gb} GB": "repository 超過 {gb} GB",
+ "the fetched ref is not a commit": "抓到的 ref 不是 commit",
+ "{file} is over {kb} KB": "{file} 超過 {kb} KB",
+ "{file} is not a file": "{file} 不是檔案",
+ "the code is over {gb} GB": "程式碼超過 {gb} GB",
+ "git took longer than {s} seconds": "git 跑超過 {s} 秒",
+ "the repository has no {file} at its root": "repository 根目錄沒有 {file}",
+ "{file} is not UTF-8": "{file} 不是 UTF-8",
+ "the repository has submodules, which installed services don't support": "repository 有 submodule,安裝的服務不支援"
+}

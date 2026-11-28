@@ -861,7 +861,10 @@ class SystemTempIsNoPlaceForIt(unittest.TestCase):
             "bin/pdf_renderer.py",
             # it names TMPDIR only as an environment name a service's secret may not take (service-ecosystem.md,
             # step 1); it makes no temp folder
-            "bin/service_manifest.py"}
+            "bin/service_manifest.py",
+            # an installed service's TMPDIR is its own cache/tmp, never a temp area (service-ecosystem.md, step 2a):
+            # policy names it, sandboxed-run makes the folder
+            "bin/policy.py", "bin/sandboxed-run"}
     USE = __import__("re").compile(r"tempfile[.](?:mkdtemp|TemporaryDirectory|NamedTemporaryFile|mkstemp|gettempdir|TemporaryFile)[(]"
                                    r"|[$][(]mktemp|[\"' ]/tmp[/\"' ]|/private/tmp|/var/folders|TMPDIR")
     MOVED = __import__("re").compile(r"dir=(?:hubconf[.])?(?:private_tmp[(][)]|STATE\b)")   # both denied to every sandbox

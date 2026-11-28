@@ -3052,7 +3052,7 @@ COMMANDS = {
     "init": cmd_init, "doctor": cmd_doctor, "config": cmd_config, "modules": cmd_modules, "llm": cmd_llm,
     "move-instance": cmd_move_instance,
     "onboard": passthrough("onboard-project.sh"), "connect": passthrough("connect.py"),
-    "recover": passthrough("recover-project.sh"),
+    "recover": passthrough("recover-project.sh"), "service": passthrough("service-cmd.py"),
     "rename": passthrough("rename-project.sh"), "status": passthrough("overview.sh"),
     "first-look": passthrough("first-look.py"),
     "state": passthrough("state.py"),

@@ -1,8 +1,9 @@
 # Writing a service for brunna
 
-> **Draft.** The manifest format below is fixed (version 1) and can be checked today. Installing services
-> (`brunna service add`), calling them from other projects, and asking the owner are designed but not built yet
-> ([docs/design/service-ecosystem.md](design/service-ecosystem.md), steps 2 to 7). This page grows as they land.
+> **Draft.** The manifest format below is fixed (version 1) and can be checked today, and a user can install a
+> service and run its CLI (`brunna service add <url>`, `brunna service run <name>`). Updates, calling a service from
+> other projects, and asking the user are designed but not built yet
+> ([docs/design/service-ecosystem.md](design/service-ecosystem.md), steps 2b to 7). This page grows as they land.
 
 A brunna service is an ordinary repository with three things:
 
@@ -74,14 +75,41 @@ manifest from a brunna checkout:
 bin/py bin/service_manifest.py <your repo>
 ```
 
+## Where it runs
+
+`brunna service add <url> [--ref <tag|branch|commit>]` fetches your repository (nothing from it runs as the user),
+checks the manifest, shows the user what it asks for, asks the user for each required secret, checks out the code and
+runs `setup` in a sandbox. Then `brunna service run <name> -- <args>` runs `cli.run` with those arguments.
+
+Your code runs in a sandbox made for a stranger's code: it reads only the system's own folders, `uv` and `node`, and
+its own folders; it writes only its own folders; it can't use unix sockets (but the system's name resolver) or listen
+on a port. Its environment is built from nothing:
+
+| variable | what |
+|---|---|
+| `BRUNNA_SERVICE_STATE` | your state folder: the only place you write what you keep; `data` paths are relative to it |
+| `HOME` | `<state>/home` |
+| `XDG_CACHE_HOME`, `UV_CACHE_DIR`, `npm_config_cache`, … | your cache folder (not backed up); downloads go here (Hugging Face follows `XDG_CACHE_HOME`) |
+| `TMPDIR` | a temp folder of your own |
+| `BRUNNA_CALLER` | who called: `owner` from the user's terminal; the calling project once step 3 lands |
+| each granted secret | by its name, if the user set it |
+| `PATH`, `LANG` | `uv`, `node`, `/usr/bin`, `/bin` |
+
+- Your code folder is read-only at run time: no `.env` beside the code, no writing a config file there.
+- In setup, the code folder and the cache are writable and the state folder isn't; no secrets are given.
+- On macOS, setup has no `git` or compilers (the Command Line Tools aren't readable inside): install from wheels
+  (`uv sync --frozen --no-build`, or a pure-Python project), never from a git dependency.
+- On Linux there is no `/dev/shm`, so Python's `multiprocessing` locks don't work; Linux also can't stop your code
+  from writing a `.git` folder in its own folders, which macOS refuses.
+- Outbound network is open (the user is told so); list the hosts you reach in `network`.
+
 ## Writing the service
 
-- **Your state folder is the only place you write.** Keep your code's folder read-only at run time; caches and data go
-  in the state folder (its path is given to you at run time).
+- **Your state folder is the only place you write** (`BRUNNA_SERVICE_STATE`); caches go in `XDG_CACHE_HOME`.
 - **Lockfiles.** Write setup to install from lockfiles (`uv sync --frozen`, `npm ci --ignore-scripts`). Once installing
   is built, setup will run in a profile of its own, and install scripts will run only if the user allows them.
-- **Who is calling.** Each call carries `BRUNNA_CALLER`, the project that called, so you can attribute cost or limit
-  use. Never trust a caller name sent in a tool's arguments.
+- **Who is calling.** Each call carries `BRUNNA_CALLER`, so you can attribute cost or limit use. Never trust a
+  caller name sent in a tool's arguments.
 - **Interface versions.** Callers pin your `interface` major. Adding a tool or an optional argument keeps it; removing
   or changing one raises it.
 - **Long work.** A tool call should return quickly. For work that takes minutes (a review), return an id and offer a

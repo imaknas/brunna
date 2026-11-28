@@ -218,6 +218,11 @@ fi
 if awk -F'\t' -v n="$PROJ_NAME" '$1==n{f=1} END{exit !f}' <<<"$ROSTER"; then
   fail "$(hub_msg "'{name}' is already in the project registry (projects/{name}.yaml): it cannot be onboarded again. {hint}" name="$PROJ_NAME" hint="$RECOVER_HINT")"
 fi
+# an installed service owns <services_root>/<name> and the party id project:<name> (docs/design/service-ecosystem.md 2a)
+if [ -d "$HUB_CONFIG/services" ] && ls "$HUB_CONFIG/services" 2>/dev/null | tr '[:upper:]' '[:lower:]' \
+     | grep -qxF "$(printf %s "$PROJ_NAME" | tr '[:upper:]' '[:lower:]').yaml"; then
+  fail "$(hub_msg "'{name}' is an installed service's name (brunna service list): pick another name for the project" name="$PROJ_NAME")"
+fi
 if [ ! -e .agent-memory ] && mini_sh "git --git-dir=\"$GO_SH/${PROJ_NAME}-memory.git\" show-ref --verify --quiet refs/heads/agent-memory" 2>/dev/null; then
   fail "$(hub_msg "the hub machine already has {name}-memory.git (with agent-memory history): this name was onboarded before. {hint}" name="$PROJ_NAME" hint="$RECOVER_HINT")"
 fi

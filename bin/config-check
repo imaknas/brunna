@@ -16,6 +16,7 @@ What it validates:
   mirror-list.txt    one git remote per line
   services.tsv       every row has as many columns as the header, labels are unique
   schedule.yaml      readable, job names unique (the old format, during the switch)
+  services/          the installed services' entries (bin/installed_services.py)
 
 When it passes, the tree it validated is recorded in the git directory's config-check-passed.
 """
@@ -35,7 +36,7 @@ import i18n  # noqa: E402
 import names  # noqa: E402
 
 _ = i18n.domain(__file__)
-CONFIG = re.compile(r"^(hub\.json|brunna\.json|models\.env|mirror-list\.txt|services\.tsv|schedule\.yaml|projects/)")
+CONFIG = re.compile(r"^(hub\.json|brunna\.json|models\.env|mirror-list\.txt|services\.tsv|schedule\.yaml|projects/|services/)")
 UNREADABLE = "{settings}: cannot read it ({error})"
 FAILED = "config-check: ✗ {error}"
 
@@ -155,6 +156,18 @@ def check(root: pathlib.Path) -> list[str]:
             elif cols[0] in seen:
                 errs.append(_("services.tsv:{line}: label `{label}` repeated", line=i, label=cols[0]))
             seen.add(cols[0])
+
+    sd = root / "services"
+    if sd.is_dir():
+        import yaml
+        import installed_services
+        for f in sorted(sd.glob("*.yaml")):
+            try:
+                doc = yaml.safe_load(f.read_text())
+            except yaml.YAMLError as e:
+                errs.append(f"services/{f.name}: {e}")
+                continue
+            errs += [f"services/{f.name}: {e}" for e in installed_services.entry_problems(doc, f.stem)]
 
     sy = root / "schedule.yaml"
     if sy.exists():

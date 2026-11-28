@@ -1001,6 +1001,12 @@ def _validate_body(doc: dict, stem: str, top: set[str], runtime_keys: tuple[str,
         # both of the platform's names are kept for it (docs/design/rename-brunna.md): a project under either would
         # take letters addressed to the platform
         errs.append(_("{name} is reserved for the platform itself; pick another name", name=stem))
+    try:   # an installed service owns <services_root>/<name> and the party id project:<name> (service-ecosystem.md 2a)
+        import installed_services
+        if installed_services.fold(stem) in installed_services.names_taken():
+            errs.append(_("{name} is an installed service's name; pick another name", name=stem))
+    except Exception:   # noqa: BLE001 (no services folder to read: no clash)
+        pass
     if doc.get("purpose") is not None and (not isinstance(doc["purpose"], str) or not doc["purpose"].strip()):
         errs.append(_("purpose must be a non-empty string"))
     if doc.get("type") == "idea" and not doc.get("purpose"):

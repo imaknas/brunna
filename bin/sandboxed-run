@@ -9,6 +9,12 @@ Design: docs/design/capabilities.md.
 
   sandboxed-run --project <name> --cwd <dir> [--port <n>] -- <argv…>
   sandboxed-run --project <name> --service <name> --cwd <dir> [--port <n>] --digest <sha256> -- <words…>
+  sandboxed-run --installed <name> --phase run|setup --cwd <dir> -- <argv…>
+
+--installed: an installed service (docs/design/service-ecosystem.md, step 2a; bin/installed_services.py), under its own
+read model (policy.service_policy, the adapters' installed mode). Its environment is built here from nothing (none of
+the caller's variables reach a stranger's code), with its granted secrets read from its secrets folder at run time and
+put in the environment, never in an argument. --cwd must be inside its code folder.
 
 --service: a service the project declares. Its environment and log are read here, from the registry, and applied inside
 the sandbox only (isolation.Entry): no process outside it has the project's variables, and no path of its entry is
@@ -65,9 +71,56 @@ def service_entry(svc: dict, cwd: str, platform_env: dict, git_dirs: list[str]):
     return isolation.Entry(env, there, svc.get("log"))
 
 
+def installed(name: str, phase: str | None, cwd: str, cmd: list[str]) -> int:
+    """An installed service's command under its read model, in an environment of its own."""
+    import installed_services as svc
+    import isolation
+    import policy
+    if phase is None:
+        return refuse("--installed needs --phase run or setup")
+    entry = svc.entries().get(name)
+    if not entry:
+        return refuse(f"{name} is not an installed service")
+    f = svc.folders(name, entry["commit"])
+    real = os.path.realpath(cwd)
+    code = os.path.realpath(f["code"])
+    if not (real == code or real.startswith(code + os.sep)):
+        return refuse(f"{cwd} is not inside {name}'s code folder")
+    pol = policy.service_policy(entry, phase)
+    env = dict(pol["env"])
+    if phase == "run":
+        for secret in (entry.get("granted") or {}).get("secrets") or []:
+            try:   # a file of the owner's, written by brunna service add/secret; never followed if a link
+                fd = os.open(f["secrets"] / secret, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(fd) as fh:
+                    env[secret] = fh.read().rstrip("\n")
+            except FileNotFoundError:
+                continue   # an optional one not set
+            except OSError as e:
+                return refuse(f"{name}'s secret {secret} can't be read ({e.strerror})")
+    for k in ("write", "read"):
+        for d in pol["installed"][k]:
+            pathlib.Path(d).mkdir(parents=True, exist_ok=True, mode=0o700)
+    pathlib.Path(env["HOME"]).mkdir(parents=True, exist_ok=True, mode=0o700)
+    pathlib.Path(env["TMPDIR"]).mkdir(parents=True, exist_ok=True, mode=0o700)
+    try:
+        os.chdir(real)
+    except OSError as e:
+        return refuse(f"{cwd}: {e.strerror}")
+    os.environ.clear()
+    os.environ.update(env)
+    try:
+        isolation.exec_installed(pol, cmd)
+    except OSError as e:
+        return refuse(f"the sandbox could not be applied ({e.strerror or e})")
+    return refuse("the adapter returned without running the command")
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="sandboxed-run", allow_abbrev=False)
-    ap.add_argument("--project", required=True)
+    ap.add_argument("--project")
+    ap.add_argument("--installed")
+    ap.add_argument("--phase", choices=("run", "setup"))
     ap.add_argument("--service")
     ap.add_argument("--digest")
     ap.add_argument("--cwd", required=True)
@@ -82,6 +135,10 @@ def main(argv: list[str]) -> int:
     import isolation
     if (why := isolation.can_sandbox()):
         return refuse(why)
+    if a.installed is not None:
+        return installed(a.installed, a.phase, a.cwd, cmd)
+    if not a.project:
+        return refuse("--project or --installed is required")
     projects = hubconf.projects()
     doc = projects.get(a.project)
     if not doc:

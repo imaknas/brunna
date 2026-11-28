@@ -97,6 +97,12 @@ def config_dir() -> pathlib.Path:
     return _part("CONFIG", "config", ROOT)
 
 
+def services_dir() -> pathlib.Path:
+    """The installed services' entries (<config>/services/<name>.yaml; docs/design/service-ecosystem.md, step 2a): not
+    registry entries, which every walker of the registry would take for projects."""
+    return config_dir() / "services"
+
+
 def data_dir() -> pathlib.Path:
     """Where data lives (digest/, reflect/, todo.md, index.md, review-log.md, openclaw-migration-status.md,
     legacy-paths.tsv)."""

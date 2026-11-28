@@ -1,7 +1,9 @@
 # Services: brunna as the centre of an ecosystem
 
 > brunna session · 2026-11-28 · r4, design. **Built 11-28: step 1** (the contract
-> `contracts/service-manifest.v1.schema.json`, `bin/service_manifest.py`, `docs/service-authors.md`); the rest not.
+> `contracts/service-manifest.v1.schema.json`, `bin/service_manifest.py`, `docs/service-authors.md`) **and step 2a**
+> (`bin/installed_services.py`, `bin/service_fetch.py`, `bin/service-cmd.py` = `brunna service`, `policy.service_policy`,
+> the adapters' installed mode, `sandboxed-run --installed`); the rest not.
 > History: r2 after two blind reviews of r1 (security; fit with the
 > platform): the wiring moved into the platform's own MCP server, installed services got their own folders, outbox and
 > answer path, the manifest can't widen a grant, and egress is said plainly not to be confined yet. r3 after a third
@@ -282,6 +284,12 @@ has two places here.
 
 ## Step 2a, in detail
 
+> **Built 11-28.** As built: the git fence is the profile's own (no `.git` or `HEAD` file anywhere it writes but its
+> cache, where uv keeps a `.git` marker in its sdists bucket), and `/etc`, `/var`, `/tmp` are readable as links only.
+> The review service, added by hand from its GitHub URL in a throwaway instance, set up (`uv sync`) and answered its
+> CLI and its MCP `initialize`, its database in its state folder. The fixture tests pass on macOS and in the Linux
+> container.
+>
 > r2, 11-28, after its blind review (a stranger's code needs its own read model; the fetch hardened; names and
 > secrets tightened; the Linux check scoped to the fixture). Found while mapping the code: a registry entry with no workspace breaks a dozen
 > walkers (`hubconf.py roster` prints `None` as a path, which `gen-index-roster.sh`, `recover-project.sh` and
