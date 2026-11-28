@@ -106,7 +106,8 @@ entirely: they change only through `brunna service add` / an update the owner co
    - `secrets/`: the values the owner put in at add.
 
    The whole `<services_root>/<name>/` (code, state, secrets) is in every other project's and service's read-deny
-   (`policy.other_projects`, which today takes a runtime folder only from an entry with `runtime:`).
+   (`policy.other_projects`, built from `registry.dirs`, which today gives a runtime folder only to an entry with
+   `runtime:`; `dirs()` and `project_data._own_folders` learn `type: service`).
 
    Add refuses a name that is a registered project's former name or the old side of a rename (`hubconf` rename
    records): records for the old name would reach the service, and core §8 delivers to a project only what it may know.
@@ -150,13 +151,18 @@ Identity for service tools rests on the folder alone:
 - the server serves service tools only when its project comes from the folder it was started in;
   `AGENTHUB_PROJECT`, which the server takes at its word outside every project (`mcp_server.resolve_project`), is
   ignored for them;
-- a `brunna mcp` serves service tools only when a positive probe says it is the owner's own unconfined process: it
-  can read the platform's state and secrets folders (`not isolation.reads_blocked()` with at least one of them
-  present), as `owner_terminal.refusal()` already decides. Detecting a sandbox would fail open: on Linux
-  `confined_now` sees only an environment mark, which a runtime's own sandbox (bubblewrap) never sets and a Landlock
-  process can unset, and such a process could chdir to another project's path, which `hubbus.project_of` reads by
-  path alone. A process that passes the probe is the owner's anyway. Tested on both adapters with an unmarked
-  confined process;
+- what keeps a confined process from being served as another project is that it can't start the service: every
+  service's folder (code, secrets) is read-denied to every other project and service (`Confinement`, and the
+  read-deny under "Two kinds of service"), so a nested `bin/sandboxed-run` has nothing to run, even under Landlock,
+  which stacks. On top of that, as defence in depth, `brunna mcp` serves service tools only when a positive probe
+  passes: it can read the platform's state and secrets folders, resolved without their environment overrides
+  (`BRUNNA_STATE`, `BRUNNA_SECRETS` and the old spellings could otherwise point it at folders a sandbox owns), as
+  `owner_terminal.refusal()` decides. A consumer's `brunna mcp` that its runtime starts outside the session's sandbox
+  passes, as intended. Detecting a sandbox instead would fail open (on Linux `confined_now` sees only an environment
+  mark). Tested on both adapters with an unmarked confined process and with a runtime-sandboxed Linux shell (whether
+  Claude Code's Linux `denyRead` hides a folder or mounts an empty one isn't measured);
+- Codex has no confine port: a Codex session in a sandboxed project's folder isn't confined by the platform, so
+  `brunna mcp` serves it no service tools there (the project is sandboxed, the session isn't what the registry says);
 - `callers` binds sandboxed consumers. An unsandboxed consumer's session is the owner's own user and could run
   `bin/sandboxed-run` itself; for it `callers` and the accounting are what the platform does when asked, not a
   guarantee (as for every session a user opens).
