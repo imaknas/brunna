@@ -62,5 +62,8 @@
  "{key} must be a list of texts": "{key} 要是文字清單",
  "{project}'s folder isn't there, so its registry entry can't be read from it": "{project} 的資料夾不在,沒辦法從那裡讀它的登記",
  "yaml can't be read: {e}": "yaml 讀不懂:{e}",
- "yaml must be a mapping of the fields that change": "yaml 要是一個 mapping,列出要改的欄位"
+ "yaml must be a mapping of the fields that change": "yaml 要是一個 mapping,列出要改的欄位",
+ "yaml is over {kib} KiB; send only the fields that change": "yaml 超過 {kib} KiB;只寄要改的欄位",
+ "{project}'s own entry is its file in the platform repo: change it with a commit": "{project} 自己的登記是平台 repo 裡的檔案:用 commit 改",
+ "this server is named to {project} but runs in {here}'s folder: {project}'s registry entry is changed only from its own folder, or from one outside every project": "這個 server 指定給 {project},卻在 {here} 的資料夾裡執行:{project} 的登記只能從它自己的資料夾、或不屬於任何專案的資料夾改"
 }

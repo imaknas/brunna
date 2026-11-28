@@ -32,11 +32,6 @@ def sh(*cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
-def hubconf_hub():
-    import names
-    return names.current("project")
-
-
 class Server(unittest.TestCase):
     def setUp(self):
         t = self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
@@ -121,12 +116,28 @@ class Server(unittest.TestCase):
         _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"}),
                                ("manifest_update", {"yaml": "- not a mapping\n"}),
                                ("manifest_update", {"yaml": "a: [\n"}),
-                               ("manifest_update", {"yaml": ""})])
-        self.assertEqual([e for e, _ in res], [False, True, True, True], res)
-        hub = hubconf_hub()
+                               ("manifest_update", {"yaml": ""}),
+                               ("manifest_update", {"yaml": "a: &x 1\nb: *x\n"}),
+                               ("manifest_update", {"yaml": "k: " + "x" * (100 << 10) + "\n"})])
+        self.assertEqual([e for e, _ in res], [False, True, True, True, True, True], res)
+        import names
+        hub = names.current("project")
         sent = [(s, to, json.loads(p)) for s, to, _r, p in self.events("message")]
         self.assertEqual([(s, to, p["type"], p["text"]) for s, to, p in sent],
                          [("demo", hub, "manifest.update", "commits: conventional\n")], "only the mapping is sent, as demo")
+
+    def test_manifest_update_only_as_the_folder_s_project(self):
+        _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"})], cwd=self.tmp / "ws" / "other",
+                              env={"AGENTHUB_PROJECT": "demo"})
+        self.assertTrue(res[0][0], res)
+        self.assertIn("other", res[0][1])
+        outside = self.tmp / "elsewhere"
+        outside.mkdir()
+        _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"})], cwd=outside,
+                              env={"AGENTHUB_PROJECT": "demo"})
+        self.assertFalse(res[0][0], res)
+        self.assertEqual([(s, json.loads(p)["type"]) for s, _t, _r, p in self.events("message")],
+                         [("demo", "manifest.update")], "only the one from outside every project is sent")
 
     def test_manifest_never_shows_the_folder_s_entry_for_another_project(self):
         shutil.rmtree(self.ws)

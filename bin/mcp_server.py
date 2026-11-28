@@ -426,10 +426,12 @@ TOOLS = [
                                                "(copy a field from manifest and change it). A mapping is merged key by "
                                                "key, a list or a value replaces what was there (send the whole list), "
                                                "<field>: null removes one; with v: it is the whole entry. The platform "
-                                               "checks and applies it within 15 minutes and replies by letter (read it "
-                                               "with inbox). Security fields (type, enforce, network, allow_write, "
-                                               "privacy, metered_models, paths) are returned: those go to the platform "
-                                               "as a request with send, and the owner confirms.",
+                                               "checks and applies it at its next run (about every 15 minutes) and "
+                                               "replies by letter (read it with inbox). Security fields are returned: "
+                                               "type, enforce, network, allow_write, privacy, metered_models, paths, "
+                                               "mailbox.wake, and in jobs: and secrets:, a job with connectors: true or "
+                                               "credentials:, a job's legacy_name, a secret with kind; those go to the "
+                                               "platform as a request with send, and the owner confirms.",
      "inputSchema": {"type": "object", "required": ["yaml"], "properties": {
          "yaml": _str("the fields that change, as YAML (a mapping)")}}},
     {"name": "note", "description": "Add an entry to this project's memory notes for today (what was done, what was "
@@ -637,6 +639,9 @@ def _options(args: dict) -> list[str]:
     return out
 
 
+MANIFEST_CAP = 96 << 10   # under one argument's limit (Linux: 128 KiB) and a sandboxed project's outbox file
+
+
 def mail_args(project: str, name: str, args: dict, run: "Run | None" = None) -> list[str]:
     """The hubbus command for a tool call: single values as --name=value, letter ids after --, so no value is read as an
     option. A run's send is held to its tools' fields (hubbus holds the same line)."""
@@ -648,9 +653,12 @@ def mail_args(project: str, name: str, args: dict, run: "Run | None" = None) -> 
         return ["manifest"]
     if name == "manifest_update":
         text = _text(args, "yaml")
+        if len(text.encode()) > MANIFEST_CAP:
+            raise BadArgs(_("yaml is over {kib} KiB; send only the fields that change", kib=MANIFEST_CAP >> 10))
         import yaml
-        try:
-            doc = yaml.safe_load(text)
+        import registry
+        try:   # read as the platform will read it: no alias (registry.LetterLoader)
+            doc = yaml.load(text, Loader=registry.LetterLoader)
         except yaml.YAMLError as e:
             raise BadArgs(_("yaml can't be read: {e}", e=str(e)[:200]))
         if not isinstance(doc, dict) or not doc:
@@ -749,6 +757,21 @@ def call(project: str | None, why: str, name: str, args: dict, client: "Client |
         cmd = mail_args(project, name, args)
     except BadArgs as e:
         return False, _("wrong arguments: {e}", e=e)
+    if name == "manifest_update":
+        if project == hubconf.hub_project():
+            return False, _("{project}'s own entry is its file in the platform repo: change it with a commit", project=project)
+        # a server named to a project (AGENTHUB_PROJECT) in another project's folder: what that folder's session sends
+        # as the named one would be run by the platform as it (its jobs, services, tests); a folder outside every project
+        # is the named one's to use (as Presence holds it)
+        if names.env("PROJECT"):
+            try:
+                here = hb().project_of(pathlib.Path.cwd())
+            except Exception:
+                here = None
+            if here and here != project:
+                return False, _("this server is named to {project} but runs in {here}'s folder: {project}'s registry entry "
+                                "is changed only from its own folder, or from one outside every project",
+                                project=project, here=here)
     if name == "manifest":
         # the one command that names no project: hubbus finds it from the folder, so it runs only where that folder is
         # this project's (a server named to a project whose folder is gone would otherwise show the one it started in)
