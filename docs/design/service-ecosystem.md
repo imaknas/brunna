@@ -341,15 +341,26 @@ reaches the Docker socket (which can mount home). On Linux, `landlock.plan` read
 `/tmp` included. That is not acceptable for a stranger's code, so `policy.service_policy(entry, phase)` is an
 allow-list:
 
-- **read**: the system's own folders (macOS: `/System`, `/usr`, `/bin`, `/sbin`, `/Library/Frameworks`,
-  `/private/etc`, `/dev` as today's profiles allow; Linux: `/usr`, `/bin`, `/lib*`, `/etc`, `/proc/self`), the
+- **read**: the system's own folders (macOS: `/` itself as a file, `/System`, `/usr`, `/bin`, `/sbin`,
+  `/Library/Frameworks`, `/private/etc`, `/private/var/select`, `/private/var/db/timezone`, `/dev` with the disk
+  devices still denied after it; Linux: `/usr`, `/bin`, `/lib*`, `/etc`, `/run/systemd/resolve` (where Ubuntu's
+  `resolv.conf` points), `/proc` (children need their own `/proc/self/exe`; other processes' environ stays refused),
+  `/sys/devices/system/cpu`, `/sys/fs/cgroup`), the
   platform's Python and the tool installs it runs (`uv`, the nvm node), and the service's own `code/<commit>`,
   `cache/`, `state/` (run) or `code/<commit>`, `cache/` (setup). Nothing else: not home, not `/Users`, `/Volumes`,
   `/tmp` or `/private/var/folders`, not the config, not the registry index;
 - **write**: `state/` and `cache/` (run), `code/<commit>/` and `cache/` (setup); its temp folder is `cache/tmp`
   (`TMPDIR`), never the system's;
-- **no unix sockets** (`(deny network-outbound (remote unix-socket))` on macOS; Linux's seccomp already refuses
-  `socket(AF_UNIX)`); outbound network open (Confinement); no port to bind.
+- **no unix sockets but the resolver's** (macOS: `(deny network-outbound (remote unix-socket))` then an allow of
+  `/private/var/run/mDNSResponder`, without which no name resolves; Linux's seccomp already refuses `socket(AF_UNIX)`
+  and its resolver reads files); outbound network open (Confinement); no port to bind;
+- **no git fence holes**: the Seatbelt git-fence rules apply to the writable folders, so setup can't plant a
+  `.git/config` (with `core.fsmonitor`) that the owner's prompt or editor would run on opening `code/`; Landlock has
+  no fence, so on Linux that stays a stated limit beside "nothing on the owner's side walks `code/`".
+
+No developer tools in setup on macOS: `/usr/bin/git` and compilers are the Command Line Tools' shims and aren't
+readable, so setup that needs to build native code or fetch git dependencies fails and says so (authors' guide).
+Linux has no `/dev/shm` in it (no shared temp), so Python's `multiprocessing` locks don't work; said in the guide.
 
 Both adapters gain this mode: Seatbelt a `service_profile` variant on the model of `pdf_profile` (deny reads by
 default, allow back the list), Landlock a `plan` that reads only the list instead of `/` minus denies, with
@@ -358,12 +369,17 @@ dirs and the readable list), and the conformance probes run against it: the conf
 folder, its own `secrets/` and `repo.git`, the Docker socket all refused; `code/` read but not written at run time.
 The `brunna` CLI can't run inside (it reads the config); a service doesn't need it before step 4, which revisits it.
 
-The environment is built by the launcher, never inherited: `PATH` (the platform's), `HOME` (`state/home`),
+The environment is built by the launcher from nothing: `sandboxed-run --installed` clears `os.environ` (today it
+updates the caller's, and Landlock's `exec_service` starts from it, so the owner's shell tokens would reach a stranger's
+code) and sets only: `PATH` (the platform's), `HOME` (`state/home`),
 `BRUNNA_SERVICE_STATE`, the cache variables, `TMPDIR`, `LANG`, `BRUNNA_CALLER` (step 3; `owner` from the owner's
-terminal), and at run time each granted secret. Secrets are set in the process after the sandbox is applied, never on
-a command line (`seatbelt.entry_argv` puts an `Entry`'s variables in `/usr/bin/env`'s arguments, which `ps` shows):
-the launcher puts them in the environment it execs the sandbox with (inherited, as `pol["env"]` is today), which only
-the owner's own processes can read, never in an argument.
+terminal), and at run time each granted secret. Secrets go in that environment, which the sandboxed process inherits
+through `execv` and only the owner's own processes can read; never in an `Entry` (`seatbelt.entry_argv` puts an
+Entry's variables in `/usr/bin/env`'s arguments, which `ps` shows to everyone). A test checks that a variable set in
+the caller is absent inside, and that no secret is in any process's arguments.
+
+The commands run (`cli.run`, `mcp.run`, `setup`) are copied into the service's entry at add, from the manifest read
+out of `repo.git`; never read back from `code/`, which setup can rewrite.
 
 **Launching.** `bin/sandboxed-run --installed <name> --phase run|setup --cwd <code/<commit>> -- <words>`: it reads the
 service's entry (not the registry), builds `service_policy`, refuses where the machine can't sandbox (exit 78, as
