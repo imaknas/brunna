@@ -440,6 +440,59 @@ that keeps running.
 arguments. On macOS (Seatbelt) in the suite, and in the Linux container (`bin/linux-test`) with the same fixture.
 Once by hand on macOS: the review service from its GitHub URL in a throwaway instance.
 
+## Step 2b, in detail
+
+> r1, 11-29, before its blind review.
+
+**What the entry gains** (`bin/installed_services.py`, copied from the manifest at add and at each update):
+`data` (the manifest's entries, relative to `state/`), `secrets_required` (the granted secrets not marked optional),
+`follow` (`tags` when the service was added at a release tag, else `none`), and `tags` (`{<tag>: <commit>}`: every
+release tag it has been installed at, with the commit it resolved to then). An entry without the new fields reads as
+`follow: none`, no data, no required secrets (2a's entries; none exist on a real install yet).
+
+**Release tags**: `v?MAJOR.MINOR.PATCH` with no suffix, compared as numbers. A pre-release (`-rc1`) or another tag is
+never taken automatically.
+
+**The update check**, platform job `brunna/service-updates` (daily, 04:20, background, `found_exit`), and by hand
+`brunna service update <name> [--ref <tag|branch|commit>] [--yes]`. For each service that follows tags (by hand:
+the one named, whatever it follows):
+
+1. `git ls-remote --tags <url>` (the fetch's rules: no config, bounded, no prompts) lists the release tags and their
+   commits (`^{}` for annotated tags).
+2. **A moved tag stops it**: any tag in `tags` that now names another commit, or is gone, is an alert
+   (`service-update:<name>`) and nothing is updated: a tag that moved is someone rewriting what was granted.
+3. The newest release tag above the installed one (by hand: the ref asked for) is fetched into `repo.git` (the fetch's
+   rules), its manifest read from the object store and checked. Its `name` must be the service's.
+4. **Asking for more waits for the owner.** More is: a model name not granted or a stronger tier, a secret not granted,
+   `principal` true where it was false, a host not in the granted network, or a new `interface` major (its consumers
+   pin the major, step 3). The job then raises the alert (`service-update:<name>`: the version, what it asks for more,
+   and `brunna service update <name>` to grant it), and the installed version keeps running. By hand, the asks are
+   shown and the owner answers, and a new required secret is asked as at add.
+5. **Set up beside**: the new commit is checked out into `code/<new>` (the checkout's rules) and `setup` runs there
+   in the setup profile (`sandboxed-run --installed <name> --phase setup --commit <new>`: setup only, the commit 40 hex
+   and its folder present), the process group killed after each command. A failure removes `code/<new>`, leaves the
+   entry, and raises the alert.
+6. **Swap**: the entry is rewritten with the new commit, ref, interface, commands, data, `secrets_required` and the
+   tag recorded, and committed. The version before stays in `code/` (a CLI still running in it keeps working, and it
+   is the way back); any older one is removed.
+
+One update or add or remove of a service at a time: each takes a lock on `<services_root>/<name>.lock`
+(`fcntl.flock`, beside the service's folder, never in it, where the service could hold it).
+
+**Backup** (`bin/backup.py`): `included()` adds, for each installed service, `state/<path>` of each `data` entry with
+backup not false (resolved, only if it is a real folder or file inside `state/`, no link on the way, the 2a folder
+check), and the service's `secrets/` folder (like the platform's secrets, encrypted in the backup). Code, cache and
+`repo.git` are never taken: they are fetched or made again.
+
+**Secrets check** (`bin/check-secrets.py`, daily): each installed service's `secrets_required` must have its file in
+`secrets/` (a real file, `0600`, not empty), else a problem in the same alert as the projects' ("{service}: secret
+{name} is not set: brunna service secret {service} {name}"). An optional one isn't checked.
+
+**Tests**: a fixture repo with tags `v1.0.0` and `v1.1.0`: added at `v1.0.0`, the job takes `v1.1.0` (set up beside,
+swapped, the old kept); a `v1.2.0` that adds a secret is not taken and alerts; a moved `v1.0.0` alerts and takes
+nothing; a failing setup leaves the entry at the old commit; `-rc` and other tags ignored; backup's `included()` lists
+the declared state data and secrets, not code or cache; a missing required secret is a problem, an optional one isn't.
+
 ## Steps
 
 Each gets its own blind review before it is built.
