@@ -1958,6 +1958,14 @@ def cmd_apply_updates() -> int:
         p = json.loads(pl or "{}")
         if p.get("type") != "manifest.update":
             continue
+        if sender in names.all("project"):   # never a file in registry_dir() the platform doesn't read for itself
+            why = _("{hub}'s own registry entry is its file in the platform repo ({file}): change it with a "
+                    "commit; a manifest.update doesn't reach it", hub=sender,
+                    file=hubconf.platform_registry().relative_to(hubconf.ROOT))
+            reply(sender, mid, _("manifest.update was not applied; the registry is unchanged:\n- {errors}", errors=why),
+                  _("returned: {errors}", errors=why[:200]))
+            print(_("{sender}: manifest.update {mid} returned ({n} {n:problem|problems})", sender=sender, mid=mid, n=1))
+            continue
         f = hubconf.registry_dir() / f"{sender}.yaml"
         sent = cur = None
         try:   # one letter is returned, whatever is wrong with it; it never stops the others

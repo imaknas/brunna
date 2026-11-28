@@ -4273,6 +4273,13 @@ def send_one(c, a, sender: str, session, here, boxed: bool = False, mid: str | N
         p["point"] = point
     if a.type in OWNER_ONLY and a.to != OWNER_ADDRESS:
         refuse(_("hubbus: {type} can only be sent to {alias}", type=a.type, alias=OWNER_ALIAS))
+    if a.type == "manifest.update":
+        if sender in names.all("project"):   # registry.py apply-updates writes only registry_dir(), never the repo's file
+            refuse(_("hubbus: {hub}'s own registry entry is its file in the platform repo ({file}): change it "
+                     "with a commit, not a manifest.update",
+                     hub=sender, file=hubconf.platform_registry().relative_to(hubconf.ROOT)))
+        if a.to not in names.all("project"):
+            refuse(_("hubbus: a manifest.update goes to {hub} (the platform applies it there)", hub=hubconf.hub_project()))
     if a.type == "drop" and not (a.task or a.question):
         refuse(_("hubbus: drop needs --task <key> or --question <id> (which task/question is no longer needed)"))
     if a.question:

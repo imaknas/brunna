@@ -113,6 +113,57 @@ class WholeEntry(Instance):
         self.assertEqual(self.entry_file.read_text(), before)
 
 
+class TheHubsOwnEntry(Instance):
+    """The platform's own entry is its file in the repo, which apply-updates never writes: a manifest.update from it is
+    refused when sent, and one already on the bus is returned, never written into the registry folder as answered."""
+
+    def send(self, *argv):
+        return subprocess.run([sys.executable, str(BIN / "hubbus"), "send", *argv], env=self.env, cwd=self.tmp,
+                              capture_output=True, text=True, timeout=60)
+
+    def messages(self):
+        c = sqlite3.connect(self.tmp / "bus" / "bus.db")
+        try:
+            return c.execute("SELECT id, source, to_project, payload FROM events WHERE type='message' ORDER BY seq").fetchall()
+        except sqlite3.OperationalError:   # no bus yet: nothing was ever sent
+            return []
+        finally:
+            c.close()
+
+    def test_sent_by_the_hub_or_to_another_project_it_is_refused(self):
+        for what, argv in (("from the hub", ("--from", HUB, "--to", HUB)), ("to a project", ("--from", "open", "--to", "open"))):
+            with self.subTest(what):
+                r = self.send(*argv, "--type", "manifest.update", "--text", "commits: conventional\n")
+                self.assertNotEqual(r.returncode, 0, r.stdout)
+                self.assertIn("manifest.update", r.stderr)
+        self.assertIn("commit", self.send("--from", HUB, "--to", HUB, "--type", "manifest.update", "--text", "a: 1").stderr)
+        self.assertEqual(self.messages(), [])
+
+    def test_one_on_the_bus_from_the_hub_is_returned(self):
+        self.run_cli(BIN / "hubbus", "send", "--from", "open", "--to", HUB, "--type", "manifest.update", "--text",
+                     "commits: conventional\n")
+        c = sqlite3.connect(self.tmp / "bus" / "bus.db")
+        try:
+            with c:
+                c.execute("UPDATE events SET source=? WHERE type='message'", (HUB,))
+        finally:
+            c.close()
+        before = self.entry_file.read_text()
+        self.run_cli(BIN / "registry.py", "apply-updates")
+        self.assertFalse((self.tmp / "config" / "projects" / f"{HUB}.yaml").exists(), "no file the platform never reads")
+        self.assertEqual(self.entry_file.read_text(), before)
+        replies = [(s, to, json.loads(pl)["text"]) for _i, s, to, pl in self.messages()[1:]]
+        self.assertEqual(len(replies), 1, replies)
+        self.assertEqual(replies[0][:2], (HUB, HUB))
+        self.assertIn("not applied", replies[0][2])
+        self.assertIn("commit", replies[0][2])
+        c = sqlite3.connect(self.tmp / "bus" / "bus.db")
+        try:
+            self.assertEqual(c.execute("SELECT COUNT(*) FROM events WHERE type='message.done'").fetchone()[0], 1)
+        finally:
+            c.close()
+
+
 class NothingStopsTheOthers(Instance):
     """A letter that can't be written, or whose reply can't be sent as it is, is returned like any other."""
 
