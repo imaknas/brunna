@@ -760,7 +760,7 @@ def call(project: str | None, why: str, name: str, args: dict, client: "Client |
     if name == "manifest_update":
         if project == hubconf.hub_project():
             return False, _("{project}'s own entry is its file in the platform repo: change it with a commit", project=project)
-        # a server named to a project (AGENTHUB_PROJECT) in another project's folder: what that folder's session sends
+        # a server named to a project (its PROJECT variable) in another project's folder: what that folder's session sends
         # as the named one would be run by the platform as it (its jobs, services, tests); a folder outside every project
         # is the named one's to use (as Presence holds it)
         if names.env("PROJECT"):
