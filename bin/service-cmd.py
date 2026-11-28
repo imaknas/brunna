@@ -47,7 +47,6 @@ _ = i18n.domain(__file__)
 
 BIN = pathlib.Path(__file__).resolve().parent
 SETUP_TIMEOUT = 1800
-ALLOW_LOCAL = svc.names.ENV_NEW + "SERVICE_ALLOW_LOCAL"   # tests: a local path or file:// URL may be fetched
 
 
 def say(msg: str) -> None:
@@ -277,7 +276,7 @@ def cmd_add(args: list[str]) -> int:
             return err(_("usage: brunna service add <url> [--ref <tag|branch|commit>] [--yes]"))
     if not url:
         return err(_("usage: brunna service add <url> [--ref <tag|branch|commit>] [--yes]"))
-    allow_local = os.environ.get(ALLOW_LOCAL) == "1"
+    allow_local = svc.names.env("SERVICE_ALLOW_LOCAL") == "1"
     stage = pathlib.Path(__import__("tempfile").mkdtemp(prefix="service-add-", dir=hubconf.private_tmp()))
     try:
         return _add(url, ref, yes, allow_local, stage)
@@ -348,7 +347,7 @@ def _newer(entry: dict, rel: dict[str, str]) -> str | None:
 
 def update_one(name: str, ref: str | None = None, yes: bool = False, auto: bool = False) -> list[str] | None:
     """Update one service; the problems (empty: current, or updated; None: not checked, its alert left as it is)."""
-    allow_local = os.environ.get(ALLOW_LOCAL) == "1"
+    allow_local = svc.names.env("SERVICE_ALLOW_LOCAL") == "1"
     entry = svc.entries().get(name)
     if not entry:
         return [_("{name} is not an installed service", name=name)]
