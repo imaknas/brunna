@@ -206,10 +206,9 @@ cost shows against the project that asked.
   Confining it (a platform proxy that allows the granted domains; on macOS remote IP denied except the proxy's port,
   on Linux Landlock's TCP-connect rules, ABI ≥ 4) is step 7, and the services list (`docs/services.md`) lists others'
   services only after it.
-- **Setup** runs another person's code (`npm` lifecycle scripts, Python builds) with network to package registries. It
-  runs in a profile of its own: the new version's folder and the service's caches writable, no secrets, no state, no
-  platform mail. Lockfiles are required (`uv sync --frozen`, `npm ci`); `--ignore-scripts` unless the owner granted
-  scripts at add.
+- **Setup** runs another person's code (`npm` lifecycle scripts, Python builds, any command the manifest lists) with
+  outbound network. It runs in a profile of its own: the new version's folder and the service's caches writable, no
+  secrets, no state, no platform mail; inside it, it is unrestricted.
 - **What reaches consumers**: tool descriptions and results go into every consuming session's context; the rules call
   them data, and a service's name and tools are shown at add.
 
@@ -442,56 +441,69 @@ Once by hand on macOS: the review service from its GitHub URL in a throwaway ins
 
 ## Step 2b, in detail
 
-> r1, 11-29, before its blind review.
+> r2, 11-29, after its blind review (nothing blocking): the lock moved out of every sandbox's reach and taken shared by
+> `run`; the backup takes `state/` itself; asking for more includes a secret turned required and any interface change;
+> `scripts` dropped as a grant (nothing could enforce it); each update fetches into a fresh repo by the tag's full
+> name and checks the commit `ls-remote` gave; a killed run cleans up; the kept version is for running processes.
 
-**What the entry gains** (`bin/installed_services.py`, copied from the manifest at add and at each update):
-`data` (the manifest's entries, relative to `state/`), `secrets_required` (the granted secrets not marked optional),
-`follow` (`tags` when the service was added at a release tag, else `none`), and `tags` (`{<tag>: <commit>}`: every
-release tag it has been installed at, with the commit it resolved to then). An entry without the new fields reads as
-`follow: none`, no data, no required secrets (2a's entries; none exist on a real install yet).
+**What the entry gains** (`bin/installed_services.py`, copied from the manifest at add and at each update): `data`
+(the manifest's entries, relative to `state/`), `secrets_required` (the granted secrets not marked optional),
+`follow` (`tags` when added at a release tag that `ls-remote` confirms is one, else `none`), `tags` (`{<tag>: <commit>}`
+of every release tag installed, with the commit then), and `previous` (the commit before, kept for processes still
+running in it; never a way back, since `state/` may have been migrated forward). `granted.scripts` is dropped: setup is
+whatever commands the manifest lists, run unrestricted inside the setup profile, and the guide says so.
 
-**Release tags**: `v?MAJOR.MINOR.PATCH` with no suffix, compared as numbers. A pre-release (`-rc1`) or another tag is
-never taken automatically.
+**Release tags**: `v?MAJOR.MINOR.PATCH` with no suffix, compared as numbers; two tags of the same version
+(`v1.0.0`, `1.0.0`) naming different commits stop the check. A pre-release or another tag is never taken
+automatically.
 
-**The update check**, platform job `brunna/service-updates` (daily, 04:20, background, `found_exit`), and by hand
-`brunna service update <name> [--ref <tag|branch|commit>] [--yes]`. For each service that follows tags (by hand:
-the one named, whatever it follows):
+**The update check**, platform job `brunna/service-updates` (daily 04:35, background, `found_exit`), and by hand
+`brunna service update <name> [--ref <tag|branch|commit>] [--yes]`. For each service that follows tags (by hand: the
+one named):
 
-1. `git ls-remote --tags <url>` (the fetch's rules: no config, bounded, no prompts) lists the release tags and their
-   commits (`^{}` for annotated tags).
-2. **A moved tag stops it**: any tag in `tags` that now names another commit, or is gone, is an alert
-   (`service-update:<name>`) and nothing is updated: a tag that moved is someone rewriting what was granted.
-3. The newest release tag above the installed one (by hand: the ref asked for) is fetched into `repo.git` (the fetch's
-   rules), its manifest read from the object store and checked. Its `name` must be the service's.
-4. **Asking for more waits for the owner.** More is: a model name not granted or a stronger tier, a secret not granted,
-   `principal` true where it was false, a host not in the granted network, or a new `interface` major (its consumers
-   pin the major, step 3). The job then raises the alert (`service-update:<name>`: the version, what it asks for more,
-   and `brunna service update <name>` to grant it), and the installed version keeps running. By hand, the asks are
-   shown and the owner answers, and a new required secret is asked as at add.
-5. **Set up beside**: the new commit is checked out into `code/<new>` (the checkout's rules) and `setup` runs there
-   in the setup profile (`sandboxed-run --installed <name> --phase setup --commit <new>`: setup only, the commit 40 hex
-   and its folder present), the process group killed after each command. A failure removes `code/<new>`, leaves the
-   entry, and raises the alert.
-6. **Swap**: the entry is rewritten with the new commit, ref, interface, commands, data, `secrets_required` and the
-   tag recorded, and committed. The version before stays in `code/` (a CLI still running in it keeps working, and it
-   is the way back); any older one is removed.
+1. `git ls-remote --tags <url>` (the fetch's rules) lists release tags and their commits (`^{}` for annotated). An
+   ssh URL needs the owner's agent, which the scheduler doesn't have: such a service is checked by hand only, and the
+   job says so once.
+2. **A moved or deleted tag stops it** (an alert, nothing updated): someone rewrote what was granted. By hand, the
+   owner sees it and an update with `--ref` replaces `tags` with the one taken.
+3. The newest release tag above the installed one (by hand: the ref asked for) is fetched **into a fresh staging repo**
+   under `hubconf.private_tmp()` by its full name (`refs/tags/<tag>`), and the commit must be the one `ls-remote` gave;
+   the manifest is read from it and checked; its `name` must be the service's.
+4. **Asking for more waits for the owner**: a model not granted or a stronger tier, a secret not granted, a granted
+   secret turned required that isn't set, `principal` true, a host not in the granted network, any change of
+   `interface`. The job raises `service-update:<name>` (the version, what more it asks, `brunna service update
+   <name>`); by hand the asks are shown, the owner answers, and a new required secret is asked.
+5. **Set up beside**, under the service's lock: any `code/<c>` that is neither the current nor the previous commit
+   (left by a killed run) is removed; the commit is checked out into `code/<new>`; `setup` runs there
+   (`sandboxed-run --installed <name> --phase setup --commit <new>`: setup only, 40 hex, the folder must exist and is
+   never made by this mode), each command in its own process group, killed after it and on SIGTERM. A failure
+   removes `code/<new>`, leaves the entry and raises the alert.
+6. **Swap**: the staging repo replaces `repo.git`; the entry gets the new commit, ref, interface, commands, data,
+   `secrets_required`, the tag, and `previous`; it is committed; any code folder older than `previous` is removed.
+   The job closes `service-update:<name>` for each service that is current again and for removed ones.
 
-One update or add or remove of a service at a time: each takes a lock on `<services_root>/<name>.lock`
-(`fcntl.flock`, beside the service's folder, never in it, where the service could hold it).
+**The lock**: `<state>/services/<name>.lock` in the platform's state (no sandbox reads it), `fcntl.flock`: add, update
+and remove take it exclusively with a bounded wait (`LOCK_NB`, retried for a minute, then they stop and say so);
+`run` takes it shared, so a swap or remove never happens under a running CLI. The entry is read again after the lock
+is taken.
 
-**Backup** (`bin/backup.py`): `included()` adds, for each installed service, `state/<path>` of each `data` entry with
-backup not false (resolved, only if it is a real folder or file inside `state/`, no link on the way, the 2a folder
-check), and the service's `secrets/` folder (like the platform's secrets, encrypted in the backup). Code, cache and
-`repo.git` are never taken: they are fetched or made again.
+**The folder check** moves into `installed_services.own_folder()` (2a's, from `sandboxed-run`), so the backup uses it
+too.
 
-**Secrets check** (`bin/check-secrets.py`, daily): each installed service's `secrets_required` must have its file in
-`secrets/` (a real file, `0600`, not empty), else a problem in the same alert as the projects' ("{service}: secret
-{name} is not set: brunna service secret {service} {name}"). An optional one isn't checked.
+**Backup** (`bin/backup.py`): for each installed service, `state/` itself (its parent is the owner's folder, which
+the service can't write, so no link on the way can lead elsewhere), excluding each `data` entry with `backup: false`,
+and its `secrets/`. Code, cache and `repo.git` never. A hard link from a denied file into `state/` is refused by the
+read model (measured on macOS; Landlock's refer right on Linux), and a test probes it. `bin/check-data.py` measures
+each service's `state/` with a cap (20 GB) and reports one over it; the backup skips a service over the cap.
 
-**Tests**: a fixture repo with tags `v1.0.0` and `v1.1.0`: added at `v1.0.0`, the job takes `v1.1.0` (set up beside,
-swapped, the old kept); a `v1.2.0` that adds a secret is not taken and alerts; a moved `v1.0.0` alerts and takes
-nothing; a failing setup leaves the entry at the old commit; `-rc` and other tags ignored; backup's `included()` lists
-the declared state data and secrets, not code or cache; a missing required secret is a problem, an optional one isn't.
+**Secrets check** (`bin/check-secrets.py`): each service's `secrets_required` has a real, non-empty `0600` file in
+`secrets/`, else a problem in the same alert ("{service}: secret {name} is not set: brunna service secret {service}
+{name}").
+
+**Tests**: a fixture repo with tags: added at `v1.0.0`, `v1.1.0` taken (set up beside, swapped, previous kept), a
+`v1.2.0` that adds a secret alerts and is not taken, a moved `v1.0.0` alerts, a failing setup leaves the entry, `-rc`
+ignored, `v1.0.0`/`1.0.0` conflict stops it; backup's list holds `state/` and `secrets/`, not code or cache; a missing
+required secret is a problem, an optional one isn't; the hard-link probe; a shared lock held by `run` blocks remove.
 
 ## Steps
 
