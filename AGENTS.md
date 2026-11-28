@@ -81,7 +81,9 @@ brunna is meant for anyone, with any coding agent, any LLM, any key.
   instance directory (default `~/.brunna`: config is a local git repo, data, secrets); the hub root holds nothing of
   the user's. New code always goes through these and never builds paths itself (the ratchet blocks it)
 - **The platform's CLI is `brunna`** (`bin/hub` is the old name and forwards to it). `brunna install-cli` puts it on
-  PATH; project sessions use `brunna send/inbox/done/…`, `brunna merge-branch`, `brunna cap-run`, `brunna complete`,
+  PATH; project sessions use `brunna send/inbox/done/…`, `brunna manifest` (the folder's own project's registry entry,
+  as a manifest.update is merged onto it: read from the registry file, never another project's; `hubbus
+  cmd_manifest`), `brunna merge-branch`, `brunna cap-run`, `brunna complete`,
   `brunna agent` (a project's declared confined agent call, docs/design/project-agent-calls.md), `brunna pdf` (a
   sandboxed project's page printed to PDF by the platform's headless browser, capability `pdf`, `bin/pdf_renderer.py`,
   docs/design/capabilities.md "pdf"), `brunna push` (a

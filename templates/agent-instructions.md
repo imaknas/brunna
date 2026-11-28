@@ -147,7 +147,7 @@ no longer needed), close it, or {{assistant}} keeps showing it as "waiting for y
   and explanations, never default values. When a value is missing or no longer works, fail visibly and notify someone;
   **never degrade silently** (switching to other credentials, another model or service): that is an invisible failure.
 - **Which credentials this project uses is declared in the platform's project registry** (this project's entry;
-  `brunna status <project>` shows it), under `secrets:` (name, location and expiry only, **never the value**); the
+  `brunna manifest` shows it, run in this project's folder), under `secrets:` (name, location and expiry only, **never the value**); the
   platform checks every day that each one exists, is backed up and is not about to expire, and alerts on problems.
   The platform's confined agent runs of this project (agent jobs with `allow:`, mail handlers) can't read or write the
   declared ones (or a copy of one at the same path anywhere in the project) with their file tools; a script a
@@ -156,8 +156,8 @@ no longer needed), close it, or {{assistant}} keeps showing it as "waiting for y
   `brunna send --to brunna --type manifest.update --text "<the changed fields>"`.
   It is merged into the entry: a mapping key by key, while a list (`secrets:`, `services:`, `jobs:`, `tests:`) or a
   value replaces what was there, so send the whole list; `<field>: null` removes a field. Leave `v:` out:
-  a letter with `v:` is the whole entry and replaces it. The platform's reply shows the
-  changed fields as they now stand: keep it in your notes for the next change. The result is returned if it doesn't
+  a letter with `v:` is the whole entry and replaces it. `brunna manifest` prints the entry as a letter is merged
+  onto it: copy a list from it, change it, and send that one field back. The result is returned if it doesn't
   validate; `type`, `enforce`, `network`, `allow_write`, `privacy`, `metered_models`, `paths` are security fields, and
   a letter that changes them is returned whole: instead write to brunna with `--type request` and explain why, and
   {{owner}} confirms.

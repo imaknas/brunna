@@ -37,7 +37,7 @@ class Instance(unittest.TestCase):
         for d in ("home", "config/projects", "data", "secrets", "bus", "state/shared/registry", "ws/open"):
             (t / d).mkdir(parents=True)
         cfg = {"owner": {"name": "alex", "tag": "Alex"}, "owner_side": "builtin", "bus_dir": str(t / "bus"),
-               "registry_dir": "projects", "workspace_root": str(t / "ws"), "runtime": {"default": "none"},
+               "registry_dir": "projects", "workspace_root": str(t / "ws"), "services_root": str(t / "services"), "runtime": {"default": "none"},
                "language": {"ui": "en", "content": "en"}}
         (t / "config" / "hub.json").write_text(json.dumps(cfg))
         self.write_entry(ENTRY)
@@ -187,6 +187,102 @@ class PartOfTheEntry(Instance):
         reply = self.update(yaml.safe_dump({"tests": [{"tier": "unit", "when": ["merge"]}]}))
         self.assertIn("not applied", reply)
         self.assertEqual(self.entry_file.read_text(), before)
+
+
+class ReadBack(Instance):
+    """`brunna manifest` (hubbus manifest): the entry of the project the folder belongs to, as a letter is merged onto
+    it. What it prints, sent back whole or one field of it, changes nothing: a project copies from it."""
+
+    ENTRIES = {
+        "plain": ENTRY,
+        "v1": {k: v for k, v in ENTRY.items() if k != "tests"} | {"v": 1, "runtime": {"test": "sh test.sh"}},
+        "services": {**ENTRY, "services": [{"name": "web", "run": "sh serve.sh", "keepalive": True,
+                                            "expose": {"local_port": 18555}}],
+                     "jobs": [{"name": "tidy", "run": "sh tidy.sh", "at": "03:00"}]},
+        "sandboxed": {**ENTRY, "enforce": {"sandbox": True}, "privacy": {"reflection": "exclude"},
+                      "mailbox": {"escalate": True, "wake": False},
+                      "secrets": [{"name": "api", "path": "~/workspace/open/.env", "env_key": "API_KEY",
+                                   "expires": "2027-01-31"}]},
+    }
+
+    def setUp(self):
+        super().setUp()
+        self.ws = self.tmp / "home" / "workspace" / "open"
+        self.ws.mkdir(parents=True)
+        (self.tmp / "services" / "open").mkdir(parents=True)   # a v1 entry with runtime: its folder must be there
+
+    def use(self, doc: dict):
+        self.write_entry(doc)
+        (self.tmp / "state" / "shared" / "registry" / "index.json").write_text(json.dumps({"projects": {"open": doc}}))
+
+    def manifest(self, cwd=None) -> subprocess.CompletedProcess:
+        return subprocess.run([sys.executable, str(BIN / "hubbus"), "manifest"], env=self.env, cwd=cwd or self.ws,
+                              capture_output=True, text=True, timeout=60)
+
+    # run in the scratch instance (its settings, not this checkout's): each part through registry.manifest_update
+    CHECK = """
+import json, sys, yaml
+sys.path.insert(0, sys.argv[1])
+import registry, tiers
+doc, printed = json.loads(sys.argv[2]), yaml.load(sys.stdin.read(), Loader=registry.LetterLoader)
+out = []
+for part in [printed, *({k: v} for k, v in printed.items() if k not in ("v", "name"))]:
+    new, errs = registry.manifest_update(part, "open", doc, {"projects": {"open": doc}})
+    out.append({"part": sorted(part), "errs": errs, "same": new == tiers.upgrade(doc), "printed": printed == tiers.upgrade(doc)})
+print(json.dumps(out))
+"""
+
+    def test_what_it_prints_sent_back_changes_nothing(self):
+        for what, doc in self.ENTRIES.items():
+            with self.subTest(what):
+                self.use(doc)
+                r = self.manifest()
+                self.assertEqual(r.returncode, 0, r.stderr)
+                self.assertIn("manifest.update", r.stderr, "how to change it, beside the entry")
+                c = subprocess.run([sys.executable, "-c", self.CHECK, str(BIN), json.dumps(doc)], input=r.stdout,
+                                   env=self.env, cwd=self.tmp, capture_output=True, text=True, timeout=60)
+                self.assertEqual(c.returncode, 0, c.stderr)
+                for got in json.loads(c.stdout):
+                    self.assertEqual((got["errs"], got["same"], got["printed"]), ([], True, True), got["part"])
+
+    def test_through_the_bus_it_changes_nothing(self):
+        self.use(self.ENTRIES["sandboxed"])
+        before = self.entry_file.read_text()
+        self.assertIn("changed nothing", self.update(self.manifest().stdout))
+        self.assertEqual(self.entry_file.read_text(), before)
+
+    def test_from_a_folder_inside_the_project(self):
+        self.use(ENTRY)
+        (self.ws / "src").mkdir()
+        r = self.manifest(self.ws / "src")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(yaml.safe_load(r.stdout)["name"], "open")
+
+    def test_outside_a_project_it_is_refused(self):
+        r = self.manifest(self.tmp)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("not in a project folder", r.stderr)
+        self.assertEqual(r.stdout, "")
+
+    def test_no_entry_or_an_unreadable_one_is_said(self):
+        self.use(ENTRY)
+        self.entry_file.unlink()
+        r = self.manifest()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("has no registry entry", r.stderr)
+        self.entry_file.write_text("name: open\n  bad: [\n")
+        r = self.manifest()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("cannot read", r.stderr)
+        self.entry_file.write_text("- a list\n")
+        self.assertIn("not a mapping", self.manifest().stderr)
+
+    def test_it_takes_no_other_project(self):
+        self.use(ENTRY)
+        r = subprocess.run([sys.executable, str(BIN / "hubbus"), "manifest", "--project", "other"], env=self.env,
+                           cwd=self.ws, capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(r.stdout, "")
 
 
 class PartsCantDoMore(unittest.TestCase):

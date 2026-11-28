@@ -559,8 +559,9 @@ def policy(name: str, doc: dict, index: dict) -> dict:
 # onboard…)
 MAIL_SUBCOMMANDS = ("send", "inbox", "show", "ack", "done", "thread", "open-questions", "review")
 # pass: a session's word, never a mailbox agent's (not in MAIL_SUBCOMMANDS; a confined run has no mail command at all)
+# manifest: a session reads its own project's registry entry (hubbus cmd_manifest), read-only
 # push: a session asks the platform to push (docs/design/platform-push.md); the command still runs in its sandbox
-SESSION_SUBCOMMANDS = (*MAIL_SUBCOMMANDS, "pass", "merge-branch", "test", "cap-run", "complete", "agent", "pdf", "push")
+SESSION_SUBCOMMANDS = (*MAIL_SUBCOMMANDS, "pass", "manifest", "merge-branch", "test", "cap-run", "complete", "agent", "pdf", "push")
 
 
 def platform_cli() -> list[str]:

@@ -265,5 +265,12 @@
  "{project}: {id} was closed before its replacement came in; the new question goes": "{project}:{id} 在取代它的問題送進來之前就關了;新問題照樣寄出",
  "not checked: the platform can't tell which session this is, so nobody would read a refusal": "沒有檢查:平台認不出這是哪個 session,退回了也沒人看得到",
  "To look at in {project}: its review list, revision {rev}": "{project} 待你看的:它的審閱清單,第 {rev} 版",
- "{question} is already closed; nothing more is sent": "{question} 已經關了;不再寄任何東西"
+ "{question} is already closed; nothing more is sent": "{question} 已經關了;不再寄任何東西",
+ "({project}'s registry entry, as a manifest.update is merged onto it. To change it, send only the fields that change: brunna send --to {hub} --type manifest.update --text \"<YAML>\"; a list is replaced whole, <field>: null removes a field. Security fields, which only {hub} changes ({owner} confirms): {fields})": "({project} 的登記,也就是 manifest.update 合併上去的那份。要改,只寄要改的欄位:brunna send --to {hub} --type manifest.update --text \"<YAML>\";清單整份替換,<欄位>: null 刪掉一個欄位。安全欄位只有 {hub} 能改({owner} 確認):{fields})",
+ "hubbus: not in a project folder: `brunna manifest` shows the entry of the project you are in": "hubbus:不在專案資料夾裡:`brunna manifest` 顯示你所在專案的登記",
+ "hubbus: {project}'s registry entry is not a mapping; write to {hub}": "hubbus:{project} 的登記不是 mapping;請寫信給 {hub}",
+ "({project}'s own entry: its file in the platform repo, changed by a commit)": "({project} 自己的登記:在平台 repo 裡的檔案,用 commit 改)",
+ "this folder's project's registry entry, as a manifest.update is merged onto it": "這個資料夾所屬專案的登記(manifest.update 合併上去的那份)",
+ "hubbus: {project} has no registry entry": "hubbus:{project} 沒有登記",
+ "hubbus: cannot read {project}'s registry entry ({e}); write to {hub}": "hubbus:讀不到 {project} 的登記({e});請寫信給 {hub}"
 }

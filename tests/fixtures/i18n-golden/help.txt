@@ -118,6 +118,7 @@ owner(你本人;不是專案 session 的指令):
                         (防的是例行或不小心的使用;沙盒專案的 session 照設計碰不到 gh 的憑證,Keychain 這點還待確認)
 專案的 session 用的(規則檔裡寫的就是這些;權限規則只放行這幾個,不放行上面的管理指令):
   brunna send | inbox | show | ack | pass | done | thread | open-questions | review …   = 專案信箱(bin/hubbus 同名的子指令)
+  brunna manifest          這個資料夾所屬專案的登記,manifest.update 合併上去的那份(唯讀;= bin/hubbus manifest)
   brunna merge-branch …    = bin/merge-branch(平行 session 的合併閘門)
   brunna test [--tier T] [--when M] [--force] [--rev R | --index]
                         = bin/test-runner.py:在匯出的 tree 跑專案宣告的測試層,記錄過的通過直接沿用
@@ -142,12 +143,13 @@ $ <HUB>/bin/hubbus --help
 [exit 0]
 --- stdout
 usage: hubbus [-h]
-              {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses} ...
+              {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,manifest,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses} ...
 
 brunna 的事件匯流排:只 append 的事件 log + 讀取游標,專案信箱是它的投影。
 
 positional arguments:
-  {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses}
+  {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,manifest,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses}
+    manifest            這個資料夾所屬專案的登記(manifest.update 合併上去的那份)
     record-publish      stdin:一個 0.4 record 或陣列;寄給 owner(往助理)。輸出每筆 {id: record id, event: 事件 id 或 null, status}
 
 options:

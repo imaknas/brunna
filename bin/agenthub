@@ -113,6 +113,8 @@ owner (you; not commands for project sessions):
 for project sessions (these are what the rules files name; the permission rules allow only these, not the admin commands above):
   brunna send | inbox | show | ack | pass | done | thread | open-questions | review …   = the project mailbox (bin/hubbus
                         subcommands of the same name)
+  brunna manifest          this folder's project's registry entry, as a manifest.update is merged onto it
+                        (read-only; = bin/hubbus manifest)
   brunna merge-branch …    = bin/merge-branch (the merge gate for parallel sessions)
   brunna test [--tier T] [--when M] [--force] [--rev R | --index]
                         = bin/test-runner.py: the project's declared test tiers in an exported tree, a recorded pass
@@ -2988,7 +2990,7 @@ def cmd_push_setup(argv: list[str]) -> int:
 # subcommands for project sessions (any coding agent): the same list as policy.platform_cli() (the permission rules
 # allow only these)
 SESSION_COMMANDS = {**{c: ("hubbus", c) for c in ("send", "inbox", "show", "ack", "pass", "done", "thread", "open-questions",
-                                                   "review")},
+                                                   "review", "manifest")},
                     "merge-branch": ("merge-branch", None), "test": ("test-runner.py", None),
                     "cap-run": ("hub-run", None),
                     "complete": ("hub-run", "--complete"), "agent": ("hub-run", "--agent"), "pdf": ("hub-run", "--pdf")}
