@@ -79,8 +79,8 @@ The manifest's fields are their own shapes, not the registry's: `secrets` have n
 service's state folder and writes the registry's `{name, path}`), `data` paths are relative (install resolves them).
 Unknown keys are refused; a later version adds them.
 
-**The manifest asks; the owner grants; the registry holds the grant.** `type: service` entries refuse manifest.update
-entirely: they change only through `brunna service add` / an update the owner confirmed. On the owner's own projects
+**The manifest asks; the owner grants; the service's entry holds the grant.** An installed service's entry is not a
+registry entry (step 2a below) and no letter changes it: only `brunna service add` / an update the owner confirmed. On the owner's own projects
 (kind 1 below), the new security fields join `PLATFORM_OWNED` (`registry.py`): `callers` and `principal`.
 
 ## Two kinds of service
@@ -90,9 +90,9 @@ entirely: they change only through `brunna service add` / an update the owner co
    platform reads `brunna-service.yaml` from the project's main branch through `project_git`, as the project). Its
    sandbox setting stays the owner's choice.
 2. **An installed service** (someone else's, or the owner's on another person's machine): `brunna service add <git
-   url | name> [--ref <tag>]`. A new registry `type: service`, beside project, idea and platform: no workspace, no
-   memory, no merge gate. Always sandboxed (`enforce.sandbox: true` set by add, not asked by the manifest; a `type:
-   service` ignores `service_sandbox_exempt`, and the config check refuses one listed there). Folders, all under
+   url | name> [--ref <tag>]`. Its own entry in the instance's config (`services/<name>.yaml`, step 2a), not a
+   registry entry: no workspace, no memory, no merge gate. Always sandboxed (by its own policy, never
+   `service_sandbox_exempt`). Folders, all under
    `<services_root>/<name>/`:
    - `code/<commit>/`: the checked-out version, read-only to the running service (a new read-only-code mode in
      `policy`, `seatbelt`, `landlock`; today the service profile makes the runtime writable);
@@ -280,6 +280,146 @@ has two places here.
 - It doesn't sandbox the owner's own services: that stays their registry choice.
 - No payments between users, no hosted registry.
 
+## Step 2a, in detail
+
+> r2, 11-28, after its blind review (a stranger's code needs its own read model; the fetch hardened; names and
+> secrets tightened; the Linux check scoped to the fixture). Found while mapping the code: a registry entry with no workspace breaks a dozen
+> walkers (`hubconf.py roster` prints `None` as a path, which `gen-index-roster.sh`, `recover-project.sh` and
+> `sync-all-memory.sh` then use; `gen-todo.py` reports a missing STATE.md every night; `render-project-settings.py`
+> fails on a sandboxed entry with no workspace; scheduler jobs get `None` as a folder). So an installed service is
+> **not a registry entry**.
+
+**Where it is kept.** `services/<name>.yaml` in the instance's config (`hubconf.services_dir()`), committed by the
+command that writes it (`commit-hub-files.sh`), validated by `bin/installed_services.py`:
+
+```yaml
+v: 1
+name: example-review        # the manifest's name
+url: https://github.com/someone/example-review.git
+ref: v2.1.0                 # the tag or branch asked for; null when a commit was
+commit: 3f2a…               # 40 hex: what is installed
+interface: 2                # the manifest's, at that commit
+granted:                    # what the owner confirmed at add (the manifest asks, this grants)
+  models: {judge: {tier: strong}}
+  secrets: [OPENAI_API_KEY] # names only; values in the service's secrets folder
+  principal: false
+  scripts: false            # setup's install scripts
+  network: [api.openai.com] # shown, not enforced (Confinement)
+added: 2026-11-28
+```
+
+Nothing that walks the registry sees it. What must know services reads `installed_services.entries()`:
+`policy.other_projects` (every service's whole folder denied to every project and every other service), the name
+checks (below), and `brunna service`. Later steps add `brunna mcp` (3), the backup and secret checks (2b), the mail
+(4).
+
+**Names.** The manifest's `name`, compared case-folded (APFS is case-insensitive by default) against: every registered
+project's name and former names, the platform's names (`names.all("project")`), modules, the owner's and the
+assistant's addresses, the `idea-<n>` pattern, and every other installed service. An existing `<services_root>/<name>`
+folder that no service owns is refused too (remove would delete into it). The other direction: `onboard-project.sh`
+and the registry's index build refuse a project named (case-folded) like an installed service, since both would own
+`<services_root>/<name>` and the party id `project:<name>`.
+
+**Folders** under `<services_root>/<name>/`, made by add as the owner, `0700`:
+
+| folder | at run time | in setup |
+|---|---|---|
+| `repo.git` (bare, the fetched commits) | denied | denied |
+| `code/<commit>/` | read | write |
+| `cache/` (`XDG_CACHE_HOME`, `UV_CACHE_DIR`, `UV_PYTHON_INSTALL_DIR`, `npm_config_cache`, the model downloads) | write | write |
+| `state/` (`BRUNNA_SERVICE_STATE`; `HOME` is `state/home`) | write | denied |
+| `secrets/` (one file per granted secret, `0600`) | denied | denied |
+
+`BRUNNA_SERVICE_STATE` is part of the service contract (`docs/service-authors.md`): where a service writes what it
+keeps; manifest `data` paths are relative to it. Caches are their own folder so setup never sees state, and they are
+writable at run time because downloads happen then too (an embedding model fetched on first use).
+
+**Policy: a read model of its own.** A sandboxed project's profile is made for the owner's own code: it may read
+most of the disk except the listed denies. Measured in the review (macOS): under it a process reads the instance's
+config folder, the registry index (every project's name and paths), other sessions' temp folders, shell history, and
+reaches the Docker socket (which can mount home). On Linux, `landlock.plan` reads `/` minus the denies, home and
+`/tmp` included. That is not acceptable for a stranger's code, so `policy.service_policy(entry, phase)` is an
+allow-list:
+
+- **read**: the system's own folders (macOS: `/System`, `/usr`, `/bin`, `/sbin`, `/Library/Frameworks`,
+  `/private/etc`, `/dev` as today's profiles allow; Linux: `/usr`, `/bin`, `/lib*`, `/etc`, `/proc/self`), the
+  platform's Python and the tool installs it runs (`uv`, the nvm node), and the service's own `code/<commit>`,
+  `cache/`, `state/` (run) or `code/<commit>`, `cache/` (setup). Nothing else: not home, not `/Users`, `/Volumes`,
+  `/tmp` or `/private/var/folders`, not the config, not the registry index;
+- **write**: `state/` and `cache/` (run), `code/<commit>/` and `cache/` (setup); its temp folder is `cache/tmp`
+  (`TMPDIR`), never the system's;
+- **no unix sockets** (`(deny network-outbound (remote unix-socket))` on macOS; Linux's seccomp already refuses
+  `socket(AF_UNIX)`); outbound network open (Confinement); no port to bind.
+
+Both adapters gain this mode: Seatbelt a `service_profile` variant on the model of `pdf_profile` (deny reads by
+default, allow back the list), Landlock a `plan` that reads only the list instead of `/` minus denies, with
+`_isolation(temp=False)` exposed. `service_policy` returns what `exec_service` takes (the policy dict, the writable
+dirs and the readable list), and the conformance probes run against it: the config, home, `/tmp`, another service's
+folder, its own `secrets/` and `repo.git`, the Docker socket all refused; `code/` read but not written at run time.
+The `brunna` CLI can't run inside (it reads the config); a service doesn't need it before step 4, which revisits it.
+
+The environment is built by the launcher, never inherited: `PATH` (the platform's), `HOME` (`state/home`),
+`BRUNNA_SERVICE_STATE`, the cache variables, `TMPDIR`, `LANG`, `BRUNNA_CALLER` (step 3; `owner` from the owner's
+terminal), and at run time each granted secret. Secrets are set in the process after the sandbox is applied, never on
+a command line (`seatbelt.entry_argv` puts an `Entry`'s variables in `/usr/bin/env`'s arguments, which `ps` shows):
+the launcher hands them over a pipe to the sandboxed side, which sets them and then execs.
+
+**Launching.** `bin/sandboxed-run --installed <name> --phase run|setup --cwd <code/<commit>> -- <words>`: it reads the
+service's entry (not the registry), builds `service_policy`, refuses where the machine can't sandbox (exit 78, as
+today), and `exec_service`s. `brunna service run <name> -- <args>` (this step: the owner's terminal only, refused
+when `owner_terminal.refusal()` says it is confined or inside a session; step 5 adds sessions through the runner)
+runs the manifest's `cli.run` plus the args.
+
+**Fetching.** As the owner, running nothing from the repo, in a staging folder under `hubconf.private_tmp()` (never
+the system temp, which every sandbox may write) until the manifest's name is known, then moved into
+`<services_root>/<name>/`:
+
+- the URL must be `https://` or `ssh` (`git@host:path` or `ssh://`); a local path or `file://` only in tests; one
+  starting with `-` is refused and `--` precedes it; `--ref` passes `git check-ref-format --allow-onelevel` or is 40
+  hex;
+- every git command runs with `GIT_CONFIG_GLOBAL=/dev/null`, `GIT_CONFIG_NOSYSTEM=1`, no prompts, a timeout and a
+  process-group kill (the `upgrade.py` pattern, made into a helper that doesn't run in the hub's own repo), and
+  `-c core.hooksPath=/dev/null -c fetch.fsckObjects=true -c protocol.file.allow=never` (tests allow file);
+  the owner's global `filter.lfs` or any configured filter never runs, nor a submodule;
+- `git init --bare repo.git`, fetch the ref with `--depth=1 --no-tags`, the pack capped (`FETCH_MAX`); the commit it
+  resolved to is recorded;
+- the manifest is read with `git cat-file blob <commit>:brunna-service.yaml`, capped at 64 KB, and checked
+  (`service_manifest.problems`) before anything is checked out;
+- the tree's total size is summed (`ls-tree -r -l`) and capped before checkout (a pack can expand far past its own
+  size); the checkout is `--work-tree=code/<commit> checkout <commit> -- .` with `core.symlinks=false` and no
+  `.gitattributes` filters (the config above has none);
+- nothing on the owner's side walks `code/` after setup has run (setup can make links); remove deletes folders without
+  following links.
+
+**Add**, `brunna service add <url> [--ref <tag|branch|commit>]`, the owner's terminal only:
+
+1. fetch and check the manifest (above); refuse a bad one with its problems;
+2. show what it asks: what it is, interface, models and tiers, secrets (required and optional, with `how`), the
+   network it says it reaches and that outbound isn't confined, whether it asks to ask the owner, whether setup wants
+   install scripts; the owner answers yes or no (`--yes` for scripts and tests);
+3. ask each required secret's value (hidden input; never echoed or logged); an optional one may be skipped and set
+   later with `brunna service secret <name> <SECRET>` (value on stdin);
+4. check out, then run `setup` in the setup profile, each command in turn, with a timeout; a failure removes
+   `code/<commit>` and stops, nothing written to config;
+5. write `services/<name>.yaml` and commit it.
+
+An add that stops anywhere leaves no entry; a second add of an existing name is refused (updates are 2b).
+
+**Remove**, `brunna service remove <name> [--purge]`: the entry (committed), `repo.git`, `code/`, `cache/`; with
+`--purge` also `state/` and `secrets/`. **List**, `brunna service list [--json]`: name, ref, commit, interface, granted.
+
+**What 2a does not do.** No updates (2b). No consumer sees the service yet (3). No mail (4). No long-running unit:
+a service's MCP server is started per session by `brunna mcp` (3), its CLI per call; a manifest asks for nothing
+that keeps running.
+
+**Tests.** A local fixture repo (a tiny Python CLI and MCP server, a manifest, setup with no network) added from a
+`file://` URL in a throwaway instance: the entry, the folders and modes, setup writing only `code/<commit>` and
+`cache`, the CLI answering under the sandbox and refused, at run time, writing `code/`, reading `secrets/`,
+`repo.git`, another service's folder, the config, home, `/tmp`, and a unix socket; a bad manifest, a name clash, a
+`-` URL and a bad ref refused before checkout; a failed setup leaving nothing; secrets absent from the process's
+arguments. On macOS (Seatbelt) in the suite, and in the Linux container (`bin/linux-test`) with the same fixture.
+Once by hand on macOS: the review service from its GitHub URL in a throwaway instance.
+
 ## Steps
 
 Each gets its own blind review before it is built.
@@ -287,11 +427,13 @@ Each gets its own blind review before it is built.
 1. **The manifest contract** and its validator; `docs/service-authors.md` first draft; the owner's public review
    service writes its manifest (a request to that project: it has a CLI and MCP already).
 2. **Installed services**, in two:
-   - 2a: `type: service` in the registry (no workspace; refuses manifest.update), its folders, read-only code and the
-     setup profile, `brunna service add` / `remove` / `list`, setup as the service, the outbox location. Done when a
-     clean brunna (the Linux test container and a second macOS account) adds the review service from its URL and its
-     CLI answers in its sandbox.
-   - 2b: updates by tag (commit pinning, setup beside, the more-asked wait).
+   - 2a (detailed below): the services' own entries, folders, read-only code and the setup profile, `brunna service
+     add` / `remove` / `list` / `secret` / `run` (the owner's terminal only), setup as the service, the services'
+     read model in both adapters. Done when the fixture service passes the tests below on macOS and in the Linux
+     container, and the review service, added by hand from its GitHub URL in a throwaway instance on macOS, answers
+     its CLI in its sandbox.
+   - 2b: updates by tag (setup beside, the more-asked wait); the services' data in the nightly backup and their
+     secrets in the daily check. The outbox location moves to step 4, where it is first used.
 3. **Consumers**: `provides`/`consumes` with `contract: service`, `callers`, `brunna mcp` serving consumed services'
    tools as the service, the folder-only identity and the confined refusal (tested on Seatbelt and Landlock), the per-runtime measurements
    above, the rules block lines, accounting. Done when a session
