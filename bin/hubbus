@@ -4280,6 +4280,8 @@ def send_one(c, a, sender: str, session, here, boxed: bool = False, mid: str | N
                      hub=sender, file=hubconf.platform_registry().relative_to(hubconf.ROOT)))
         if a.to not in names.all("project"):
             refuse(_("hubbus: a manifest.update goes to {hub} (the platform applies it there)", hub=hubconf.hub_project()))
+        if (now := now_named(sender)) != sender:   # apply-updates would write a second entry under the former name
+            refuse(_("hubbus: {sender} is called {now} now: a manifest.update goes as {now}", sender=sender, now=now))
     if a.type == "drop" and not (a.task or a.question):
         refuse(_("hubbus: drop needs --task <key> or --question <id> (which task/question is no longer needed)"))
     if a.question:

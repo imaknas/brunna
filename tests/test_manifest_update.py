@@ -137,7 +137,39 @@ class TheHubsOwnEntry(Instance):
                 self.assertNotEqual(r.returncode, 0, r.stdout)
                 self.assertIn("manifest.update", r.stderr)
         self.assertIn("commit", self.send("--from", HUB, "--to", HUB, "--type", "manifest.update", "--text", "a: 1").stderr)
+        other = names.other("project")
+        self.assertNotEqual(self.send("--from", other, "--to", other, "--type", "manifest.update", "--text", "a: 1").returncode,
+                            0, "the platform's other spelling is the platform")
         self.assertEqual(self.messages(), [])
+        self.run_cli(BIN / "hubbus", "send", "--from", "open", "--to", other, "--type", "manifest.update", "--text", "a: 1")
+        self.assertEqual([to for _i, _s, to, _p in self.messages()], [HUB], "sent to the other spelling, it reaches the platform")
+
+    def renamed(self):
+        (self.tmp / "state" / "shared" / "project-renames.json").write_text(
+            json.dumps({"old-open": {"new": "open", "stage": "done"}}))
+
+    def test_a_former_name_sends_none_and_one_on_the_bus_is_returned(self):
+        self.renamed()
+        r = self.send("--from", "old-open", "--to", HUB, "--type", "manifest.update", "--text", yaml.safe_dump(ENTRY))
+        self.assertNotEqual(r.returncode, 0, r.stdout)
+        self.assertIn("open", r.stderr)
+        self.assertEqual(self.messages(), [])
+        self.run_cli(BIN / "hubbus", "send", "--from", "open", "--to", HUB, "--type", "manifest.update", "--text",
+                     yaml.safe_dump({**ENTRY, "name": "old-open"}))
+        c = sqlite3.connect(self.tmp / "bus" / "bus.db")
+        try:
+            with c:
+                c.execute("UPDATE events SET source='old-open' WHERE type='message'")
+        finally:
+            c.close()
+        before = self.entry_file.read_text()
+        self.run_cli(BIN / "registry.py", "apply-updates")
+        self.assertFalse((self.tmp / "config" / "projects" / "old-open.yaml").exists(), "no second entry")
+        self.assertEqual(self.entry_file.read_text(), before)
+        texts = [json.loads(pl)["text"] for _i, _s, _to, pl in self.messages()[1:]]
+        self.assertEqual(len(texts), 1, texts)
+        self.assertIn("not applied", texts[0])
+        self.assertIn("former name", texts[0])
 
     def test_one_on_the_bus_from_the_hub_is_returned(self):
         self.run_cli(BIN / "hubbus", "send", "--from", "open", "--to", HUB, "--type", "manifest.update", "--text",

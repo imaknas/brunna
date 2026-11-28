@@ -254,5 +254,6 @@
  "service {name}: local_port {port} is the platform's (the sign-in callback of brunna credentials grant, or the status page)": "服務 {name}:local_port {port} 是平台的(brunna credentials grant 登入的回呼,或狀態頁)",
  "runtime_preset.login_use is the text asked of the owner": "runtime_preset.login_use 是要問擁有者的話",
  "{where}: login must be the name of a login": "{where}:login 要是登入方式的名稱",
- "{hub}'s own registry entry is its file in the platform repo ({file}): change it with a commit; a manifest.update doesn't reach it": "{hub} 自己的登記是平台 repo 裡的檔案({file}):用 commit 改;manifest.update 改不到它"
+ "{hub}'s own registry entry is its file in the platform repo ({file}): change it with a commit; a manifest.update doesn't reach it": "{hub} 自己的登記是平台 repo 裡的檔案({file}):用 commit 改;manifest.update 改不到它",
+ "{sender} is a former name of {now}: the entry is {now}'s, changed by a manifest.update sent as {now}": "{sender} 是 {now} 以前的名字:登記是 {now} 的,要以 {now} 寄 manifest.update 改"
 }

@@ -1954,6 +1954,8 @@ def cmd_apply_updates() -> int:
         index = json.loads((CACHE / "index.json").read_text())
     except (OSError, ValueError):
         index = {"projects": {}}
+    taken = hubconf.projects()
+    former = {o: p for p in taken for o in hubconf.former_names(p) if o not in taken}
     for mid, sender, pl in rows:
         p = json.loads(pl or "{}")
         if p.get("type") != "manifest.update":
@@ -1967,6 +1969,13 @@ def cmd_apply_updates() -> int:
             print(_("{sender}: manifest.update {mid} returned ({n} {n:problem|problems})", sender=sender, mid=mid, n=1))
             continue
         f = hubconf.registry_dir() / f"{sender}.yaml"
+        if not f.exists() and (now := former.get(sender)):   # a second entry beside the project's own
+            why = _("{sender} is a former name of {now}: the entry is {now}'s, changed by a manifest.update sent "
+                    "as {now}", sender=sender, now=now)
+            reply(sender, mid, _("manifest.update was not applied; the registry is unchanged:\n- {errors}", errors=why),
+                  _("returned: {errors}", errors=why[:200]))
+            print(_("{sender}: manifest.update {mid} returned ({n} {n:problem|problems})", sender=sender, mid=mid, n=1))
+            continue
         sent = cur = None
         try:   # one letter is returned, whatever is wrong with it; it never stops the others
             cur = (yaml.safe_load(f.read_text()) or {}) if f.exists() else None
