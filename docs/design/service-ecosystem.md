@@ -4,7 +4,9 @@
 > platform): the wiring moved into the platform's own MCP server, installed services got their own folders, outbox and
 > answer path, the manifest can't widen a grant, and egress is said plainly not to be confined yet. r3 after a third
 > review of r2: service tools only for a project known by its folder and never from a confined `brunna mcp`, a
-> service's outbox limited to replies and owner records, the CLI runner off cap-runner's Seatbelt-only jobs.
+> service's outbox limited to replies and owner records, the CLI runner off cap-runner's Seatbelt-only jobs. r4
+> after a fourth review: service tools only on a positive probe (fails closed on Linux), services' folders in every
+> read-deny, services excluded from the default callers, Transport 0.1 named.
 >
 > Asked by the owner: some of the owner's projects serve other projects (a blind-review tool, a compute pool); anyone
 > who installs brunna should be able to find them, install them, and make their own services work with brunna the same
@@ -97,9 +99,17 @@ entirely: they change only through `brunna service add` / an update the owner co
      project's (`take_outboxes`, `projects()` and `outbox_rel` learn the service's location). From a service's outbox
      only replies to letters addressed to it and, under the `principal` grant, records for the owner are taken; any
      other letter is refused (a stranger's code must not write requests that wake other projects' sessions or start
-     agents). The service's state folder is also scanned by the platform's runners like a workspace, so
-     `brunna complete` (under the `models` grant) and the question check work from it;
+     agents). The service's state folder is also taken by the platform's runners as its folder, so `brunna complete`
+     (under the `models` grant) and the question check work from it. Those run through cap-runner today, which is
+     Seatbelt-only and in the optional sandbox module; the runner that takes `use` requests (below) takes these for
+     services too, on macOS and Linux, so a service needs no module;
    - `secrets/`: the values the owner put in at add.
+
+   The whole `<services_root>/<name>/` (code, state, secrets) is in every other project's and service's read-deny
+   (`policy.other_projects`, which today takes a runtime folder only from an entry with `runtime:`).
+
+   Add refuses a name that is a registered project's former name or the old side of a rename (`hubconf` rename
+   records): records for the old name would reach the service, and core §8 delivers to a project only what it may know.
 
    Add shows what the manifest asks (models and tiers, secrets, principal, the network it says it reaches, that
    outbound isn't confined) and the owner confirms; the confirmed set is the registry entry. A missing required secret
@@ -118,7 +128,7 @@ Every service verb is under `brunna service` (add, remove, list, run, init, chec
 
 A consumer declares what it uses with the existing `consumes` (`{contract: service, from: <service>, v: <major>}`, by
 manifest.update as any registry change). A service limits who may call with `callers: [<project>…]` (default: every
-project of the owner's; set by the owner only).
+project of the owner's, not other services, which need `callers` to name them; set by the owner only).
 
 **MCP: through `brunna mcp`.** The platform's MCP server is registered once per runtime, at user level, with the
 owner's consent (`mcp_register` in the runtime adapter), and already decides which project its session is (from the
@@ -140,9 +150,13 @@ Identity for service tools rests on the folder alone:
 - the server serves service tools only when its project comes from the folder it was started in;
   `AGENTHUB_PROJECT`, which the server takes at its word outside every project (`mcp_server.resolve_project`), is
   ignored for them;
-- a `brunna mcp` that is itself confined (`isolation.confined_now`, the CONFINED mark) serves no service tools: on
-  macOS a sandboxed shell couldn't start the service's sandbox anyway, but Landlock stacks, so the refusal is
-  explicit, and tested on both adapters;
+- a `brunna mcp` serves service tools only when a positive probe says it is the owner's own unconfined process: it
+  can read the platform's state and secrets folders (`not isolation.reads_blocked()` with at least one of them
+  present), as `owner_terminal.refusal()` already decides. Detecting a sandbox would fail open: on Linux
+  `confined_now` sees only an environment mark, which a runtime's own sandbox (bubblewrap) never sets and a Landlock
+  process can unset, and such a process could chdir to another project's path, which `hubbus.project_of` reads by
+  path alone. A process that passes the probe is the owner's anyway. Tested on both adapters with an unmarked
+  confined process;
 - `callers` binds sandboxed consumers. An unsandboxed consumer's session is the owner's own user and could run
   `bin/sandboxed-run` itself; for it `callers` and the accounting are what the platform does when asked, not a
   guarantee (as for every session a user opens).
@@ -196,9 +210,9 @@ has two places here.
 
 1. **Services are requesters.** A service is a registry entry, so its party id is `project:<name>`
    (`hubconf.party`), whichever kind. With the `principal` grant it asks the owner a question or gives a task through
-   its outbox; `hubbus dispatch` takes it (as for a sandboxed project), the bridge sends the records to whichever
-   principal side is configured, and a question goes through the question check like a project's (which runs through
-   cap-runner: the service's state folder is its folder there). Without the grant its records are refused.
+   its outbox; `hubbus dispatch` takes it (as for a sandboxed project) and the records go to the principal side as a
+   project's do: with an assistant, the bridge sends them; with the built-in owner side they stay on the bus for
+   `bin/owner.py`. A question goes through the question check like a project's (run by the services' runner above). Without the grant its records are refused.
    The answer path is new. A requester needn't have a state document (core §1: the role is the deployment's to
    authenticate; Acts §5: a requester with no state document need not implement the Markdown binding). Delivering a
    settled or reopened record to the service is core §8's delivery to the project, the principal side's duty, which
@@ -220,10 +234,16 @@ has two places here.
    principal side today is the assistant's own API (the `brunna/hubbus-bridge` job, `hubbus bridge`, against
    `assistant.api`, formats vendored under `contracts/vendor/muninn/`), so another assistant needs brunna to learn its
    API.
-   Proposal (agent-ops-specs' view, not decided by the owner): an HTTP binding as a document of its own in
-   agent-ops-specs, beside the Acts Markdown binding rather than in core: publish, fetch from a cursor, ack, designed
-   together with core §15's open "resync and completeness", and the same semantics as the MCP binding agent-ops-specs
-   is drafting. The bridge would speak it and Muninn move to it; brunna keeps the current path until both have it.
+   Since 11-28 agent-ops-specs has **Principal Handoff Transport 0.1** (experimental, `transport/SPEC.md`, its own
+   version line outside 0.6's freeze; "a transport, not a binding in the sense of core §11"): send, fetch from an
+   opaque cursor, ack, with an HTTP mapping (an MCP mapping to follow, same semantics); the principal side is the
+   server. What it changes for brunna's bridge when it moves to it: fetch returns every origin's records, brunna's own
+   included (`incoming_errors` refuses a non-principal origin today; it must skip its own instead); a cursor is
+   compared only for equality, and an `unknown_cursor` after the log is restored means fetching from the start and
+   resending its own records the log lacks; HTTPS, or a Unix socket on the same machine (plain HTTP on loopback does
+   not conform); a relay credential may stand for several projects' parties. Muninn moves to it too. The service
+   binding (above) is the second request to agent-ops-specs, not started. brunna keeps the current path until the
+   bridge and Muninn both speak Transport; the bridge is the mailbox's code.
 
 ## Discovery and developers
 
@@ -272,5 +292,5 @@ Each gets its own blind review before it is built.
   refused); one whose manifest asks for more than was granted waits for the owner.
 - The first public service is the owner's public review service alone; the compute project stays the owner's own
   (kind 1) until the owner decides otherwise.
-- Open: whether to ask agent-ops-specs for the HTTP binding and the service binding (its answer of 11-28 confirmed
-  brunna's reading and gave its view of where they belong; a proposal is a request letter to it).
+- Asked of agent-ops-specs (11-28, the owner's go): Transport (written, 0.1, experimental) and the service binding
+  (not started). Open: when the bridge and Muninn move to Transport.
