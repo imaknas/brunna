@@ -9,7 +9,9 @@ memory notes (docs/design/tool-agnostic.md section 4).
 Tools: inbox, show, thread, send, ack, pass, done (same names and meanings as `brunna`'s mailbox commands) + ask_owner
 (ask the owner), note (written into this project's memory notes), manifest (= `brunna manifest`: this project's registry
 entry, read-only; never a confined run's; hubbus takes the project from the folder it runs in, so the server runs
-it only in its project's own folder). Everything is handed to bin/hubbus (the same
+it only in its project's own folder), manifest_update (a manifest.update letter to the platform from this project,
+as `brunna send --type manifest.update`; never a confined run's: hubbus refuses one there too). Everything is handed to
+bin/hubbus (the same
 implementation); the server only decides which project: environment variable AGENTHUB_PROJECT > working directory
 (hubbus.project_of: worktrees and .agent-memory count as the main project). Project not recognised -> every tool
 returns an error saying how to set it. A sandboxed project's mail goes through its outbox and view, as hubbus does
@@ -418,11 +420,18 @@ TOOLS = [
          "as_is": _str("send it without the check, saying why")}}},
     {"name": "manifest", "description": "This project's registry entry: what the platform has declared for it (tests, "
                                         "services, jobs, secrets, data outside its folder…), as a manifest.update is merged "
-                                        "onto it. Read-only. A change is a manifest.update letter, sent with the command "
-                                        "line (brunna send --type manifest.update; this server's send doesn't send one): "
-                                        "copy the field from here, change it and send only that field (a list is replaced "
-                                        "whole).",
+                                        "onto it. Read-only: a change goes with manifest_update.",
      "inputSchema": {"type": "object", "properties": {}}},
+    {"name": "manifest_update", "description": "Change this project's registry entry: send the fields that change, as YAML "
+                                               "(copy a field from manifest and change it). A mapping is merged key by "
+                                               "key, a list or a value replaces what was there (send the whole list), "
+                                               "<field>: null removes one; with v: it is the whole entry. The platform "
+                                               "checks and applies it within 15 minutes and replies by letter (read it "
+                                               "with inbox). Security fields (type, enforce, network, allow_write, "
+                                               "privacy, metered_models, paths) are returned: those go to the platform "
+                                               "as a request with send, and the owner confirms.",
+     "inputSchema": {"type": "object", "required": ["yaml"], "properties": {
+         "yaml": _str("the fields that change, as YAML (a mapping)")}}},
     {"name": "note", "description": "Add an entry to this project's memory notes for today (what was done, what was "
                                     "decided, what is unfinished; one matter per entry).",
      "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": _str("the entry")}}},
@@ -637,6 +646,16 @@ def mail_args(project: str, name: str, args: dict, run: "Run | None" = None) -> 
         return ["inbox", f"--project={project}"]
     if name == "manifest":   # hubbus reads the project from the folder it runs in (call() checks it is the project's)
         return ["manifest"]
+    if name == "manifest_update":
+        text = _text(args, "yaml")
+        import yaml
+        try:
+            doc = yaml.safe_load(text)
+        except yaml.YAMLError as e:
+            raise BadArgs(_("yaml can't be read: {e}", e=str(e)[:200]))
+        if not isinstance(doc, dict) or not doc:
+            raise BadArgs(_("yaml must be a mapping of the fields that change"))
+        return ["send", f"--from={project}", f"--to={hubconf.hub_project()}", "--type=manifest.update", f"--text={text}"]
     if name in ("show", "thread"):
         return [name, "--", _one_id(args)]
     if name == "send":

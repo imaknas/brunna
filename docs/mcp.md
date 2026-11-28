@@ -14,10 +14,10 @@ that agent opens in a project folder can:
 | `ask_owner` | Ask the owner something they have to decide, with the options and the default this project proceeds on while it waits |
 | `note` | Add an entry to this project's memory note for today |
 | `manifest` | This project's registry entry, as a `manifest.update` is merged onto it (read-only; = `brunna manifest`) |
+| `manifest_update` | Change it: the fields that change, as YAML, sent to the platform as a `manifest.update` (= `brunna send --type manifest.update`); the platform's reply comes by letter |
 
 It is the same implementation as the command line `brunna inbox|show|thread|send|ack|pass|done|manifest`
-(`bin/hubbus`). A change to the registry entry is a `manifest.update` letter, sent with the command line: the server's
-`send` doesn't send one. On
+(`bin/hubbus`). The platform's own runs (mail handlers, agent jobs) get neither `manifest` nor `manifest_update`. On
 `initialize` the server puts the platform's rules and the number of letters not yet closed into `instructions`: the
 rules reach the agent without changing any file in the project.
 

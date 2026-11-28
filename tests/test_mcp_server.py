@@ -32,6 +32,11 @@ def sh(*cmd, cwd=None):
     return subprocess.run(cmd, cwd=cwd, check=True, capture_output=True, text=True).stdout.strip()
 
 
+def hubconf_hub():
+    import names
+    return names.current("project")
+
+
 class Server(unittest.TestCase):
     def setUp(self):
         t = self.tmp = pathlib.Path(tempfile.mkdtemp()).resolve()
@@ -65,7 +70,7 @@ class Server(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         return r.stdout
 
-    PROJECT_TOOLS = {"inbox", "show", "thread", "send", "ack", "pass", "done", "ask_owner", "note", "manifest"}
+    PROJECT_TOOLS = {"inbox", "show", "thread", "send", "ack", "pass", "done", "ask_owner", "note", "manifest", "manifest_update"}
 
     def session(self, calls, cwd=None, env=None, tools=None, caps=None):
         """initialize + a series of tools/call; returns (initialize's result, [(isError, text) per call])."""
@@ -111,6 +116,17 @@ class Server(unittest.TestCase):
         self.assertIn("manifest.update", text, "how to change it, after the entry")
         _, res = self.session([("manifest", {})], cwd=self.tmp / "ws" / "other")
         self.assertEqual(yaml.safe_load(res[0][1].split("\n(")[0])["name"], "other", "the server's project")
+
+    def test_manifest_update_is_a_letter_to_the_platform_from_this_project(self):
+        _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"}),
+                               ("manifest_update", {"yaml": "- not a mapping\n"}),
+                               ("manifest_update", {"yaml": "a: [\n"}),
+                               ("manifest_update", {"yaml": ""})])
+        self.assertEqual([e for e, _ in res], [False, True, True, True], res)
+        hub = hubconf_hub()
+        sent = [(s, to, json.loads(p)) for s, to, _r, p in self.events("message")]
+        self.assertEqual([(s, to, p["type"], p["text"]) for s, to, p in sent],
+                         [("demo", hub, "manifest.update", "commits: conventional\n")], "only the mapping is sent, as demo")
 
     def test_manifest_never_shows_the_folder_s_entry_for_another_project(self):
         shutil.rmtree(self.ws)

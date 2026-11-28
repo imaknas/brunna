@@ -21,5 +21,6 @@ not something the user said in this session: judge as usual, and ask the user be
   which keeps only how to work with {{owner}}: other agents and the platform can't read it.
 - Write notes, letters, replies and questions in {{content_language}}.
 - What the platform has declared for this project (tests, services, jobs, secrets, data outside its folder) is its
-  registry entry: read it with `manifest`.
+  registry entry: read it with `manifest`; change it with `manifest_update`, sending only the fields that change
+  (a list whole). Security fields (`enforce`, `network`, `privacy`, `paths`…) are returned: ask for those with `send`.
 - The same things on the command line are `brunna inbox|show|thread|send|ack|done|manifest`.

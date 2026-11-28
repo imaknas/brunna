@@ -60,5 +60,7 @@
  "{path} is already connected, as the project {name}; nothing to do": "{path} 已經接上了(專案 {name}),不用再做什麼",
  "{project}: a merge or the like is under way in {path}; the note is not written until somebody finishes it": "{project}:{path} 有一個合併(或類似的操作)做到一半;做完之前不會寫筆記",
  "{key} must be a list of texts": "{key} 要是文字清單",
- "{project}'s folder isn't there, so its registry entry can't be read from it": "{project} 的資料夾不在,沒辦法從那裡讀它的登記"
+ "{project}'s folder isn't there, so its registry entry can't be read from it": "{project} 的資料夾不在,沒辦法從那裡讀它的登記",
+ "yaml can't be read: {e}": "yaml 讀不懂:{e}",
+ "yaml must be a mapping of the fields that change": "yaml 要是一個 mapping,列出要改的欄位"
 }
