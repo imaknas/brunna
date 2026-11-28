@@ -467,8 +467,8 @@ automatically.
 one named):
 
 1. `git ls-remote --tags <url>` (the fetch's rules) lists release tags and their commits (`^{}` for annotated). An
-   ssh URL needs the owner's agent, which the scheduler doesn't have: such a service is checked by hand only, and the
-   job says so once.
+   ssh URL needs the owner's agent, which the scheduler doesn't have: such a service is checked by hand only; the
+   job says so in its output and leaves its alert as it is.
 2. **A moved or deleted tag stops it** (an alert, nothing updated): someone rewrote what was granted. By hand, the
    owner sees it and an update with `--ref` replaces `tags` with the one taken.
 3. The newest release tag above the installed one (by hand: the ref asked for) is fetched **into a fresh staging repo**
@@ -483,9 +483,16 @@ one named):
    (`sandboxed-run --installed <name> --phase setup --commit <new>`: setup only, 40 hex, the folder must exist and is
    never made by this mode), each command in its own process group, killed after it and on SIGTERM. A failure
    removes `code/<new>`, leaves the entry and raises the alert.
-6. **Swap**: the staging repo replaces `repo.git`; the entry gets the new commit, ref, interface, commands, data,
+   Everything above is checked before the lock; under it the entry is read again, and if its commit, grants, tags or
+   how it follows changed meanwhile (an add, remove or another update), nothing is taken ("run it again").
+6. **Swap**: the entry is written first, then the staging repo replaces `repo.git`; the entry gets the new commit, ref, interface, commands, data,
    `secrets_required`, the tag, and `previous`; it is committed; any code folder older than `previous` is removed.
    The job closes `service-update:<name>` for each service that is current again and for removed ones.
+
+**How it follows after a by-hand update**: a release tag keeps it following tags (after a moved tag the owner
+accepted, only the tag taken is recorded); a branch, a commit or any other tag pins it (`follow: none`): the job
+leaves it, and only another `--ref` moves it. A by-hand update to the commit already installed only records how it
+follows.
 
 **The lock**: `<state>/services/<name>.lock` in the platform's state (no sandbox reads it), `fcntl.flock`: add, update
 and remove take it exclusively with a bounded wait (`LOCK_NB`, retried for a minute, then they stop and say so);
@@ -499,10 +506,11 @@ too.
 the service can't write, so no link on the way can lead elsewhere), excluding each `data` entry with `backup: false`,
 and its `secrets/`. Code, cache and `repo.git` never. A hard link from a denied file into `state/` is refused by the
 read model (measured on macOS; Landlock's refer right on Linux), and a test probes it. `bin/check-data.py` measures
-each service's `state/` with a cap (20 GB) and reports one over it; the backup skips a service over the cap.
+each service's `state/` with a cap (20 GB) and reports one over it, or one whose `state/` isn't its own real folder,
+under its own alert key (`service-data:<name>`, the owner's); the backup skips such a service.
 
 **Secrets check** (`bin/check-secrets.py`): each service's `secrets_required` has a real, non-empty `0600` file in
-`secrets/`, else a problem in the same alert ("{service}: secret {name} is not set: brunna service secret {service}
+`secrets/`, readable by no one else, else a problem in the same alert ("{service}: secret {name} is not set: brunna service secret {service}
 {name}").
 
 **Tests**: a fixture repo with tags: added at `v1.0.0`, `v1.1.0` taken (set up beside, swapped, previous kept), a

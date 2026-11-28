@@ -73,6 +73,8 @@ CLI = r"""case "$1" in
 read) if cat "$2" >/dev/null 2>&1 || ls "$2/" >/dev/null 2>&1; then echo "ALLOWED"; else echo "REFUSED"; fi;;
 write) if (echo x > "$2") 2>/dev/null; then echo "ALLOWED"; else echo "REFUSED"; fi;;
 env) env;;
+link) if ln "$2" "$3" 2>/dev/null; then echo "LINKED"; else echo "REFUSED"; fi;;
+sleep) sleep "$2";;
 swap) if rm -rf "$2" 2>/dev/null && ln -s "$3" "$2" 2>/dev/null; then echo "SWAPPED"; else echo "REFUSED"; fi;;
 esac
 """
@@ -176,6 +178,41 @@ class AddAndRun(Instance):
         self.assertNotIn("ALLOWED", r.stdout)
         self.assertFalse((victim / "home").exists())
 
+    def test_no_hard_link_to_a_file_it_cant_read(self):
+        self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 0)
+        victim = self.tmp / "victim.txt"
+        victim.write_text("owner's")
+        state = self.tmp / "services" / "echo-svc" / "state"
+        out = self.cli("run", "echo-svc", "--", "link", str(victim), str(state / "l")).stdout
+        self.assertIn("REFUSED", out)
+        self.assertFalse((state / "l").exists())
+
+    def test_a_running_cli_holds_off_remove(self):
+        self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 0)
+        names.env_set(self.env, "SERVICE_LOCK_WAIT", "1")
+        running = subprocess.Popen([sys.executable, str(self.tmp / "drive.py"), str(ROOT), "run", "echo-svc", "--",
+                                    "sleep", "4"], env=self.env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        self.addCleanup(running.wait)
+        import time
+        time.sleep(1.5)
+        r = self.cli("remove", "echo-svc")
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue((self.tmp / "config" / "services" / "echo-svc.yaml").exists())
+
+    def test_required_secrets_are_checked(self):
+        (self.src / "brunna-service.yaml").write_text(MANIFEST.replace(
+            "secrets: [{name: ECHO_KEY, what: \"a key\", optional: true}]",
+            "secrets: [{name: ECHO_KEY, what: \"a key\", optional: true}, {name: NEED_KEY, what: x}]"))
+        git("commit", "-qam", "need", cwd=self.src)
+        # no terminal: a required secret can't be asked, so add refuses; the entry is made by hand here instead
+        self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 1)
+        code = subprocess.run([sys.executable, "-c", """
+import sys; sys.path.insert(0, sys.argv[1]); import installed_services as s
+e = {"secrets_required": ["NEED_KEY"]}
+print(len(s.secret_problems("echo-svc", e)), len(s.secret_problems("echo-svc", {"secrets_required": []})))
+""", str(ROOT / "bin")], env=self.env, text=True, capture_output=True)
+        self.assertEqual(code.stdout.split(), ["1", "0"], code.stderr)
+
     def test_nothing_setup_starts_outlives_it(self):
         (self.src / "brunna-service.yaml").write_text(MANIFEST.replace(
             "echo ok > built.txt", "(sleep 2; echo late > late.txt) & echo ok > built.txt"))
@@ -277,6 +314,24 @@ class Updates(Instance):
         r = self.cli("update", "--all")
         self.assertIn("v1.1.0", r.stderr)
         self.assertEqual(self.entry()["ref"], "v1.1.0")
+
+    def test_a_ref_by_hand_pins_it(self):
+        self.tag("v1.0.0", "one")
+        self.assertEqual(self.cli("add", str(self.src), "--ref", "v1.0.0", "--yes").returncode, 0)
+        git("branch", "dev", cwd=self.src)
+        self.tag("v1.1.0", "one-one")
+        git("tag", "-f", "v1.0.0", "v1.1.0", cwd=self.src)   # moved
+        r = self.cli("update", "echo-svc", "--ref", "dev", "--yes")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        e = self.entry()
+        self.assertEqual((e["ref"], e["follow"], e["tags"]), ("dev", "none", {}))
+        self.cli("update", "--all")   # a pin isn't followed: still at dev
+        self.assertEqual(self.entry()["ref"], "dev")
+        # taking a release tag by hand after a move: follows again, with only that tag recorded
+        r = self.cli("update", "echo-svc", "--ref", "v1.1.0", "--yes")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        e = self.entry()
+        self.assertEqual((e["follow"], list(e["tags"])), ("tags", ["v1.1.0"]))
 
     def test_two_spellings_of_one_version(self):
         self.tag("v1.0.0", "one")

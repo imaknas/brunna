@@ -246,9 +246,9 @@ def _setup(name: str, commit: str, code: pathlib.Path, commands: list[str]) -> s
     return None
 
 
-def _release_tags(url: str, allow_local: bool) -> tuple[dict[str, str], list[str]]:
-    """The remote's release tags {tag: commit}, and the problems: two spellings of one version naming different
-    commits."""
+def _release_tags(url: str, allow_local: bool) -> tuple[dict[str, str], list[str], dict[str, str]]:
+    """The remote's release tags {tag: commit}, the problems (two spellings of one version naming different commits),
+    and every tag it has."""
     remote = service_fetch.tags(url, allow_local)
     rel = {t: c for t, c in remote.items() if svc.release(t)}
     seen: dict[tuple, tuple[str, str]] = {}
@@ -258,7 +258,7 @@ def _release_tags(url: str, allow_local: bool) -> tuple[dict[str, str], list[str
         if v in seen and seen[v][1] != c:
             problems.append(_("tags {a} and {b} are one version but name different commits", a=seen[v][0], b=t))
         seen.setdefault(v, (t, c))
-    return rel, problems
+    return rel, problems, remote
 
 
 def cmd_add(args: list[str]) -> int:
@@ -291,7 +291,7 @@ def _add(url: str, ref: str | None, yes: bool, allow_local: bool, stage: pathlib
     say(_("Fetching {url} …", url=url))
     follow, tags, expect = "none", {}, None
     if ref and svc.release(ref):   # follows release tags only when the remote says it is one
-        rel, problems = _release_tags(url, allow_local)
+        rel, problems, _all = _release_tags(url, allow_local)
         if problems:
             return err(_("not added: {why}", why="; ".join(problems)))
         if ref in rel:
@@ -346,8 +346,8 @@ def _newer(entry: dict, rel: dict[str, str]) -> str | None:
     return None
 
 
-def update_one(name: str, ref: str | None = None, yes: bool = False, auto: bool = False) -> list[str]:
-    """Update one service; the problems (empty: current, or updated)."""
+def update_one(name: str, ref: str | None = None, yes: bool = False, auto: bool = False) -> list[str] | None:
+    """Update one service; the problems (empty: current, or updated; None: not checked, its alert left as it is)."""
     allow_local = os.environ.get(ALLOW_LOCAL) == "1"
     entry = svc.entries().get(name)
     if not entry:
@@ -356,8 +356,8 @@ def update_one(name: str, ref: str | None = None, yes: bool = False, auto: bool 
     if auto and not url.startswith(("https://", "file://", "/")) and not os.environ.get("SSH_AUTH_SOCK"):
         say(_("{name}: an ssh address is checked only by hand (brunna service update {name}): the job has no ssh agent",
               name=name))
-        return []
-    rel, problems = _release_tags(url, allow_local)
+        return None
+    rel, problems, every = _release_tags(url, allow_local)
     moved = [t for t, c in (entry.get("tags") or {}).items() if rel.get(t) != c]
     if moved and (auto or not ref):
         problems.append(_("tag {tags} no longer names what was installed (moved or deleted): nothing updated; "
@@ -365,23 +365,45 @@ def update_one(name: str, ref: str | None = None, yes: bool = False, auto: bool 
                           tags=", ".join(moved), name=name))
     if problems:
         return problems
+    if not auto and not ref and entry.get("follow") != "tags":
+        return []   # pinned to a branch or commit: only an update with --ref moves it
     target = ref or _newer(entry, rel)
     if not target:
         return []
-    is_tag = target in rel
-    if is_tag and target in (entry.get("tags") or {}) and rel[target] == entry["commit"]:
+    is_tag = target in every
+    if is_tag and target in (entry.get("tags") or {}) and rel.get(target) == entry["commit"]:
         return []
+    checked = {k: entry.get(k) for k in ("commit", "granted", "tags", "follow")}
     stage = pathlib.Path(__import__("tempfile").mkdtemp(prefix="service-update-", dir=hubconf.private_tmp()))
     try:
         say(_("{name}: fetching {ref} …", name=name, ref=target))
         commit, doc = _fetch_checked(url, target, stage / "repo.git", allow_local,
-                                     expect=rel.get(target) if is_tag else None, tag=is_tag)
+                                     expect=every.get(target) if is_tag else None, tag=is_tag)
         if doc["name"] != name:
             return [_("{ref}'s manifest names {other}, not {name}", ref=target, other=doc["name"], name=name)]
+        # how it follows from here: a release tag keeps following tags (a moved one, accepted by hand, replaces the
+        # record); a branch, commit or other tag asked for by hand pins it (nothing moves it but another --ref)
+        if is_tag and svc.release(target) is not None:
+            follow = "tags"
+            tags = {target: commit} if moved else {**(entry.get("tags") or {}), target: commit}
+        else:
+            follow, tags = "none", {}
         if commit == entry["commit"]:
+            if not ref or (entry.get("follow"), entry.get("tags"), entry.get("ref")) == (follow, tags, target):
+                return []
+            with svc.lock(name):   # the same code, asked for by another name: only how it follows changes
+                now = svc.entries().get(name)
+                if now is None or {k: now.get(k) for k in checked} != checked:
+                    return [_("{name} changed while it was being checked (removed, re-added or updated); run it "
+                              "again", name=name)]
+                _write_entry({**now, "ref": target if not service_fetch.HEX.match(target) else None,
+                              "follow": follow, "tags": tags})
+            _commit(name, f"feat(services): {name} follows {target}")
+            say(_("{name} is current", name=name))
             return []
         more = asks_more(entry, doc)
         granted = entry["granted"]
+        values: dict[str, str] = {}
         if more:
             if auto:
                 return [_("{ref} asks for more than was granted: {more}; run brunna service update {name} to see and "
@@ -393,14 +415,18 @@ def update_one(name: str, ref: str | None = None, yes: bool = False, auto: bool 
             new = {s["name"] for s in doc.get("secrets") or []} - set(granted.get("secrets") or [])
             unset = {s["name"] for s in doc.get("secrets") or [] if not s.get("optional")
                      and not _secret_set(name, s["name"])}
-            values = _ask_secrets(doc, only=new | unset)
-            if isinstance(values, str):
-                return [_("not updated: {why}", why=values)]
-            for secret, v in values.items():
-                _write_secret(name, secret, v)
+            got = _ask_secrets(doc, only=new | unset)
+            if isinstance(got, str):
+                return [_("not updated: {why}", why=got)]
+            values = got
             granted = _granted(doc)
         with svc.lock(name):
-            entry = svc.entries().get(name) or entry   # read again under the lock
+            now = svc.entries().get(name)   # read again under the lock: what was checked must still be what it is
+            if now is None or {k: now.get(k) for k in checked} != checked:
+                return [_("{name} changed while it was being checked (removed, re-added or updated); run it again",
+                          name=name)]
+            for secret, v in values.items():
+                _write_secret(name, secret, v)
             f = svc.folders(name, commit)
             keep = {entry["commit"], entry.get("previous")}
             for c in list(f["code_root"].iterdir()) if f["code_root"].is_dir() else []:
@@ -415,15 +441,10 @@ def update_one(name: str, ref: str | None = None, yes: bool = False, auto: bool 
             finally:
                 if not ok:
                     _rmtree(f["code"])
-            tags = dict(entry.get("tags") or {}) if not (ref and moved) else {}
-            follow = entry.get("follow", "none")
-            if is_tag and svc.release(target):
-                tags[target] = commit
-                follow = "tags" if follow == "tags" or not ref else follow
             new_entry = _entry(doc, url, target, commit, granted, follow, tags, entry["commit"], entry["added"])
+            _write_entry(new_entry)   # first: a failure after this leaves the new version's entry and code, working
             _rmtree(f["repo"])
             shutil.move(str(stage / "repo.git"), str(f["repo"]))
-            _write_entry(new_entry)
             for c in list(f["code_root"].iterdir()):
                 if c.name not in (commit, entry["commit"]):
                     _rmtree(c)
@@ -444,6 +465,8 @@ def cmd_update(args: list[str]) -> int:
         names = {n for n, e in svc.entries().items() if e.get("follow") == "tags"}
         for name in sorted(names):
             problems = update_one(name, auto=True)
+            if problems is None:
+                continue
             for p in problems:
                 err(f"⚠️ {name}: {p}")
             found |= bool(problems)
@@ -466,7 +489,7 @@ def cmd_update(args: list[str]) -> int:
             rest.append(a)
     if len(rest) != 1 or (ref is not None and not ref):
         return err(_("usage: brunna service update <name> [--ref <tag|branch|commit>] [--yes] | --all"))
-    problems = update_one(rest[0], ref=ref, yes=yes)
+    problems = update_one(rest[0], ref=ref, yes=yes) or []
     for p in problems:
         err(p)
     if not problems:

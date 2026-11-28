@@ -10,5 +10,6 @@
  "{where}: what the backup takes of it grew to {gb} GB in a week: did something that can be made again land in it without an exclude?": "{where}:備份要收的部分一週內長到 {gb} GB:是不是有可以重新產生的東西放進去、卻沒排除?",
  "{where}: {count} {count:path|paths} in it can't be read, so the backup misses them (first: {first}): make them readable, or exclude them": "{where}:裡面有 {count} 個路徑讀不到,備份會漏掉(第一個:{first}):讓它們可讀,或排除它們",
  "service {name}: not backed up: {why}": "服務 {name}:沒有備份:{why}",
- "service {name}: its state is over {gb} GB, so the backup leaves it out": "服務 {name}:狀態超過 {gb} GB,所以備份不收它"
+ "service {name}: its state is over {gb} GB, so the backup leaves it out": "服務 {name}:狀態超過 {gb} GB,所以備份不收它",
+ "service {name}'s state is backed up again": "服務 {name} 的狀態又有備份了"
 }

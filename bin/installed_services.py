@@ -172,11 +172,38 @@ def own_folder(d: pathlib.Path, base: pathlib.Path, make: bool = True) -> str | 
     return None
 
 
+def secret_problems(name: str, entry: dict) -> list[str]:
+    """The required secrets that aren't set: each must be a real, non-empty file of this user's, readable by no one
+    else, in the service's secrets folder. An optional one isn't checked."""
+    import os
+    import stat
+    out = []
+    for secret in entry.get("secrets_required") or []:
+        try:
+            st = os.lstat(folders(name)["secrets"] / secret)
+            ok = (stat.S_ISREG(st.st_mode) and st.st_size > 0 and st.st_uid == os.getuid()
+                  and not st.st_mode & 0o077)
+        except OSError:
+            ok = False
+        if not ok:
+            out.append(_("{service}: secret {name} is not set: brunna service secret {service} {name}",
+                         service=name, name=secret))
+    return out
+
+
+def lock_wait() -> float:
+    """How long add, update, remove and run wait for the lock: a minute (tests set a shorter one)."""
+    try:
+        return float(names.env("SERVICE_LOCK_WAIT") or 60)
+    except ValueError:
+        return 60.0
+
+
 class Locked(Exception):
     pass
 
 
-def lock(name: str, shared: bool = False, wait: float = 60.0):
+def lock(name: str, shared: bool = False, wait: float | None = None):
     """The service's lock (<state>/services/<name>.lock, where no sandbox reads): exclusive for add, update and
     remove, shared for run, so a swap or remove never happens under a running CLI. Retried for `wait` seconds, then
     Locked. A context manager; the lock goes with its process."""
@@ -191,7 +218,7 @@ def lock(name: str, shared: bool = False, wait: float = 60.0):
         d.mkdir(parents=True, exist_ok=True)
         fd = os.open(d / f"{name}.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
-            end = time.monotonic() + wait
+            end = time.monotonic() + (lock_wait() if wait is None else wait)
             while True:
                 try:
                     fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)

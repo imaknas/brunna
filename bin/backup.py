@@ -148,11 +148,17 @@ def declared() -> list[project_data.Entry]:
     return [e for e in project_data.entries(include=owner_included()) if e.path and e.backup]
 
 
+_SERVICES: list | None = None   # one walk per run: included() and excludes() both ask
+
+
 def services() -> list[tuple[str, pathlib.Path, list[str]]]:
     """Each installed service's folders the backup takes (docs/design/service-ecosystem.md, step 2b): (name, folder,
     excludes) for its state/ (minus its data entries with backup: false) and its secrets/. Never its code, cache or
     fetched commits, which are fetched or made again. A service whose folders aren't its own real folders (a link
     where one belongs), or whose state/ is over installed_services.CAP, is left out (check-data says so)."""
+    global _SERVICES
+    if _SERVICES is not None:
+        return _SERVICES
     import installed_services as svc
     out = []
     for name, e in sorted(svc.entries().items()):
@@ -166,6 +172,7 @@ def services() -> list[tuple[str, pathlib.Path, list[str]]]:
                 out.append((name, state, skip))
         if f["secrets"].exists() and not svc.own_folder(f["secrets"], f["base"], make=False):
             out.append((name, f["secrets"], []))
+    _SERVICES = out
     return out
 
 

@@ -61,5 +61,6 @@
  "{ref} asks for more than was granted: {more}; run brunna service update {name} to see and grant it": "{ref} 要的比已授權的多:{more};跑 brunna service update {name} 看過再授權",
  "not updated": "沒有更新",
  "not updated: {why}": "沒有更新:{why}",
- "Grant this and update {name}?": "授權並更新 {name}?"
+ "Grant this and update {name}?": "授權並更新 {name}?",
+ "{name} changed while it was being checked (removed, re-added or updated); run it again": "{name} 在檢查期間變了(被移除、重裝或更新過);請再跑一次"
 }

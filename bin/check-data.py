@@ -159,19 +159,20 @@ def main(argv: list[str]) -> int:
         print(_("{project}: {path} backed up, {mb} MB", project=e.project, path=e.raw, mb=round(n / (1 << 20))))
     # installed services (docs/design/service-ecosystem.md, step 2b): the backup takes each one's state/ unless it is
     # over the cap or isn't its own real folder; say so here, where it is seen
+    # (their own alert key, service-data:<name>, the owner's: no project's agent can shrink a service's state)
     import installed_services
+    service_problems: dict[str, list[str]] = {}
     for svc_name, se in sorted(installed_services.entries().items()):
         f = installed_services.folders(svc_name)
         if not f["state"].exists():
             continue
         if (why := installed_services.own_folder(f["state"], f["base"], make=False)):
-            problem(svc_name, f"service-folder:{svc_name}", _("service {name}: not backed up: {why}", name=svc_name, why=why))
+            service_problems[svc_name] = [_("service {name}: not backed up: {why}", name=svc_name, why=why)]
             continue
         skip = [f"{f['state']}/{d['path'].rstrip('/')}" for d in se.get("data") or [] if d.get("backup") is False]
         if project_data.size(f["state"], skip, cap=installed_services.CAP) > installed_services.CAP:
-            problem(svc_name, f"service-cap:{svc_name}",
-                    _("service {name}: its state is over {gb} GB, so the backup leaves it out", name=svc_name,
-                      gb=installed_services.CAP >> 30))
+            service_problems[svc_name] = [_("service {name}: its state is over {gb} GB, so the backup leaves it out",
+                                            name=svc_name, gb=installed_services.CAP >> 30)]
     live = {f"{e.project}:{e.path}" for e in entries if e.path}
     for k in [k for k in sizes if k not in live]:
         del sizes[k]
@@ -193,6 +194,14 @@ def main(argv: list[str]) -> int:
     STATE.parent.mkdir(parents=True, exist_ok=True)
     STATE.write_text(json.dumps(state, ensure_ascii=False, indent=1))
     told = True
+    for svc_name, probs in sorted(service_problems.items()):
+        for x in probs:
+            print(f"⚠️ {x}")
+        told &= alert.once(f"service-data:{svc_name}", probs, _("service {name}'s state is backed up again",
+                                                                 name=svc_name))
+    for key in alert.open_keys("service-data:"):
+        if key.split(":", 1)[1] not in service_problems:
+            told &= alert.once(key, [], _("service {name}'s state is backed up again", name=key.split(":", 1)[1]))
     for key in alert.open_keys(alert.DATA_KEY):
         if key[len(alert.DATA_KEY):] not in problems:
             told &= alert.once(key, [], _("{project}'s declared data is fine again", project=key[len(alert.DATA_KEY):]))
@@ -203,7 +212,7 @@ def main(argv: list[str]) -> int:
                            _("{project}'s declared data is fine again", project=project), ids=ids[project])
     print(_("Checked {count} declared {count:folder|folders}; {problems} {problems:project|projects} with problems",
             count=len(entries), problems=len(problems)))
-    if not problems:
+    if not problems and not service_problems:
         return 0 if told else 1
     return alert.FOUND if told else 1
 
