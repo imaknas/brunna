@@ -110,7 +110,16 @@ class Server(unittest.TestCase):
         self.assertEqual((printed["name"], printed["v"]), ("demo", 2), "the v1 entry as a letter is merged onto it")
         self.assertIn("manifest.update", text, "how to change it, after the entry")
         _, res = self.session([("manifest", {})], cwd=self.tmp / "ws" / "other")
-        self.assertEqual(yaml.safe_load(res[0][1].split("\n(")[0])["name"], "other", "the folder's project, only")
+        self.assertEqual(yaml.safe_load(res[0][1].split("\n(")[0])["name"], "other", "the server's project")
+
+    def test_manifest_never_shows_the_folder_s_entry_for_another_project(self):
+        shutil.rmtree(self.ws)
+        for named in ("demo", "dmeo"):   # its folder gone; a name no project has
+            with self.subTest(named):
+                _, res = self.session([("manifest", {})], cwd=self.tmp / "ws" / "other", env={"AGENTHUB_PROJECT": named})
+                err, text = res[0]
+                self.assertTrue(err, text)
+                self.assertNotIn("name: other", text)
 
     def test_read_reply_and_close(self):
         sent = self.hubbus("send", "--from", "other", "--to", "demo", "--type", "question", "--text", "which cache?")

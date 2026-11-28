@@ -15,7 +15,9 @@ that agent opens in a project folder can:
 | `note` | Add an entry to this project's memory note for today |
 | `manifest` | This project's registry entry, as a `manifest.update` is merged onto it (read-only; = `brunna manifest`) |
 
-It is the same implementation as the command line `brunna inbox|show|thread|send|ack|pass|done` (`bin/hubbus`). On
+It is the same implementation as the command line `brunna inbox|show|thread|send|ack|pass|done|manifest`
+(`bin/hubbus`). A change to the registry entry is a `manifest.update` letter, sent with the command line: the server's
+`send` doesn't send one. On
 `initialize` the server puts the platform's rules and the number of letters not yet closed into `instructions`: the
 rules reach the agent without changing any file in the project.
 

@@ -8,7 +8,8 @@ memory notes (docs/design/tool-agnostic.md section 4).
 
 Tools: inbox, show, thread, send, ack, pass, done (same names and meanings as `brunna`'s mailbox commands) + ask_owner
 (ask the owner), note (written into this project's memory notes), manifest (= `brunna manifest`: this project's registry
-entry, read-only; never a confined run's). Everything is handed to bin/hubbus (the same
+entry, read-only; never a confined run's; hubbus takes the project from the folder it runs in, so the server runs
+it only in its project's own folder). Everything is handed to bin/hubbus (the same
 implementation); the server only decides which project: environment variable AGENTHUB_PROJECT > working directory
 (hubbus.project_of: worktrees and .agent-memory count as the main project). Project not recognised -> every tool
 returns an error saying how to set it. A sandboxed project's mail goes through its outbox and view, as hubbus does
@@ -417,8 +418,10 @@ TOOLS = [
          "as_is": _str("send it without the check, saying why")}}},
     {"name": "manifest", "description": "This project's registry entry: what the platform has declared for it (tests, "
                                         "services, jobs, secrets, data outside its folder…), as a manifest.update is merged "
-                                        "onto it. Read-only: to change a field, copy it from here, change it and send only "
-                                        "that field (a list is replaced whole).",
+                                        "onto it. Read-only. A change is a manifest.update letter, sent with the command "
+                                        "line (brunna send --type manifest.update; this server's send doesn't send one): "
+                                        "copy the field from here, change it and send only that field (a list is replaced "
+                                        "whole).",
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "note", "description": "Add an entry to this project's memory notes for today (what was done, what was "
                                     "decided, what is unfinished; one matter per entry).",
@@ -632,7 +635,7 @@ def mail_args(project: str, name: str, args: dict, run: "Run | None" = None) -> 
         raise BadArgs(_("the arguments must be an object"))
     if name == "inbox":
         return ["inbox", f"--project={project}"]
-    if name == "manifest":   # hubbus reads the project from the folder it runs in: hubbus_cli runs it in the project's
+    if name == "manifest":   # hubbus reads the project from the folder it runs in (call() checks it is the project's)
         return ["manifest"]
     if name in ("show", "thread"):
         return [name, "--", _one_id(args)]
@@ -727,6 +730,12 @@ def call(project: str | None, why: str, name: str, args: dict, client: "Client |
         cmd = mail_args(project, name, args)
     except BadArgs as e:
         return False, _("wrong arguments: {e}", e=e)
+    if name == "manifest":
+        # the one command that names no project: hubbus finds it from the folder, so it runs only where that folder is
+        # this project's (a server named to a project whose folder is gone would otherwise show the one it started in)
+        ws = hubconf.workspace(project)
+        if not ws or not pathlib.Path(ws).is_dir() or hb().project_of(pathlib.Path(ws)) != project:
+            return False, _("{project}'s folder isn't there, so its registry entry can't be read from it", project=project)
     if name == "inbox":
         try:
             n = unread(project)

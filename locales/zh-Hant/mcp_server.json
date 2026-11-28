@@ -59,5 +59,6 @@
  "This session's tool version failed the platform's sandbox check: the platform steers no letter to it, and the project's letters wait for another session.": "這個 session 的工具版本沒通過平台的沙箱檢查:平台不會把任何信導向它,這個專案的信會等別的 session。",
  "{path} is already connected, as the project {name}; nothing to do": "{path} 已經接上了(專案 {name}),不用再做什麼",
  "{project}: a merge or the like is under way in {path}; the note is not written until somebody finishes it": "{project}:{path} 有一個合併(或類似的操作)做到一半;做完之前不會寫筆記",
- "{key} must be a list of texts": "{key} 要是文字清單"
+ "{key} must be a list of texts": "{key} 要是文字清單",
+ "{project}'s folder isn't there, so its registry entry can't be read from it": "{project} 的資料夾不在,沒辦法從那裡讀它的登記"
 }
