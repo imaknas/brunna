@@ -58,12 +58,14 @@ Rules beyond the shape:
 
 - `cli` and `mcp` are both required.
 - `data` paths are relative to the state folder brunna gives the service: no leading `/` or `~`, no `..`, no glob
-  characters, and no entry inside another.
+  characters, no entry inside another (compared case-insensitively), and nothing under `.brunna/`, which is the
+  platform's.
 - Secret names are environment variable names, each once, and none the platform or a process relies on: nothing
-  starting with `BRUNNA_`, `AGENTHUB_`, `LD_`, `DYLD_`, `PYTHON`, `NODE_`, `UV_`, `NPM_`, `GIT_`, `SSH_` or `LC_`, and
-  not `PATH`, `HOME`, `TMPDIR`, `LANG`, the proxy or CA variables and the like.
+  starting with `BRUNNA_`, `AGENTHUB_`, `LD_`, `DYLD_`, `PYTHON`, `NODE_`, `UV_`, `NPM_`, `PIP_`, `GIT_`, `SSH_`, `LC_`,
+  `XDG_`, `PERL5`, `RUBY`, `CARGO_`, `RUSTUP_`, `BUN_` or `DENO_`, and not `PATH`, `HOME`, `TMPDIR`, `LANG`, `TZ`, the
+  Java options, the proxy or CA variables and the like.
 - `backup: false` needs a `why`.
-- Duplicate keys in the YAML are refused.
+- Duplicate keys and merge keys (`<<`) in the YAML are refused.
 
 The schema is [contracts/service-manifest.v1.schema.json](../contracts/service-manifest.v1.schema.json). To check a
 manifest from a brunna checkout:
@@ -76,8 +78,8 @@ bin/py bin/service_manifest.py <your repo>
 
 - **Your state folder is the only place you write.** Keep your code's folder read-only at run time; caches and data go
   in the state folder (its path is given to you at run time).
-- **Lockfiles.** Setup runs with `uv sync --frozen`, `npm ci` and the like; install scripts don't run unless the user
-  allows them.
+- **Lockfiles.** Write setup to install from lockfiles (`uv sync --frozen`, `npm ci --ignore-scripts`). Once installing
+  is built, setup will run in a profile of its own, and install scripts will run only if the user allows them.
 - **Who is calling.** Each call carries `BRUNNA_CALLER`, the project that called, so you can attribute cost or limit
   use. Never trust a caller name sent in a tool's arguments.
 - **Interface versions.** Callers pin your `interface` major. Adding a tool or an optional argument keeps it; removing

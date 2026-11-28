@@ -31,10 +31,13 @@ FILE = "brunna-service.yaml"
 SCHEMA = pathlib.Path(__file__).resolve().parent.parent / "contracts" / "service-manifest.v1.schema.json"
 MODEL_POINT = re.compile(r"[a-z0-9][a-z0-9-]{0,47}\Z")   # registry.MODEL_POINT (registry imports too much to share)
 PLAIN = re.compile(r"[^\x00-\x1f\x7f()\[\]{}*?]+\Z")
-RESERVED_PREFIXES = ("BRUNNA_", "AGENTHUB_", "LD_", "DYLD_", "PYTHON", "NODE_", "UV_", "NPM_", "GIT_", "SSH_", "LC_")
+RESERVED_PREFIXES = ("BRUNNA_", "AGENTHUB_", "LD_", "DYLD_", "PYTHON", "NODE_", "UV_", "NPM_", "PIP_", "GIT_", "SSH_",
+                     "LC_", "XDG_", "PERL5", "RUBY", "CARGO_", "RUSTUP_", "BUN_", "DENO_")
 RESERVED = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP", "LANG", "TERM", "PWD", "IFS",
             "ENV", "BASH_ENV", "PROMPT_COMMAND", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",
-            "CURL_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY"}
+            "CURL_CA_BUNDLE", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "JAVA_TOOL_OPTIONS",
+            "_JAVA_OPTIONS", "TZ"}
+PLATFORM_DIR = ".brunna"   # in the state folder: the service's platform mail (outbox, inbox view), never its data
 
 
 def _reserved(name: str) -> bool:
@@ -51,7 +54,11 @@ def _loader():
     def mapping(loader, node, deep=False):
         seen = set()
         for k, _v in node.value:
+            if k.tag == "tag:yaml.org,2002:merge":   # `<<: *anchor` would hide keys from a reader of the file
+                raise yaml.constructor.ConstructorError(None, None, _("merge keys (<<) are not allowed"), k.start_mark)
             key = loader.construct_object(k, deep=deep)
+            if not isinstance(key, (str, int, float, bool, type(None))):
+                raise yaml.constructor.ConstructorError(None, None, _("a key must be a plain value"), k.start_mark)
             if key in seen:
                 raise yaml.constructor.ConstructorError(None, None, _("duplicate key {key!r}", key=key), k.start_mark)
             seen.add(key)
@@ -70,13 +77,22 @@ def parse(text: str) -> tuple[object, list[str]]:
         return None, [_("not readable as YAML: {err}", err=str(e).splitlines()[0] if str(e) else type(e).__name__)]
 
 
+def _fold(part: str) -> str:
+    """A path step as the disk may compare it (case-insensitive, NFC): Results and results are one folder on APFS."""
+    import unicodedata
+    return unicodedata.normalize("NFC", part).casefold()
+
+
 def _rel_problem(raw: str) -> str | None:
     if raw.startswith(("/", "~")) or "\\" in raw:
         return _("must be relative to the state folder (no leading / or ~)")
     if not PLAIN.match(raw):
         return _("no glob, bracket, brace or control character")
-    if any(p in ("", ".", "..") for p in raw.rstrip("/").split("/")):
+    parts = raw.rstrip("/").split("/")
+    if any(p in ("", ".", "..") for p in parts):
         return _("no empty, . or .. step")
+    if _fold(parts[0]) == PLATFORM_DIR:
+        return _("{dir} in the state folder is the platform's", dir=PLATFORM_DIR)
     return None
 
 
@@ -108,7 +124,7 @@ def problems(doc) -> list[str]:
         if why:
             errs.append(_("data[{i}]: path {path}: {why}", i=i, path=raw, why=why))
             continue
-        parts = tuple(p for p in raw.split("/") if p)
+        parts = tuple(_fold(p) for p in raw.split("/") if p)
         for j, other in paths:
             if parts[:len(other)] == other or other[:len(parts)] == parts:
                 errs.append(_("data[{i}]: path {path} overlaps data[{j}]", i=i, path=raw, j=j))

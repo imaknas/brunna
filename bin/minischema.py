@@ -25,6 +25,41 @@ def _type_ok(t: str, x) -> bool:
     return isinstance(x, TYPES.get(t, object))
 
 
+def _same(x, c) -> bool:
+    """JSON equality: true is not 1, and 1.0 is not the integer 1 a const or enum names."""
+    if isinstance(x, bool) or isinstance(c, bool):
+        return isinstance(x, bool) and isinstance(c, bool) and x == c
+    if isinstance(c, int) and isinstance(x, float) or isinstance(c, float) and isinstance(x, int):
+        return False
+    return x == c
+
+
+def _ecma(pattern: str) -> str:
+    """The pattern for Python's re with ECMA's `$`: the end of the string (Python's `$` also matches before a final
+    newline). Every `$` outside a bracket and not escaped becomes `\\Z`."""
+    out, i, in_class = [], 0, False
+    while i < len(pattern):
+        c = pattern[i]
+        if c == "\\":
+            out.append(pattern[i:i + 2])
+            i += 2
+            continue
+        if in_class:
+            in_class = c != "]"
+        elif c == "[":
+            in_class = True
+        elif c == "$":
+            c = r"\Z"
+        out.append(c)
+        i += 1
+    return "".join(out)
+
+
+def _search(pattern: str, x: str) -> bool:
+    """A JSON Schema pattern (ECMA semantics for `$`)."""
+    return re.search(_ecma(pattern), x) is not None
+
+
 def errors(schema: dict, x, path: str = "$", root: dict | None = None) -> list[str]:
     root = root or schema
     if schema is True or schema == {}:
@@ -45,12 +80,12 @@ def errors(schema: dict, x, path: str = "$", root: dict | None = None) -> list[s
         ts = t if isinstance(t, list) else [t]
         if not any(_type_ok(tt, x) for tt in ts):
             return [_("{path}: the type must be {type}, got {actual}", path=path, type=t, actual=type(x).__name__)]
-    if "const" in schema and x != schema["const"]:
+    if "const" in schema and not _same(x, schema["const"]):
         out.append(_("{path}: must be {const!r}", path=path, const=schema["const"]))
-    if "enum" in schema and x not in schema["enum"]:
+    if "enum" in schema and not any(_same(x, e) for e in schema["enum"]):
         out.append(_("{path}: {value!r} is not in {enum}", path=path, value=x, enum=schema["enum"]))
     if isinstance(x, str):
-        if "pattern" in schema and not re.search(schema["pattern"], x):
+        if "pattern" in schema and not _search(schema["pattern"], x):
             out.append(_("{path}: {value!r} does not match {pattern}", path=path, value=x, pattern=schema["pattern"]))
         if "minLength" in schema and len(x) < schema["minLength"]:
             out.append(_("{path}: too short", path=path))

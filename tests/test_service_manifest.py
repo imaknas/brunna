@@ -89,6 +89,34 @@ class Manifest(unittest.TestCase):
         doc["secrets"] = [{"name": "A_KEY", "what": "x"}, {"name": "A_KEY", "what": "y"}]
         self.bad(doc)
 
+    def test_trailing_newline_and_json_types(self):
+        for key, value in (("name", "ab\n"), ("cli", {"run": "a\n"}), ("network", ["api.example.com\n"]),
+                           ("secrets", [{"name": "A_KEY\n", "what": "x"}]), ("v", True), ("v", 1.0)):
+            with self.subTest(key=key, value=value):
+                doc = example()
+                doc[key] = value
+                self.bad(doc)
+
+    def test_more_paths_and_names(self):
+        for data in ([{"path": "Results", "what": "x"}, {"path": "results/a", "what": "y"}],
+                     [{"path": ".brunna/outbox", "what": "x"}], [{"path": ".Brunna", "what": "x"}]):
+            with self.subTest(data=data):
+                doc = example()
+                doc["data"] = data
+                self.bad(doc)
+        for name in ("PIP_INDEX_URL", "XDG_CONFIG_HOME", "PERL5OPT", "RUBYOPT", "JAVA_TOOL_OPTIONS", "TZ", "CARGO_HOME"):
+            with self.subTest(name=name):
+                doc = example()
+                doc["secrets"] = [{"name": name, "what": "x"}]
+                self.bad(doc)
+
+    def test_odd_yaml_keys(self):
+        for text in ("? [a]\n: 1\n", "? {a: 1}\n: 1\n", "a: &b {x: 1}\nc:\n  <<: *b\n", "a:\n  b: 1\n  b: 2\n"):
+            with self.subTest(text=text):
+                doc, errs = sm.parse(text)
+                self.assertIsNone(doc)
+                self.assertTrue(errs)
+
     def test_not_a_mapping(self):
         for doc in (None, [], "text"):
             with self.subTest(doc=doc):
