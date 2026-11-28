@@ -1,6 +1,8 @@
 # Services: brunna as the centre of an ecosystem
 
-> brunna session · 2026-11-28 · r3, design, nothing built. r2 after two blind reviews of r1 (security; fit with the
+> brunna session · 2026-11-28 · r4, design. **Built 11-28: step 1** (the contract
+> `contracts/service-manifest.v1.schema.json`, `bin/service_manifest.py`, `docs/service-authors.md`); the rest not.
+> History: r2 after two blind reviews of r1 (security; fit with the
 > platform): the wiring moved into the platform's own MCP server, installed services got their own folders, outbox and
 > answer path, the manifest can't widen a grant, and egress is said plainly not to be confined yet. r3 after a third
 > review of r2: service tools only for a project known by its folder and never from a confined `brunna mcp`, a

@@ -1,0 +1,31 @@
+# An example service manifest (service-manifest.v1): committed at the service's repository root as brunna-service.yaml.
+v: 1
+name: example-review
+what: "Ask several providers' models the same question and run blind reviews"
+interface: 2
+setup:
+- uv sync --frozen
+- npm ci --ignore-scripts
+cli:
+  run: uv run review
+mcp:
+  run: uv run review-mcp
+models:
+  judge:
+    tier: strong
+secrets:
+- name: OPENAI_API_KEY
+  what: "OpenAI models"
+  how: "make a key at the provider's API keys page"
+  optional: true
+network:
+- api.openai.com
+- api.anthropic.com
+data:
+- path: results
+  what: "review results"
+- path: cache
+  what: "downloaded model lists"
+  backup: false
+  why: "fetched again from the providers"
+principal: true

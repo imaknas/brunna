@@ -1,0 +1,15 @@
+{
+ "duplicate key {key!r}": "重複的鍵 {key!r}",
+ "not readable as YAML: {err}": "不是能讀的 YAML:{err}",
+ "must be relative to the state folder (no leading / or ~)": "要是相對於狀態資料夾的路徑(開頭不能是 / 或 ~)",
+ "no glob, bracket, brace or control character": "不能有萬用字元、方括號、大括號或控制字元",
+ "no empty, . or .. step": "不能有空的、. 或 .. 的一段",
+ "models: name {name!r} must be lowercase letters, digits and -": "models:名稱 {name!r} 只能有小寫字母、數字和 -",
+ "secrets[{i}]: {name} is named twice": "secrets[{i}]:{name} 出現了兩次",
+ "secrets[{i}]: {name} is an environment name the platform sets or a process depends on": "secrets[{i}]:{name} 是平台會設定、或程式執行要靠的環境變數名稱",
+ "data[{i}]: path {path}: {why}": "data[{i}]:路徑 {path}:{why}",
+ "data[{i}]: path {path} overlaps data[{j}]": "data[{i}]:路徑 {path} 跟 data[{j}] 重疊",
+ "can't read {path}: {err}": "讀不到 {path}:{err}",
+ "usage: service_manifest.py <file or folder>": "用法:service_manifest.py <檔案或資料夾>",
+ "the manifest is valid": "宣告檔沒有問題"
+}
