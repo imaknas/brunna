@@ -676,5 +676,7 @@ def service_policy(entry: dict, phase: str, index: dict | None = None) -> dict:
             "git_fence": None,
             "installed": {"phase": phase, "write": write, "read": read, "tool_files": tools["files"],
                           "tool_dirs": tools["dirs"], "fence_names": list(GIT_FENCE_NAMES),
-                          "fence_files": list(GIT_FENCE_FILES), "fence_free": [f["cache"]]},
+                          "fence_files": list(GIT_FENCE_FILES), "fence_free": [f["cache"]],
+                          "roots": [f["base"], f["state"], f["home"], f["cache"], f["tmp"], f["cache"] / "home",
+                                    f["code_root"], f["code"]]},
             "network": DOMAINS + list((entry.get("granted") or {}).get("network") or []), "local_bind": False}

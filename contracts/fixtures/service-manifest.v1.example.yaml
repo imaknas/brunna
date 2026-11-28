@@ -28,4 +28,4 @@ data:
   what: "downloaded model lists"
   backup: false
   why: "fetched again from the providers"
-principal: true
+principal: false

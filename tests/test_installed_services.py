@@ -73,6 +73,7 @@ CLI = r"""case "$1" in
 read) if cat "$2" >/dev/null 2>&1 || ls "$2/" >/dev/null 2>&1; then echo "ALLOWED"; else echo "REFUSED"; fi;;
 write) if (echo x > "$2") 2>/dev/null; then echo "ALLOWED"; else echo "REFUSED"; fi;;
 env) env;;
+swap) if rm -rf "$2" 2>/dev/null && ln -s "$3" "$2" 2>/dev/null; then echo "SWAPPED"; else echo "REFUSED"; fi;;
 esac
 """
 DRIVER = """import importlib.util, sys
@@ -159,6 +160,31 @@ class AddAndRun(Instance):
         self.assertTrue((base / "state").exists())
         self.assertFalse((self.tmp / "config" / "services" / "echo-svc.yaml").exists())
 
+    def test_its_folders_stay_its_own(self):
+        self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 0)
+        base, victim = self.tmp / "services" / "echo-svc", self.tmp / "victim"
+        victim.mkdir()
+        (victim / "secret.txt").write_text("owner's")
+        out = self.cli("run", "echo-svc", "--", "swap", str(base / "state"), str(victim)).stdout
+        if isolation.adapter()[0] == "seatbelt":   # Landlock: removing state/ needs a right on base it doesn't have
+            self.assertIn("REFUSED", out)
+        # and a link put there some other way is refused before anything runs or is made
+        shutil.rmtree(base / "state")
+        (base / "state").symlink_to(victim)
+        r = self.cli("run", "echo-svc", "--", "read", str(victim / "secret.txt"))
+        self.assertNotEqual(r.returncode, 0)
+        self.assertNotIn("ALLOWED", r.stdout)
+        self.assertFalse((victim / "home").exists())
+
+    def test_nothing_setup_starts_outlives_it(self):
+        (self.src / "brunna-service.yaml").write_text(MANIFEST.replace(
+            "echo ok > built.txt", "(sleep 2; echo late > late.txt) & echo ok > built.txt"))
+        git("commit", "-qam", "late", cwd=self.src)
+        self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 0)
+        import time
+        time.sleep(3)
+        self.assertFalse((self.code() / "late.txt").exists())
+
     def test_a_failing_setup_leaves_nothing(self):
         (self.src / "brunna-service.yaml").write_text(MANIFEST.replace("echo ok > built.txt", "exit 3"))
         git("commit", "-qam", "fail", cwd=self.src)
@@ -175,6 +201,12 @@ class Refused(Instance):
         r = self.cli("add", str(self.src), "--yes")
         self.assertEqual(r.returncode, 1)
         self.assertFalse((self.tmp / "services" / "echo-svc").exists())
+
+    def test_remove_takes_only_a_service_name(self):
+        (self.tmp / "config" / "projects" / "foo.yaml").write_text("v: 2\n")
+        r = self.cli("remove", "../projects/foo")
+        self.assertEqual(r.returncode, 1)
+        self.assertTrue((self.tmp / "config" / "projects" / "foo.yaml").exists())
 
     def test_local_source_needs_the_test_switch(self):
         names.env_set(self.env, "SERVICE_ALLOW_LOCAL", "")

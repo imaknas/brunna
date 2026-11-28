@@ -485,6 +485,8 @@ def installed_profile(pol: dict) -> str:
         f"(allow network-outbound (remote unix-socket (path-literal {q(RESOLVER)})))",
         *_isolation(pol, write, readable=read, temp=False),
         *_installed_fence(inst),
+        "; its folders themselves can't be removed, renamed or replaced (by a link the next run would follow)",
+        "(deny file-write* " + " ".join(f"(literal {q(pathlib.Path(x).resolve())})" for x in inst["roots"]) + ")",
         "; reads: nothing but the system's folders, its own and its tools (an allow-list: the last matching rule wins)",
         '(deny file-read* (subpath "/"))',
         "(allow file-read* (literal \"/\") (literal \"/etc\") (literal \"/var\") (literal \"/tmp\") " + " ".join(

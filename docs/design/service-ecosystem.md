@@ -228,20 +228,15 @@ has two places here.
    settled or reopened record to the service is core §8's delivery to the project, the principal side's duty, which
    brunna carries as the transport into the service's inbox view; it is not the registrar's (the registrar applies the
    Markdown binding to state documents) and carries none of the registrar's claims.
-   Mechanical application: agent-ops-specs wrote the **Program binding** (11-28, `program/SPEC.md`, with
-   `conformance/apply.json` and a reference `ph_program.py`; a 0.7 proposal, unpublished, since a binding shares its
-   extensions' version and 0.6 is frozen). Its result is a pure function of the records: apply (a value), open,
-   withdrawn, dismissed, judgement, or fault. It applies only when the service wrote the item itself (its own `by`,
-   `terms_rev` and digest matching), a principal side configured for the binding settled it, authority is principal
-   or confirmed, and the answer is exactly an option (Decisions: `answer.option` among the options and `answer.text`
-   the option's label, no note; Acts: done or dropped, no note). Judgement means asking again (a new decision with the
-   same options, the old one withdrawn as replaced); fault is reported to the deployment once. What it asks of brunna
-   as the deployment: which requesters are programs, which principal sides implement the binding, and a key prefix per
-   service; of the service: options on every decision, text saying what each option, a dismissal and giving up do,
-   intent written before acting, refetch from the start after losing its store; of the principal side: an answered
-   option's label written into `answer.text` verbatim, anything else said in text (so the program asks again).
-   Until Acts and Decisions 0.7 list it, mechanical application stays outside the published spec, but services can be
-   built to it now.
+   Mechanical application: **deferred** (11-28, the owner's decision in agent-ops-specs), until the first service that
+   asks the owner itself appears. agent-ops-specs wrote a Program binding (`program/SPEC.md`: a program may act on a
+   settlement only when the answer is exactly one of its own options, settled by a principal side configured for it)
+   and keeps it out of every version: it is needed only where no agent stands between, a program that asks and then
+   acts on the answer itself (a nightly job asking before it deletes, a bot before it pays). No such service exists:
+   the review service asks for no `principal` grant; it is a tool agents call. **When a service needs the owner to
+   decide, the agent calling it asks** (with the ordinary Acts and Decisions), and passes the answer in its call (the
+   review service's `--budget`). Until the first service that asks for itself, the `principal` grant is reserved and
+   unused.
    A call waiting on the owner returns to its consumer at once with the question's id; it never holds the call open.
    Owner to-dos and questions from services appear with projects' (`todo.md`, the principal side), the service named.
 2. **The principal side is a role anyone can fill.** Muninn is one, `bin/owner.py` another; an assistant that
@@ -476,6 +471,6 @@ Each gets its own blind review before it is built.
   refused); one whose manifest asks for more than was granted waits for the owner.
 - The first public service is the owner's public review service alone; the compute project stays the owner's own
   (kind 1) until the owner decides otherwise.
-- Asked of agent-ops-specs (11-28, the owner's go): both written. Transport 0.1 (experimental, pushed) and the Program
-  binding (a 0.7 proposal, not pushed yet). Open: when the bridge and Muninn move to Transport, and telling Muninn
-  what both ask of a principal side.
+- Asked of agent-ops-specs (11-28, the owner's go): Transport 0.1 (experimental, pushed; Muninn serves it since
+  11-28) and the Program binding (written, then deferred the same day by the owner: no service asks for itself).
+  Open: when brunna's bridge moves to Transport.

@@ -77,11 +77,21 @@ def _commit(name: str, message: str) -> None:
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def _sandboxed(name: str, phase: str, cwd: pathlib.Path, words: list[str], timeout: int | None = None,
-               capture: bool = False) -> subprocess.CompletedProcess:
+def _sandboxed(name: str, phase: str, cwd: pathlib.Path, words: list[str], timeout: int | None = None) -> int:
+    """Run in the service's sandbox, in a process group of its own, killed whole when the command ends (or times out):
+    nothing it started in the background outlives it (a setup's leftover would keep writing its code folder)."""
+    import signal
     cmd = [sys.executable, "-I", "-B", str(BIN / "sandboxed-run"), "--installed", name, "--phase", phase,
            "--cwd", str(cwd), "--", *words]
-    return subprocess.run(cmd, timeout=timeout, text=True, capture_output=capture)
+    p = subprocess.Popen(cmd, start_new_session=True)
+    try:
+        return p.wait(timeout=timeout)
+    finally:
+        try:
+            os.killpg(p.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        p.wait()
 
 
 def show_asks(m: dict) -> None:
@@ -185,7 +195,7 @@ def _add(url: str, ref: str | None, yes: bool, allow_local: bool, stage: pathlib
         return err(_("not added: {path} already exists", path=base))
     ok = False
     try:
-        os.rename(stage / "repo.git", f["repo"])
+        shutil.move(str(stage / "repo.git"), str(f["repo"]))   # private_tmp may be on another volume
         service_fetch.checkout(f["repo"], commit, f["code"])
         for d in ("cache", "state", "home", "tmp"):
             f[d].mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -203,13 +213,13 @@ def _add(url: str, ref: str | None, yes: bool, allow_local: bool, stage: pathlib
         for c in entry["run"]["setup"]:
             say(_("setup: {cmd}", cmd=c))
             try:
-                r = _sandboxed(name, "setup", f["code"], ["/bin/sh", "-c", c], timeout=SETUP_TIMEOUT)
+                code = _sandboxed(name, "setup", f["code"], ["/bin/sh", "-c", c], timeout=SETUP_TIMEOUT)
             except subprocess.TimeoutExpired:
                 return err(_("not added: setup took longer than {m} minutes", m=SETUP_TIMEOUT // 60))
-            if r.returncode:
-                return err(_("not added: setup failed ({cmd}, exit {code})", cmd=c, code=r.returncode))
+            if code:
+                return err(_("not added: setup failed ({cmd}, exit {code})", cmd=c, code=code))
         ok = True
-    except service_fetch.FetchError as e:
+    except (service_fetch.FetchError, OSError) as e:
         return err(_("not added: {why}", why=e))
     finally:
         if not ok:
@@ -239,6 +249,8 @@ def cmd_remove(args: list[str]) -> int:
     if len(rest) != 1:
         return err(_("usage: brunna service remove <name> [--purge]"))
     name = rest[0]
+    if not svc.NAME.match(name):
+        return err(_("{name} is not an installed service", name=name))
     if name not in svc.entries() and not _entry_path(name).exists():
         return err(_("{name} is not an installed service", name=name))
     f = svc.folders(name)
@@ -302,7 +314,7 @@ def cmd_run(args: list[str]) -> int:
     except ValueError as x:
         return err(_("{name}'s CLI command can't be parsed ({err})", name=name, err=x))
     f = svc.folders(name, e["commit"])
-    return _sandboxed(name, "run", f["code"], [*words, *rest]).returncode
+    return _sandboxed(name, "run", f["code"], [*words, *rest])
 
 
 VERBS = {"add": cmd_add, "remove": cmd_remove, "list": cmd_list, "secret": cmd_secret, "run": cmd_run}

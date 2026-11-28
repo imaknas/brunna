@@ -49,7 +49,7 @@ network: [api.openai.com, api.anthropic.com]   # the hosts it reaches
 data:                     # what it keeps, relative to its state folder; backed up unless backup: false
 - {path: results, what: "review results"}
 - {path: cache, what: "downloaded model lists", backup: false, why: "fetched again from the providers"}
-principal: true           # it asks to put questions and tasks to the user
+principal: false          # reserved: asking the user itself (not used yet)
 ```
 
 Everything in it must be true on every machine: no path of yours, no port, no key, no list of who uses it. What the
@@ -88,14 +88,15 @@ on a port. Its environment is built from nothing:
 | variable | what |
 |---|---|
 | `BRUNNA_SERVICE_STATE` | your state folder: the only place you write what you keep; `data` paths are relative to it |
-| `HOME` | `<state>/home` |
+| `HOME` | `<state>/home` at run time, `<cache>/home` in setup |
 | `XDG_CACHE_HOME`, `UV_CACHE_DIR`, `npm_config_cache`, … | your cache folder (not backed up); downloads go here (Hugging Face follows `XDG_CACHE_HOME`) |
 | `TMPDIR` | a temp folder of your own |
 | `BRUNNA_CALLER` | who called: `owner` from the user's terminal; the calling project once step 3 lands |
 | each granted secret | by its name, if the user set it |
 | `PATH`, `LANG` | `uv`, `node`, `/usr/bin`, `/bin` |
 
-- Your code folder is read-only at run time: no `.env` beside the code, no writing a config file there.
+- Your code folder is read-only at run time (and nothing setup started in the background outlives it): no `.env`
+  beside the code, no writing a config file there. Your folders themselves can't be removed or replaced.
 - In setup, the code folder and the cache are writable and the state folder isn't; no secrets are given.
 - On macOS, setup has no `git` or compilers (the Command Line Tools aren't readable inside): install from wheels
   (`uv sync --frozen --no-build`, or a pure-Python project), never from a git dependency.
@@ -114,5 +115,6 @@ on a port. Its environment is built from nothing:
   or changing one raises it.
 - **Long work.** A tool call should return quickly. For work that takes minutes (a review), return an id and offer a
   tool to fetch the result.
-- **Asking the user.** With `principal: true` granted, a question or task goes to the user through Principal Handoff
-  (how is added here with step 4). A call that waits on the user returns at once with the question's id.
+- **Asking the user.** When your service needs the user to decide (a budget, a choice), the agent calling it asks
+  the user and passes the answer in the call (an argument such as `--budget`). Leave `principal` false: a service
+  that asks the user itself and acts on the answer is reserved for later (docs/design/service-ecosystem.md).

@@ -71,6 +71,32 @@ def service_entry(svc: dict, cwd: str, platform_env: dict, git_dirs: list[str]):
     return isolation.Entry(env, there, svc.get("log"))
 
 
+def _own_folder(d: pathlib.Path, base: pathlib.Path) -> str | None:
+    """d is a real folder of this user's, not a link, its parent too (made if missing, base's parent must exist);
+    None when it is, else why not."""
+    import stat
+    d = pathlib.Path(d)
+    try:
+        st = os.lstat(d)
+    except FileNotFoundError:
+        if d != base and (why := _own_folder(d.parent, base)):
+            return why
+        try:
+            os.mkdir(d, 0o700)
+        except FileExistsError:
+            pass
+        except OSError as e:
+            return f"{d} can't be made ({e.strerror})"
+        st = os.lstat(d)
+    if not stat.S_ISDIR(st.st_mode):
+        return f"{d} is not a folder (a link or a file where its folder belongs)"
+    if st.st_uid != os.getuid():
+        return f"{d} is not this user's"
+    if d != base and os.path.realpath(d) != os.path.join(os.path.realpath(d.parent), d.name):
+        return f"{d} doesn't lead where it should"
+    return None
+
+
 def installed(name: str, phase: str | None, cwd: str, cmd: list[str]) -> int:
     """An installed service's command under its read model, in an environment of its own."""
     import installed_services as svc
@@ -88,6 +114,13 @@ def installed(name: str, phase: str | None, cwd: str, cmd: list[str]) -> int:
         return refuse(f"{cwd} is not inside {name}'s code folder")
     pol = policy.service_policy(entry, phase)
     env = dict(pol["env"])
+    # its folders must be what they are configured to be: real folders of the owner's, no link anywhere from its base
+    # down (a run could replace state/ with a link to a folder of the owner's, which the next run's profile, resolving
+    # its folders, would then allow, and the owner's mkdir here would follow); made one level at a time when missing
+    chain = [f["base"], f["state"], f["home"], f["cache"], f["tmp"], f["cache"] / "home", f["code_root"], f["code"]]
+    for d in chain:
+        if (why := _own_folder(d, f["base"])):
+            return refuse(f"{name}: {why}")
     if phase == "run":
         for secret in (entry.get("granted") or {}).get("secrets") or []:
             try:   # a file of the owner's, written by brunna service add/secret; never followed if a link
@@ -98,11 +131,6 @@ def installed(name: str, phase: str | None, cwd: str, cmd: list[str]) -> int:
                 continue   # an optional one not set
             except OSError as e:
                 return refuse(f"{name}'s secret {secret} can't be read ({e.strerror})")
-    for k in ("write", "read"):
-        for d in pol["installed"][k]:
-            pathlib.Path(d).mkdir(parents=True, exist_ok=True, mode=0o700)
-    pathlib.Path(env["HOME"]).mkdir(parents=True, exist_ok=True, mode=0o700)
-    pathlib.Path(env["TMPDIR"]).mkdir(parents=True, exist_ok=True, mode=0o700)
     try:
         os.chdir(real)
     except OSError as e:
