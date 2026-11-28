@@ -7,7 +7,8 @@
 > `brunna/service-updates`, the lock, `backup.services()`, the services' secrets in check-secrets, their state's size
 > in check-data) **and step 3a** (`bin/service_index.py`, `bin/service_tools.py`, `bin/mcp_relay.py`, `brunna mcp`
 > serving consumed services' tools to unsandboxed projects, `brunna service callers`, `isolation.platform_readable`);
-> the rest not.
+> **and step 3b's code** (sandboxed consumers by name, `runtime_ports.session_runtime`, sandboxed projects'
+> services, the manifest read without links or aliases, results filtered); the rest not.
 > History: r2 after two blind reviews of r1 (security; fit with the
 > platform): the wiring moved into the platform's own MCP server, installed services got their own folders, outbox and
 > answer path, the manifest can't widen a grant, and egress is said plainly not to be confined yet. r3 after a third

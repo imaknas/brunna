@@ -1,6 +1,8 @@
 {
- "{project} is sandboxed: services are served only to unsandboxed projects for now (step 3b)": "{project} 開了 sandbox:目前服務只提供給沒開 sandbox 的專案(第 3b 步)",
  "{service}: no such service here": "{service}:這裡沒有這個服務",
  "{service}: consumed at interface {want}, but it is at {have}": "{service}:consumes 寫的是介面 {want},它現在是 {have}",
- "{service}: {project} is not among its callers": "{service}:{project} 不在它的 callers 裡"
+ "{service}: {project} is not among its callers": "{service}:{project} 不在它的 callers 裡",
+ "{project} is sandboxed, and which coding agent runs this session can't be told: no services": "{project} 開了 sandbox,而且看不出這個 session 是哪個 coding agent 在跑：沒有服務",
+ "{project} is sandboxed, and {runtime} doesn't confine its sessions: no services": "{project} 開了 sandbox,而 {runtime} 不會把它的 session 關進 sandbox:沒有服務",
+ "{service}: a sandboxed project is served only when the service's callers names it (brunna service callers, or its registry callers)": "{service}:開了 sandbox 的專案，要服務的 callers 明確列出它才能用(brunna service callers,或它登錄裡的 callers)"
 }

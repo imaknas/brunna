@@ -1579,6 +1579,31 @@ def recorded_sessions(runtime: str) -> set[str]:
     return {runtime_of(s)[1] for s, rec in open_sessions().items() if rec["runtime"] == runtime}
 
 
+def session_runtime(chain=None) -> str | None:
+    """Which installed runtime's session this process runs under (docs/design/service-ecosystem.md, step 3b): the
+    nearest ancestor that a runtime's session_process claims. None: none claims one, or the process was reparented to
+    pid 1 (its session gone). For a process no session id reaches (an MCP server). chain: (pid, command) pairs, nearest
+    first (tests); the process's own ancestors otherwise."""
+    chain = list(ancestors()) if chain is None else list(chain)
+    if not chain or chain[0][0] <= 1:
+        return None
+    claims = []
+    for name in installed():
+        try:
+            fn = getattr(_module(name), "session_process", None)
+        except (KeyError, ImportError):
+            continue
+        if callable(fn):
+            claims.append((name, fn))
+    for pid, command in chain:
+        if pid <= 1:
+            return None
+        for name, fn in claims:
+            if fn(command or ""):
+                return name
+    return None
+
+
 def current_session(env=None) -> str | None:
     """Which session the current process belongs to, in the platform's ids. With one installed runtime: that runtime
     answers from the environment, as before A1. With several, each that has session state may find an id in the

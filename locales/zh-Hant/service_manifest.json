@@ -14,5 +14,6 @@
  "the manifest is valid": "宣告檔沒有問題",
  "{dir} in the state folder is the platform's": "狀態資料夾裡的 {dir} 是平台的",
  "merge keys (<<) are not allowed": "不能用合併鍵(<<)",
- "a key must be a plain value": "鍵要是一般的值"
+ "a key must be a plain value": "鍵要是一般的值",
+ "aliases (*name) are not allowed": "不能用 alias(*name)"
 }

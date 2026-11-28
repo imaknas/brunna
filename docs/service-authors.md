@@ -112,7 +112,9 @@ short: the whole name the client sees (`mcp__brunna__<service>__<tool>`) must fi
 digits, `_` and `-`. Your server is started once per session (start fast: it has 20 seconds to answer `initialize`
 and `tools/list`), as your service, with `BRUNNA_CALLER` the calling project. Requests your server makes to the
 client (sampling, elicitation) aren't supported; a call has 15 minutes. The user decides which projects may call it
-(`brunna service callers`).
+(`brunna service callers`); a project the user keeps in a sandbox is served only when named there. What your tools
+return reaches the caller as text and images only (resources and links to them are dropped), and your tools'
+`annotations` aren't passed on.
 
 ## Releases
 

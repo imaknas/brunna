@@ -1,13 +1,14 @@
 """Which services there are on this machine, and who may call each (docs/design/service-ecosystem.md, step 3).
 
   installed   every installed service (bin/installed_services.py): runs in its own sandbox
-  project     a registered, unsandboxed project of the owner's whose entry provides {contract: service, v: <major>}
-              and whose working tree holds a valid brunna-service.yaml: runs in its workspace with the owner's rights
-              (a sandboxed one is step 3b)
+  project     a registered project of the owner's whose entry provides {contract: service, v: <major>} and whose
+              working tree holds a valid brunna-service.yaml: runs in its workspace, with the owner's rights when the
+              project is unsandboxed, in the project's own sandbox when it is (step 3b)
 
 A consumer may call a service when its entry consumes {contract: service, from: <service>, v: <major>} at the service's
-current interface major, it is among the service's callers (not set: every registered project, never another
-service), and it isn't sandboxed (step 3a). Standard library + PyYAML.
+current interface major and it is among the service's callers (not set: every registered project, never another
+service). A sandboxed consumer (step 3b) only when its session's runtime confines its sessions and the service's
+callers names it: never by the default, since every service holds some of the owner's authority. Standard library + PyYAML.
 """
 from __future__ import annotations
 
@@ -41,12 +42,13 @@ class Service:
     mcp: list[str]             # the MCP server's words
     cwd: pathlib.Path
     callers: list[str] | None  # None: every registered project
+    sandboxed: bool = True     # runs in a sandbox (installed, or a sandboxed project's)
 
 
 def _kind1(name: str, doc: dict) -> Service | None:
     import service_manifest
-    if _sandboxed(doc) or "__" in name:
-        return None   # a sandboxed one is step 3b; a name holding __ wouldn't split from its tools' names
+    if "__" in name:
+        return None   # a name holding __ wouldn't split from its tools' names
     declared = [p for p in doc.get("provides") or [] if isinstance(p, dict) and p.get("contract") == CONTRACT]
     if not declared:
         return None
@@ -62,7 +64,7 @@ def _kind1(name: str, doc: dict) -> Service | None:
         words = shlex.split(m["mcp"]["run"])
     except ValueError:
         return None
-    return Service(name, "project", m["interface"], m["what"], words, ws, doc.get("callers"))
+    return Service(name, "project", m["interface"], m["what"], words, ws, doc.get("callers"), _sandboxed(doc))
 
 
 def _sandboxed(doc: dict) -> bool:
@@ -89,16 +91,23 @@ def services(projects: dict | None = None) -> dict[str, Service]:
     return out
 
 
-def consumed(consumer: str, projects: dict | None = None) -> tuple[list[Service], list[str]]:
-    """(the services this project may call, why each one it consumes can't be)."""
+def consumed(consumer: str, projects: dict | None = None, runtime: str | None = None) -> tuple[list[Service], list[str]]:
+    """(the services this project may call, why each one it consumes can't be). runtime: the session's runtime
+    (runtime_ports.session_runtime), which a sandboxed consumer's must confine its sessions."""
     projects = hubconf.projects() if projects is None else projects
     doc = projects.get(consumer) or {}
     wanted = [c for c in doc.get("consumes") or [] if isinstance(c, dict) and c.get("contract") == CONTRACT]
     if not wanted:
         return [], []
-    if _sandboxed(doc):
-        return [], [_("{project} is sandboxed: services are served only to unsandboxed projects for now (step 3b)",
-                      project=consumer)]
+    boxed = _sandboxed(doc)
+    if boxed:
+        import runtime_ports
+        if runtime is None:
+            return [], [_("{project} is sandboxed, and which coding agent runs this session can't be told: no services",
+                          project=consumer)]
+        if not runtime_ports.sessions_confined(runtime):
+            return [], [_("{project} is sandboxed, and {runtime} doesn't confine its sessions: no services",
+                          project=consumer, runtime=runtime)]
     have = services(projects)
     ok, why = [], []
     for c in wanted:
@@ -108,6 +117,9 @@ def consumed(consumer: str, projects: dict | None = None) -> tuple[list[Service]
         elif str(c.get("v")) != str(s.interface):
             why.append(_("{service}: consumed at interface {want}, but it is at {have}", service=s.name,
                          want=c.get("v"), have=s.interface))
+        elif boxed and consumer not in (s.callers or []):
+            why.append(_("{service}: a sandboxed project is served only when the service's callers names it "
+                         "(brunna service callers, or its registry callers)", service=s.name))
         elif s.callers is not None and consumer not in s.callers:
             why.append(_("{service}: {project} is not among its callers", service=s.name, project=consumer))
         else:

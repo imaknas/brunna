@@ -599,7 +599,11 @@ def current_session(env) -> str | None:
     return env.get("CLAUDE_CODE_SESSION_ID") or None
 
 
-_SESSION_PROCESS = re.compile(r"(?:^|/)claude(?:\s|$)|/claude-code/|@anthropic-ai/claude-code")
+# the claude executable; the npm package; the desktop app's session process (~/.claude/remote/ccd-cli/<version>, measured
+# 11-29); the native install's version (~/.local/share/claude/versions/<version>). Anchored: other things live under
+# ~/.claude/ (plugin servers, hooks) and must not be taken for a session
+_SESSION_PROCESS = re.compile(r"(?:^|/)claude(?:\s|$)|/claude-code/|@anthropic-ai/claude-code"
+                              r"|/\.claude/remote/ccd-cli/[^/\s]+(?:\s|$)|/\.local/share/claude/versions/[^/\s]+(?:\s|$)")
 
 
 def session_process(command: str) -> bool:

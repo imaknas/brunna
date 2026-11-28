@@ -52,7 +52,12 @@ def _loader():
     import yaml
 
     class Strict(yaml.SafeLoader):
-        pass
+        def compose_node(self, parent, index):
+            # an alias (*x) makes a small file a huge document: a manifest has no use for one
+            if self.check_event(yaml.events.AliasEvent):
+                raise yaml.composer.ComposerError(None, None, _("aliases (*name) are not allowed"),
+                                                  self.peek_event().start_mark)
+            return super().compose_node(parent, index)
 
     def mapping(loader, node, deep=False):
         seen = set()
@@ -135,14 +140,22 @@ def problems(doc) -> list[str]:
     return errs
 
 
+MAX_BYTES = 64 << 10
+
+
 def check(path: pathlib.Path) -> tuple[object, list[str]]:
-    """Read and check a manifest file (or a folder holding one)."""
-    if path.is_dir():
-        path = path / FILE
+    """Read and check a manifest file (or a folder holding one): never through a link, a regular file only (not a
+    FIFO), at most MAX_BYTES (a project's folder is the project's to fill, and the owner's process reads it)."""
+    import nofollow
+    path = pathlib.Path(path)
+    base, rel = (path, FILE) if path.is_dir() else (path.parent, path.name)
     try:
-        text = path.read_text()
+        raw = nofollow.read(base, rel, cap=MAX_BYTES)
+        if raw is None:
+            raise FileNotFoundError(base / rel)
+        text = raw.decode("utf-8")
     except (OSError, UnicodeDecodeError) as e:
-        return None, [_("can't read {path}: {err}", path=path, err=e)]
+        return None, [_("can't read {path}: {err}", path=base / rel, err=e)]
     doc, errs = parse(text)
     if errs:
         return None, errs
