@@ -513,7 +513,10 @@ class Client:
         self.incoming.put("")
 
     def _next(self) -> str:
-        return self.incoming.get()
+        line = self.incoming.get()
+        if line == "":
+            self.incoming.put("")   # the end stays the end for whoever reads next
+        return line
 
     def line(self) -> str:
         return self.pending.pop(0) if self.pending else self._next()
@@ -836,6 +839,8 @@ def _services(project: str | None):
     positive probe finds confined (docs/design/service-ecosystem.md, step 3a)."""
     import isolation
     import service_tools
+    if not service_tools.Services(project, None).wanted_any():
+        return None   # a project that consumes no service: its session's tools are as before, nothing probed
     why = None
     if os.environ.get("HUB_LLM_POINT") or os.environ.get("HUBBUS_LEASE"):
         why = _("this is a run the platform started")
@@ -863,9 +868,7 @@ def serve(run_file: str | None = None) -> int:
     log(_("project: {project}", project=project or _("(unrecognized)")))
     presence = Presence(None if run is not None else project)
     client = Client()
-    services = None if run is not None else _services(project)
-    if services is not None and not services.wanted_any():
-        services = None   # a project that consumes no service: its session's tools are as before
+    services = None if run is not None else _services(project)   # None for a project that consumes no service
     if services is not None:
         import atexit
         atexit.register(services.stop)

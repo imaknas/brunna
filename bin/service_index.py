@@ -44,11 +44,11 @@ class Service:
 
 
 def _kind1(name: str, doc: dict) -> Service | None:
-    import isolation
     import service_manifest
-    if isolation.sandboxed({**doc, "name": name}) or "__" in name:
+    if _sandboxed(doc) or "__" in name:
         return None   # a sandboxed one is step 3b; a name holding __ wouldn't split from its tools' names
-    if not any(isinstance(p, dict) and p.get("contract") == CONTRACT for p in doc.get("provides") or []):
+    declared = [p for p in doc.get("provides") or [] if isinstance(p, dict) and p.get("contract") == CONTRACT]
+    if not declared:
         return None
     ws = hubconf.path((doc.get("paths") or {}).get("workspace"))
     if not ws or not ws.is_dir():
@@ -56,11 +56,18 @@ def _kind1(name: str, doc: dict) -> Service | None:
     m, errs = service_manifest.check(ws)
     if errs or not isinstance(m, dict) or m.get("name") != name:
         return None
+    if str(declared[0].get("v")) != str(m.get("interface")):
+        return None   # what the registry says it provides must be what its manifest says it is
     try:
         words = shlex.split(m["mcp"]["run"])
     except ValueError:
         return None
     return Service(name, "project", m["interface"], m["what"], words, ws, doc.get("callers"))
+
+
+def _sandboxed(doc: dict) -> bool:
+    """Its sessions are sandboxed (enforce.sandbox), whatever service_sandbox_exempt says of its services and jobs."""
+    return (doc.get("enforce") or {}).get("sandbox") is True
 
 
 def services(projects: dict | None = None) -> dict[str, Service]:
@@ -84,13 +91,12 @@ def services(projects: dict | None = None) -> dict[str, Service]:
 
 def consumed(consumer: str, projects: dict | None = None) -> tuple[list[Service], list[str]]:
     """(the services this project may call, why each one it consumes can't be)."""
-    import isolation
     projects = hubconf.projects() if projects is None else projects
     doc = projects.get(consumer) or {}
     wanted = [c for c in doc.get("consumes") or [] if isinstance(c, dict) and c.get("contract") == CONTRACT]
     if not wanted:
         return [], []
-    if isolation.sandboxed({**doc, "name": consumer}):
+    if _sandboxed(doc):
         return [], [_("{project} is sandboxed: services are served only to unsandboxed projects for now (step 3b)",
                       project=consumer)]
     have = services(projects)

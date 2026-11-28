@@ -393,15 +393,19 @@ def exec_installed(pol: dict, argv: list[str]):
 
 def platform_readable() -> bool:
     """A positive probe that this process is the owner's own, unconfined (docs/design/service-ecosystem.md, step 3):
-    the platform's state folder, located from where this code is (not from the environment, which a sandboxed process
-    can point at a folder of its own), exists and a file inside it is actually read (an empty folder mounted over it,
-    as a sandbox may do, has none; an empty one is written to instead). One that can't be found that way (a test's throwaway tree) falls back to the
-    configured state folder."""
+    a file in the platform's state folder is actually read. The folder is located from where this code is, not from
+    the environment (which a sandboxed process can point at a folder of its own); a sandbox that denies it fails the
+    stat or the read, one that mounts an empty folder over it has no file to read. Only where that folder doesn't
+    exist at all (a test's throwaway tree, never an install) is the configured one used. Defence in depth, not the
+    boundary: what holds is that a process inside a sandbox can't read the services' folders, and whatever it starts
+    stays in its sandbox."""
     here = pathlib.Path(__file__).resolve().parent.parent
-    state = hubconf._main_checkout(here) / ".state"
-    if not state.is_dir():
-        state = hubconf.STATE
     try:
+        state = hubconf._main_checkout(here) / ".state"
+        try:
+            os.lstat(state)
+        except FileNotFoundError:
+            state = hubconf.STATE
         with os.scandir(state) as it:
             for i, e in enumerate(it):
                 if i > 200:
@@ -410,10 +414,6 @@ def platform_readable() -> bool:
                     with open(e.path, "rb") as fh:
                         fh.read(1)
                     return True
-        # nothing in it to read (a new install): writing a file there proves it as well, since no sandbox writes the
-        # platform's state
-        fd = os.open(state / ".probe", os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW, 0o600)
-        os.close(fd)
-        return True
     except OSError:
         return False
+    return False

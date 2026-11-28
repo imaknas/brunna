@@ -18,6 +18,7 @@ import threading
 import time
 
 MAX_LINE = 4 << 20
+MAX_TOOLS = 200
 LOG_MAX = 1 << 20
 PROTOCOL = "2025-06-18"
 
@@ -33,6 +34,7 @@ class Child:
         self.out: queue.Queue = queue.Queue()
         self.next_id = 0
         self.tools: list[dict] = []
+        self.eof = False
 
     # ---------- process ----------
     def start(self) -> None:
@@ -42,7 +44,7 @@ class Child:
         threading.Thread(target=self._drain_err, daemon=True).start()
 
     def alive(self) -> bool:
-        return self.p is not None and self.p.poll() is None
+        return self.p is not None and self.p.poll() is None and not self.eof
 
     def stop(self) -> None:
         if self.p is None:
@@ -60,11 +62,10 @@ class Child:
         stream = self.p.stdout
         while True:
             line = stream.readline(MAX_LINE + 1)
-            if not line:
-                self.out.put(None)
-                return
-            if len(line) > MAX_LINE:
-                self.stop()
+            if not line or len(line) > MAX_LINE:
+                if line:
+                    self.stop()
+                self.eof = True
                 self.out.put(None)
                 return
             try:
@@ -97,21 +98,26 @@ class Child:
     def request(self, method: str, params: dict, timeout: float, while_waiting=None) -> dict:
         """Send a request; its result, or ChildError. while_waiting(child, our_id) is called about every 0.2 s (the
         caller answers the client's pings and forwards a cancel there)."""
+        if self.eof:
+            raise ChildError(f"{self.name}: its server has stopped")
         self.next_id += 1
         rid = f"brunna-{self.next_id}"
         self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
         end = time.monotonic() + timeout
+        last = time.monotonic()
         while True:
             left = end - time.monotonic()
             if left <= 0:
                 raise ChildError(f"{self.name}: no answer to {method} in {int(timeout)} s")
+            if while_waiting and time.monotonic() - last >= 0.2:   # whatever arrives: a chatty child starves nothing
+                while_waiting(self, rid)
+                last = time.monotonic()
             try:
                 msg = self.out.get(timeout=min(0.2, left))
             except queue.Empty:
-                if while_waiting:
-                    while_waiting(self, rid)
                 continue
             if msg is None:
+                self.out.put(None)   # stays stopped for the next request too
                 raise ChildError(f"{self.name}: its server has stopped")
             if "method" in msg:   # its own request to the client, or a notification
                 if msg.get("id") is not None:
@@ -145,6 +151,9 @@ class Child:
         for _page in range(50):
             res = self.request("tools/list", {"cursor": cursor} if cursor else {}, max(0.1, end - time.monotonic()))
             tools += [t for t in res.get("tools") or [] if isinstance(t, dict) and isinstance(t.get("name"), str)]
+            if len(tools) > MAX_TOOLS:
+                tools = tools[:MAX_TOOLS]
+                break
             cursor = res.get("nextCursor")
             if not cursor:
                 break

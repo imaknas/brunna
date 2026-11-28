@@ -8,5 +8,6 @@
  "{service}: its tool {tool} isn't served (a name of letters, digits, _ and -, and short enough for the client, is needed)": "{service}:它的工具 {tool} 沒有提供(名稱只能有字母、數字、_ 和 -,而且要夠短，客戶端才收)",
  "{service}: didn't start ({why}); see {log}": "{service}:沒有啟動({why});看 {log}",
  "{service}'s server has stopped and didn't start again ({why})": "{service} 的伺服器停了，也沒能再啟動({why})",
- "(no tools)": "(沒有工具)"
+ "(no tools)": "(沒有工具)",
+ "{service}: its tool {tool} isn't served (its description or input schema is too long)": "{service}:它的工具 {tool} 沒有提供(說明或輸入 schema 太長)"
 }

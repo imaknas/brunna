@@ -522,7 +522,11 @@ required secret is a problem, an optional one isn't; the hard-link probe; a shar
 
 ## Step 3, in detail
 
-> **3a built 11-29.** As built: the probe writes a file in an empty state folder when it has none to read; a service's
+> **3a built 11-29.** As built: the probe reads a file in the platform's state folder found from where the code is
+> (a configured one only where that folder doesn't exist at all, a test's tree); it is defence in depth, not the
+> boundary, which is that a sandboxed process can't read the services' folders and what it starts stays in its
+> sandbox. "Sandboxed" for a consumer or a provider is `enforce.sandbox` (its sessions), whatever
+> `service_sandbox_exempt` says. A provider's registry `v` must be its manifest's interface. A service's
 > compiled Python goes to its cache (`PYTHONPYCACHEPREFIX`), since its code is read-only and the review service took
 > 10 s to start without it (2 s with it); `START_S` is 20 s. The `services` tool is listed only for a project that
 > consumes a service, so every other session's tools are as before. Run for real in a throwaway instance: the review

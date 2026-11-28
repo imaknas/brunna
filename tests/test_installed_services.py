@@ -114,6 +114,13 @@ class Instance(unittest.TestCase):
             names.env_set(self.env, var, str(self.tmp / sub))
         names.env_set(self.env, "SERVICE_ALLOW_LOCAL", "1")
         self.env["CALLER_SECRET_TOKEN"] = "leak"
+        (self.tmp / "state" / "probe").write_text("x")   # the confinement probe reads a file in the platform's state
+        import hubconf
+        main_state = hubconf._main_checkout(ROOT) / ".state"
+        # a test tree's own state folder may be there and empty (the Linux container's copy): give the probe a file
+        # in it; a real install's always has some, and is never written here
+        if main_state.is_dir() and not any(e.is_file() for e in main_state.iterdir()):
+            (main_state / "probe").write_text("x")
 
     def cli(self, *args, stdin: str = "") -> subprocess.CompletedProcess:
         return subprocess.run([sys.executable, str(self.tmp / "drive.py"), str(ROOT), *args], env=self.env,
@@ -359,6 +366,24 @@ class Names(unittest.TestCase):
         self.assertIsNone(service_index.tool_name("echo-svc", "has space", "brunna"))
 
 
+class Relay(unittest.TestCase):
+    def test_a_child_that_closes_its_output_is_stopped_at_once(self):
+        import mcp_relay
+        tmp = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        c = mcp_relay.Child("x", ["/bin/sh", "-c", "exec 1>&-; sleep 30"], tmp, {"PATH": "/usr/bin:/bin"},
+                            tmp / "x.log")
+        c.start()
+        self.addCleanup(c.stop)
+        import time
+        t0 = time.monotonic()
+        for _ in range(2):
+            with self.assertRaises(mcp_relay.ChildError):
+                c.request("tools/list", {}, 10)
+        self.assertLess(time.monotonic() - t0, 5)
+        self.assertFalse(c.alive())
+
+
 class Lock(Instance):
     def test_a_shared_lock_holds_off_an_exclusive_one(self):
         out = subprocess.run([sys.executable, "-c", """
@@ -412,7 +437,6 @@ class Consumers(Instance):
         self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 0)
         self.ws = self.tmp / "consumer"
         self.ws.mkdir()
-        (self.tmp / "state" / "probe").write_text("x")   # the probe reads a file in the platform's state
 
     def register(self, consumes=True, callers=None, v=1, sandbox=False):
         import yaml
@@ -493,6 +517,31 @@ class Consumers(Instance):
         out = self.session(["kind-one__whoami"])
         self.assertIn("kind-one__whoami", self.tools(out))
         self.assertIn("caller=consumer", self.text(out, 0))
+
+    def test_a_provider_declaring_another_major_is_not_served(self):
+        import yaml
+        own = self.tmp / "kind-two"
+        own.mkdir()
+        (own / "mcp.pl").write_text(MCP)
+        (own / "brunna-service.yaml").write_text(MANIFEST.replace("name: echo-svc", "name: kind-two").replace(
+            'mcp: {run: "sh cli.sh mcp"}', 'mcp: {run: "/usr/bin/perl mcp.pl"}'))
+        (self.tmp / "config" / "projects" / "kind-two.yaml").write_text(yaml.safe_dump(
+            {"v": 2, "name": "kind-two", "paths": {"workspace": str(own)}, "provides": [{"contract": "service", "v": 2}]}))
+        doc = {"v": 2, "name": "consumer", "paths": {"workspace": str(self.ws)},
+               "consumes": [{"contract": "service", "from": "kind-two", "v": 2}]}
+        (self.tmp / "config" / "projects" / "consumer.yaml").write_text(yaml.safe_dump(doc))
+        subprocess.run([sys.executable, str(ROOT / "bin" / "registry.py"), "refresh"], env=self.env, capture_output=True)
+        self.assertFalse({t for t in self.tools(self.session([])) if t.startswith("kind-two__")})
+
+    @unittest.skipIf(isolation.adapter()[0] != "seatbelt", "the probe under Seatbelt")
+    def test_a_confined_server_without_services_still_answers(self):
+        main_state = os.path.realpath(__import__("hubconf")._main_checkout(ROOT) / ".state")
+        prof = (f'(version 1)(allow default)(deny file-read* (subpath "{os.path.realpath(self.tmp / "state")}") '
+                f'(subpath "{main_state}"))')
+        r = subprocess.run(["/usr/bin/sandbox-exec", "-p", prof, sys.executable, str(ROOT / "bin" / "mcp_server.py")],
+                           cwd=self.ws, env=self.env, text=True, capture_output=True, timeout=60,
+                           input=json.dumps({"jsonrpc": "2.0", "id": 0, "method": "initialize", "params": {}}) + "\n")
+        self.assertIn('"id": 0', r.stdout, r.stderr[-400:])
 
     @unittest.skipIf(isolation.adapter()[0] != "seatbelt", "the probe under Seatbelt")
     def test_a_confined_server_serves_none(self):
