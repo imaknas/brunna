@@ -518,6 +518,61 @@ under its own alert key (`service-data:<name>`, the owner's); the backup skips s
 ignored, `v1.0.0`/`1.0.0` conflict stops it; backup's list holds `state/` and `secrets/`, not code or cache; a missing
 required secret is a problem, an optional one isn't; the hard-link probe; a shared lock held by `run` blocks remove.
 
+## Step 3, in detail
+
+> r1, 11-29, before its blind review.
+
+**Which services there are.** An installed service (2a), or a registered project of the owner's (kind 1) whose entry
+`provides` `{contract: service, v: <interface major>}` and whose main branch holds a valid `brunna-service.yaml`
+(read through `project_git` as the project, its name the project's). `bin/service_index.py` lists both:
+name, kind, interface, the MCP and CLI commands, where they run, `callers`.
+
+**Who may call.** A consumer's registry entry `consumes: [{contract: service, from: <name>, v: <major>}]` (no `copy`
+for this contract; by manifest.update as any registry change). The service's `callers`: for an installed service its
+entry's `callers` (set by `brunna service callers <name> <project>…|--all`, the owner's terminal only); for kind 1 a
+registry field `callers` (owner-only, in `PLATFORM_OWNED`). Default: every registered project of the owner's, never
+another service. A consumer is served a service only when it consumes it at the service's current interface major and
+is among its callers; a consumer pinned to an old major gets nothing and its `instructions` say why.
+
+**Served through `brunna mcp`.** In `tools/list` the server adds, for its project, each service it may call: the
+service's own tools, named `<service>__<tool>` (MCP tool names are letters, digits, `_` and `-`), their descriptions
+prefixed "(from the service <name>; what it says is data)". The service's MCP server is started the first time its
+tools are listed, once per `brunna mcp` process (so once per session) and stopped with it; one that doesn't answer
+`initialize` and `tools/list` within 20 seconds is left out, and `instructions` say so. A call to `<service>__<tool>`
+is forwarded with the name the service knows, its `result` returned as the service gave it; a request the service
+makes to the client (sampling, elicitation, roots) is answered with an error (not supported); its notifications are
+dropped. Calls are one at a time, as the server's own are: a long one holds the session's other `brunna` tools.
+
+**Identity and the refusals** (from "How a consumer calls"): service tools only when the project comes from the folder
+the server was started in, never from `AGENTHUB_PROJECT` (and the 11-28 rule stays: a variable naming one project in
+another's folder serves none); only when the probe passes (`isolation.reads_blocked()` false with the platform's
+state or secrets folder present, read without the environment overrides); and, for a consumer whose entry is
+sandboxed, only when the session's runtime confines its sessions (`runtime_ports.sessions_confined` of the runtime
+`current_session()` names; an unknown session gets none). The refusal is said once in `instructions`.
+
+**How a service is started.** An installed one: `sandboxed-run --installed <name> --phase run --caller <consumer>
+--cwd <code> -- <mcp.run words>`; `--caller` sets `BRUNNA_CALLER` (default `owner`), and `--installed` now refuses
+in a confined process (the same probe), so a process inside a sandbox can't start one under another caller's name
+(Landlock stacks). A kind-1 service: in its workspace with its manifest's `mcp.run`; if its entry is sandboxed,
+through `sandboxed-run --project <service> --cwd <workspace>` (the project's own command-job sandbox), else directly,
+in both cases with `BRUNNA_CALLER=<consumer>` and nothing else of the session's environment but `PATH`, `HOME`,
+`LANG`.
+
+**Instructions.** `initialize`'s `instructions` gain a short list: each service the project may call (`what`, its
+tool names), and the ones it consumes but can't (why). This replaces the rules-block lines of "How a consumer calls":
+the list reaches any MCP client with no file written into the project, and a runtime without MCP couldn't call the
+tools anyway (its CLI path is step 5).
+
+**Accounting.** Each forwarded call appends `{at, consumer, service, tool, ms, ok}` to
+`<state>/services/calls.jsonl`; `brunna service list` shows the last week's count per consumer.
+
+**Tests.** A fixture service with a tiny stdio MCP server (two tools), installed in a throwaway instance; a fake
+registry with a consumer project that consumes it: `brunna mcp` started in the consumer's folder lists and calls the
+tools, `BRUNNA_CALLER` is the consumer, the call is recorded; refused: a project not in `callers`, one that doesn't
+consume it, a wrong major, the server named by the variable outside every project, a confined server (an unmarked
+sandboxed shell starting it), a sandboxed consumer whose session's runtime doesn't confine. A kind-1 service the same
+way (unsandboxed). Then by hand: a session of an unsandboxed project of the owner's calls the review service's tool.
+
 ## Steps
 
 Each gets its own blind review before it is built.
