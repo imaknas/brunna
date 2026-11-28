@@ -199,20 +199,31 @@ has two places here.
    its outbox; `hubbus dispatch` takes it (as for a sandboxed project), the bridge sends the records to whichever
    principal side is configured, and a question goes through the question check like a project's (which runs through
    cap-runner: the service's state folder is its folder there). Without the grant its records are refused.
-   The answer path is new: for a project's own items the registrar applies settlements to its STATE.md; a service has
-   none. For a requester with no STATE.md the registrar turns a settled or reopened record into a letter to the
-   service's inbox view. This needs its own argument against the Acts and Decisions suites (the registrar's
-   behaviour for such requesters, not only its records), written in step 4.
+   The answer path is new. A requester needn't have a state document (core §1: the role is the deployment's to
+   authenticate; Acts §5: a requester with no state document need not implement the Markdown binding). Delivering a
+   settled or reopened record to the service is core §8's delivery to the project, the principal side's duty, which
+   brunna carries as the transport into the service's inbox view; it is not the registrar's (the registrar applies the
+   Markdown binding to state documents) and carries none of the registrar's claims.
+   The open part (agent-ops-specs, 11-28, an open-reading candidate there): core §8 lets only an extension's binding
+   apply records mechanically, and Decisions §5 has a requester apply by judgement. A service that is a program and
+   branches on `outcome` or `answer.option` applies mechanically with no binding. Needed: a service binding in
+   agent-ops-specs saying which fields may be applied mechanically (outcome, answer.option) and which never (text,
+   note, quote). Until it exists, a service's answers reach it, and acting on them mechanically is outside the spec.
    A call waiting on the owner returns to its consumer at once with the question's id; it never holds the call open.
    Owner to-dos and questions from services appear with projects' (`todo.md`, the principal side), the service named.
 2. **The principal side is a role anyone can fill.** Muninn is one, `bin/owner.py` another; an assistant that
    implements Principal Handoff and passes its suites should plug in by configuration. Missing today: Principal Handoff
-   defines records, not how they travel. brunna's link to a principal side is the assistant's own API (the
-   `brunna/hubbus-bridge` job, `hubbus bridge`, against `assistant.api`, with formats vendored under
-   `contracts/vendor/muninn/`), so another assistant needs brunna to learn its API. Proposal: a transport binding
-   (records over HTTP: publish, pull since a cursor, ack) specified in agent-ops-specs beside the records, the bridge
-   speaking it, Muninn moving to it. That is agent-ops-specs' and Muninn's work, asked by letter; brunna keeps the
-   current path until both have it.
+   defines records, not how they travel, on purpose (core §10: any transport with at-least-once delivery and
+   authenticated senders; §15 leaves transport out of scope; Acts §9 lists transport bindings as open). What core
+   asks of any transport: at-least-once with retries, the authenticated sender checked against `by` and its role,
+   delivery to the project rather than a session, and a sent record changed only by a later record. brunna's link to a
+   principal side today is the assistant's own API (the `brunna/hubbus-bridge` job, `hubbus bridge`, against
+   `assistant.api`, formats vendored under `contracts/vendor/muninn/`), so another assistant needs brunna to learn its
+   API.
+   Proposal (agent-ops-specs' view, not decided by the owner): an HTTP binding as a document of its own in
+   agent-ops-specs, beside the Acts Markdown binding rather than in core: publish, fetch from a cursor, ack, designed
+   together with core §15's open "resync and completeness", and the same semantics as the MCP binding agent-ops-specs
+   is drafting. The bridge would speak it and Muninn move to it; brunna keeps the current path until both have it.
 
 ## Discovery and developers
 
@@ -261,6 +272,5 @@ Each gets its own blind review before it is built.
   refused); one whose manifest asks for more than was granted waits for the owner.
 - The first public service is the owner's public review service alone; the compute project stays the owner's own
   (kind 1) until the owner decides otherwise.
-- Open: the Principal Handoff transport binding. Before proposing it, brunna asked agent-ops-specs (11-28) whether its
-  reading is right: that Principal Handoff defines records and not their transport, whether a requester must have a
-  Markdown document, and where a binding would belong.
+- Open: whether to ask agent-ops-specs for the HTTP binding and the service binding (its answer of 11-28 confirmed
+  brunna's reading and gave its view of where they belong; a proposal is a request letter to it).
