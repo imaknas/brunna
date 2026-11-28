@@ -226,11 +226,20 @@ has two places here.
    settled or reopened record to the service is core §8's delivery to the project, the principal side's duty, which
    brunna carries as the transport into the service's inbox view; it is not the registrar's (the registrar applies the
    Markdown binding to state documents) and carries none of the registrar's claims.
-   The open part (agent-ops-specs, 11-28, an open-reading candidate there): core §8 lets only an extension's binding
-   apply records mechanically, and Decisions §5 has a requester apply by judgement. A service that is a program and
-   branches on `outcome` or `answer.option` applies mechanically with no binding. Needed: a service binding in
-   agent-ops-specs saying which fields may be applied mechanically (outcome, answer.option) and which never (text,
-   note, quote). Until it exists, a service's answers reach it, and acting on them mechanically is outside the spec.
+   Mechanical application: agent-ops-specs wrote the **Program binding** (11-28, `program/SPEC.md`, with
+   `conformance/apply.json` and a reference `ph_program.py`; a 0.7 proposal, unpublished, since a binding shares its
+   extensions' version and 0.6 is frozen). Its result is a pure function of the records: apply (a value), open,
+   withdrawn, dismissed, judgement, or fault. It applies only when the service wrote the item itself (its own `by`,
+   `terms_rev` and digest matching), a principal side configured for the binding settled it, authority is principal
+   or confirmed, and the answer is exactly an option (Decisions: `answer.option` among the options and `answer.text`
+   the option's label, no note; Acts: done or dropped, no note). Judgement means asking again (a new decision with the
+   same options, the old one withdrawn as replaced); fault is reported to the deployment once. What it asks of brunna
+   as the deployment: which requesters are programs, which principal sides implement the binding, and a key prefix per
+   service; of the service: options on every decision, text saying what each option, a dismissal and giving up do,
+   intent written before acting, refetch from the start after losing its store; of the principal side: an answered
+   option's label written into `answer.text` verbatim, anything else said in text (so the program asks again).
+   Until Acts and Decisions 0.7 list it, mechanical application stays outside the published spec, but services can be
+   built to it now.
    A call waiting on the owner returns to its consumer at once with the question's id; it never holds the call open.
    Owner to-dos and questions from services appear with projects' (`todo.md`, the principal side), the service named.
 2. **The principal side is a role anyone can fill.** Muninn is one, `bin/owner.py` another; an assistant that
@@ -249,8 +258,8 @@ has two places here.
    included (`incoming_errors` refuses a non-principal origin today; it must skip its own instead); a cursor is
    compared only for equality, and an `unknown_cursor` after the log is restored means fetching from the start and
    resending its own records the log lacks; HTTPS, or a Unix socket on the same machine (plain HTTP on loopback does
-   not conform); a relay credential may stand for several projects' parties. Muninn moves to it too. The service
-   binding (above) is the second request to agent-ops-specs, not started. brunna keeps the current path until the
+   not conform); a relay credential may stand for several projects' parties. Muninn moves to it too. The Program
+   binding (above) is the second. brunna keeps the current path until the
    bridge and Muninn both speak Transport; the bridge is the mailbox's code.
 
 ## Discovery and developers
@@ -300,5 +309,6 @@ Each gets its own blind review before it is built.
   refused); one whose manifest asks for more than was granted waits for the owner.
 - The first public service is the owner's public review service alone; the compute project stays the owner's own
   (kind 1) until the owner decides otherwise.
-- Asked of agent-ops-specs (11-28, the owner's go): Transport (written, 0.1, experimental) and the service binding
-  (not started). Open: when the bridge and Muninn move to Transport.
+- Asked of agent-ops-specs (11-28, the owner's go): both written. Transport 0.1 (experimental, pushed) and the Program
+  binding (a 0.7 proposal, not pushed yet). Open: when the bridge and Muninn move to Transport, and telling Muninn
+  what both ask of a principal side.
