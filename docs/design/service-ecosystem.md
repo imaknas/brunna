@@ -599,6 +599,45 @@ platform run, the variable outside every project, a confined server (Seatbelt an
 a kind-1 service (unsandboxed); the registry and contracts-check taking a `contract: service` consume. Then by hand: a
 session of an unsandboxed project of the owner's calls the review service.
 
+## Step 3b, in detail
+
+> r1, 11-29, before its blind review.
+
+**Measured first (11-29, on the owner's machine).** A Claude Code session opened from the desktop app (the compute
+project's): its `brunna mcp` is a child of the session's own process (`~/.claude/remote/ccd-cli/<version>`), not in
+any sandbox (`sandbox_check` 0), with the project's folder as its working directory. The session's sandbox (its
+`sandbox` settings) wraps the tools' commands, not the MCP servers. The adapter's `session_process` doesn't recognise
+that command line today (it knows `claude` and the npm package), so it gains the desktop app's. Still to measure, in
+this step's done-when: the same in a sandboxed project's session (the platform's rendered settings there), and that
+its permission rules let `mcp__<server>__…` tools through or ask for them.
+
+**Which runtime runs the session.** `runtime_ports.session_runtime()` (new, neutral): walking up from the server's own
+process, the first ancestor an installed runtime's `session_process` claims names the runtime; none claims one =
+unknown. Not `current_session()`: no session id reaches an MCP server's environment.
+
+**Who is served, for a sandboxed consumer** (`enforce.sandbox`, its sessions):
+
+- its session's runtime confines its sessions (`runtime_ports.sessions_confined`); an unknown runtime, or one that
+  doesn't (Codex today), gets no service tools and the `services` tool says why;
+- only services that run sandboxed themselves: an installed service, or a **sandboxed** project's own service (kind
+  1, below); an unsandboxed project's service only when that project's owner-only `callers` names the consumer
+  explicitly (not the default "every project"), since it runs with the owner's rights and the consumer chooses its
+  arguments;
+- the rest as for an unsandboxed consumer (consumes it at its major, among its callers).
+
+**A sandboxed project as a service** (kind 1, now admitted to the index): started through `sandboxed-run --project
+<service> --cwd <its workspace> -- <mcp.run words>`, the project's own command-job sandbox, with the environment built
+from nothing (the platform's locations, `PATH`, `HOME`, `LANG`, `BRUNNA_CALLER=<consumer>`). Its manifest is read by
+the owner's process from the project's folder, so it is read without following a link and capped at 64 KB, and a
+problem with it is never shown to a consumer in detail (only "not a valid service"): a sandboxed project could make
+it a link to another file of the owner's.
+
+**Tests.** `session_runtime()` from a fake ancestor chain; a sandboxed consumer served an installed service when the
+runtime confines, refused when it doesn't or is unknown; refused an unsandboxed project's service unless its callers
+name the consumer; a sandboxed kind-1 service started in its sandbox (can't read another project's folder) with
+`BRUNNA_CALLER`; its manifest as a link refused, with no content shown. Then by hand: a session of a sandboxed
+project calls a service.
+
 ## Steps
 
 Each gets its own blind review before it is built.
@@ -613,7 +652,8 @@ Each gets its own blind review before it is built.
      its CLI in its sandbox.
    - 2b: updates by tag (setup beside, the more-asked wait); the services' data in the nightly backup and their
      secrets in the daily check. The outbox location moves to step 4, where it is first used.
-3. **Consumers** (3a: unsandboxed consumers, built first; 3b: sandboxed ones, detailed above): `provides`/`consumes`
+3. **Consumers** (3a: unsandboxed consumers, built first; 3b: sandboxed ones and sandboxed projects' services,
+   detailed above): `provides`/`consumes`
    with `contract: service`, `callers`, `brunna mcp` serving consumed services'
    tools as the service, the folder-only identity and the confined refusal (tested on Seatbelt and Landlock), the
    per-runtime measurements above, the `services` tool, accounting. Done when a session
