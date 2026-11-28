@@ -18,6 +18,7 @@ config pipeline 的 check(docs/design/new-user.md 3.7):一次驗證所有 config
   mirror-list.txt    每行一個 git remote
   services.tsv       每列欄數跟表頭一樣、label 不重複
   schedule.yaml      讀得進來、job 名稱不重複(切換期間的舊格式)
+  services/          已安裝服務的登錄項(bin/installed_services.py)
 
 通過時把這次驗過的 tree 記在 git 目錄的 config-check-passed。
 

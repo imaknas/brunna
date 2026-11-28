@@ -17,7 +17,7 @@ has no workspace, memory or merge gate, and every walker of the registry would t
   added: YYYY-MM-DD
 
 Its folders, all under <services_root>/<name>/ (folders()): repo.git (the fetched commits), code/<commit>/ (read at
-run time, written in setup), cache/ (tool caches and downloads), state/ (what it keeps; BRUNNA_SERVICE_STATE),
+run time, written in setup), cache/ (tool caches and downloads), state/ (what it keeps; STATE_ENV below),
 secrets/ (one file per granted secret). Standard library + PyYAML.
 """
 from __future__ import annotations

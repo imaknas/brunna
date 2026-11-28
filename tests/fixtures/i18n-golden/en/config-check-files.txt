@@ -19,6 +19,7 @@ What it validates:
   mirror-list.txt    one git remote per line
   services.tsv       every row has as many columns as the header, labels are unique
   schedule.yaml      readable, job names unique (the old format, during the switch)
+  services/          the installed services' entries (bin/installed_services.py)
 
 When it passes, the tree it validated is recorded in the git directory's config-check-passed.
 
