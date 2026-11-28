@@ -11,6 +11,8 @@ no such tool: nope
 wrong arguments: id must be text
 === note without memory
 nowhere has no memory folder (.agent-memory); this project is not set up for memory tracking
+=== named to another project
+this server is named to nowhere (AGENTHUB_PROJECT) but runs in demo's folder: in a project's folder it serves only that project, so every tool is refused. Take AGENTHUB_PROJECT out of this tool's MCP settings for that folder
 === stderr unknown project
 brunna mcp: project: (unrecognized)
 

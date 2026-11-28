@@ -381,8 +381,10 @@ class Mcp(Golden):
         err, res = session([("inbox", {}), ("note", {"text": "a  b"}), ("nope", {}), ("show", {})])
         out += [("stderr", err), ("inbox (empty)", res[0]), ("note", res[1]), ("unknown tool", res[2]),
                 ("bad arguments", res[3])]
-        err, res = session([("note", {"text": "x"})], extra={"AGENTHUB_PROJECT": "nowhere"})
+        err, res = session([("note", {"text": "x"})], cwd=t, extra={"AGENTHUB_PROJECT": "nowhere"})
         out += [("note without memory", res[0])]
+        err, res = session([("note", {"text": "x"})], extra={"AGENTHUB_PROJECT": "nowhere"})
+        out += [("named to another project", res[0])]
         err, res = session([("inbox", {})], cwd=t)
         out += [("stderr unknown project", err), ("unknown project", res[0])]
         err, res = session([("send", {"to": "x", "type": "info", "text": "x"})], extra={"HUB_LLM_POINT": "mailbox-propose"})

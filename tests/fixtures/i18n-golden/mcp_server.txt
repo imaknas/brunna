@@ -11,6 +11,8 @@ demo 的信箱是空的
 參數不對:id 要是文字
 === note without memory
 nowhere 沒有 memory 資料夾(.agent-memory);這個專案沒有接上 memory 追蹤
+=== named to another project
+這個 server 指定給 nowhere(AGENTHUB_PROJECT),卻在 demo 的資料夾裡執行:在專案的資料夾裡它只服務那個專案,所以每個工具都拒絕。請把 AGENTHUB_PROJECT 從這個工具在那個資料夾的 MCP 設定拿掉
 === stderr unknown project
 brunna mcp: 專案:(認不出來)
 
