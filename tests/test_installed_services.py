@@ -399,6 +399,9 @@ class SessionRuntime(unittest.TestCase):
         self.assertIsNone(runtime_ports.session_runtime([(9, "node /Users/u/.claude/plugins/x/server.js"),
                                                          (1, "/sbin/launchd")]))
         self.assertIsNone(runtime_ports.session_runtime([(1, "/sbin/launchd")]))
+        self.assertEqual(runtime_ports.session_runtime([(1, "claude --resume")]), "claude")   # a container's init
+        if "codex" not in runtime_ports.installed():   # an uninstalled runtime's session inside Claude's: unknown
+            self.assertIsNone(runtime_ports.session_runtime([(9, "/usr/local/bin/codex"), (8, desktop)]))
 
 
 class Manifests(unittest.TestCase):

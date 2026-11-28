@@ -1585,22 +1585,25 @@ def session_runtime(chain=None) -> str | None:
     pid 1 (its session gone). For a process no session id reaches (an MCP server). chain: (pid, command) pairs, nearest
     first (tests); the process's own ancestors otherwise."""
     chain = list(ancestors()) if chain is None else list(chain)
-    if not chain or chain[0][0] <= 1:
+    if not chain:
         return None
+    # every runtime the platform knows claims its own (one not installed here too): a session of an uninstalled one
+    # inside another's must read as unknown, never as the outer one's
     claims = []
-    for name in installed():
+    for name in RUNTIMES:
         try:
             fn = getattr(_module(name), "session_process", None)
         except (KeyError, ImportError):
             continue
         if callable(fn):
             claims.append((name, fn))
+    have = set(installed())
     for pid, command in chain:
-        if pid <= 1:
-            return None
         for name, fn in claims:
             if fn(command or ""):
-                return name
+                return name if name in have else None
+        if pid <= 1:   # an unclaimed init: the session is gone (reparented), or there was none
+            return None
     return None
 
 
