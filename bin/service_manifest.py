@@ -4,9 +4,9 @@ contracts/service-manifest.v1.schema.json): the schema, plus what a schema can't
 
   - data paths are relative to the service's state folder: no leading /, no ~, no .. step, no glob, bracket, brace
     or control character, and no two entries where one is inside the other;
-  - secret names are unique and none is an environment name the platform sets or a process depends on (BRUNNA_* and
-    AGENTHUB_* are the platform's, BRUNNA_CALLER above all; PATH, HOME, LD_*, DYLD_* and the like would change how the
-    service runs, not give it a key);
+  - secret names are unique and none is an environment name the platform sets or a process depends on (every
+    spelling of the platform's own prefix, names.env_names, the caller's name above all; PATH, HOME, LD_*, DYLD_* and
+    the like would change how the service runs, not give it a key);
   - model names follow the registry's rule (bin/registry.py MODEL_POINT).
 
 The manifest is read as YAML with duplicate keys refused (a later key silently winning would make what is shown at
@@ -24,6 +24,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 import i18n  # noqa: E402
 import minischema  # noqa: E402
+import names  # noqa: E402
 
 _ = i18n.domain(__file__)
 
@@ -31,7 +32,9 @@ FILE = "brunna-service.yaml"
 SCHEMA = pathlib.Path(__file__).resolve().parent.parent / "contracts" / "service-manifest.v1.schema.json"
 MODEL_POINT = re.compile(r"[a-z0-9][a-z0-9-]{0,47}\Z")   # registry.MODEL_POINT (registry imports too much to share)
 PLAIN = re.compile(r"[^\x00-\x1f\x7f()\[\]{}*?]+\Z")
-RESERVED_PREFIXES = ("BRUNNA_", "AGENTHUB_", "LD_", "DYLD_", "PYTHON", "NODE_", "UV_", "NPM_", "PIP_", "GIT_", "SSH_",
+# every spelling of the platform's own variables (names.py: the new prefix, and the two old ones)
+_PLATFORM_ENV = tuple(dict.fromkeys((*names.env_names(""), names.env_old("PROJECT")[:-len("PROJECT")])))
+RESERVED_PREFIXES = (*_PLATFORM_ENV, "LD_", "DYLD_", "PYTHON", "NODE_", "UV_", "NPM_", "PIP_", "GIT_", "SSH_",
                      "LC_", "XDG_", "PERL5", "RUBY", "CARGO_", "RUSTUP_", "BUN_", "DENO_")
 RESERVED = {"PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TMP", "TEMP", "LANG", "TERM", "PWD", "IFS",
             "ENV", "BASH_ENV", "PROMPT_COMMAND", "SSL_CERT_FILE", "SSL_CERT_DIR", "REQUESTS_CA_BUNDLE",

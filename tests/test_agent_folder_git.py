@@ -858,7 +858,10 @@ class SystemTempIsNoPlaceForIt(unittest.TestCase):
             "bin/git_remote.py",
             # a print's TMPDIR is its job's scratch folder in platform state, never a temp area (capabilities.md, "pdf"
             # r1); its download stages in private_tmp
-            "bin/pdf_renderer.py"}
+            "bin/pdf_renderer.py",
+            # it names TMPDIR only as an environment name a service's secret may not take (service-ecosystem.md,
+            # step 1); it makes no temp folder
+            "bin/service_manifest.py"}
     USE = __import__("re").compile(r"tempfile[.](?:mkdtemp|TemporaryDirectory|NamedTemporaryFile|mkstemp|gettempdir|TemporaryFile)[(]"
                                    r"|[$][(]mktemp|[\"' ]/tmp[/\"' ]|/private/tmp|/var/folders|TMPDIR")
     MOVED = __import__("re").compile(r"dir=(?:hubconf[.])?(?:private_tmp[(][)]|STATE\b)")   # both denied to every sandbox
