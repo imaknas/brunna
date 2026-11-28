@@ -106,9 +106,8 @@ entirely: they change only through `brunna service add` / an update the owner co
    stops the add with how to get one; an optional one is listed and the service starts without it.
 
    Updates: the registry keeps the commit each granted tag resolved to; a tag that moved is refused. A new release
-   tag is fetched and set up beside the running version and replaces it only if setup passed. Whether a new tag is
-   taken automatically or asked each time is open (below); one whose manifest asks for more than was granted always
-   waits for the owner (an owner to-do), the old version running.
+   tag is fetched automatically (decided 11-28) and set up beside the running version, and replaces it only if setup
+   passed; one whose manifest asks for more than was granted always waits for the owner (an owner to-do), the old version running.
 
    `brunna service remove <name>` (never `uninstall`, which removes brunna) removes code and the entry; state only
    with `--purge`.
@@ -256,10 +255,12 @@ Each gets its own blind review before it is built.
 6. **For developers**: `brunna service init` / `check`, `docs/services.md`, the catalog with the owner's services.
 7. **Egress confinement** (the proxy and the per-adapter rules); then others' services may be listed.
 
-## Open, for the owner
+## Decided by the owner (11-28), and open
 
-- The Principal Handoff transport binding: specify it in agent-ops-specs (and move Muninn to it), or keep the
-  principal side as the assistant's API plus the built-in one?
-- Installed services' updates: take every release tag automatically (waiting only when it asks for more), or ask
-  each time?
-- Which of the owner's services are the first public ones (only public repos can be installed by others).
+- Installed services follow release tags automatically (set up beside, replaced only if setup passed, a moved tag
+  refused); one whose manifest asks for more than was granted waits for the owner.
+- The first public service is the owner's public review service alone; the compute project stays the owner's own
+  (kind 1) until the owner decides otherwise.
+- Open: the Principal Handoff transport binding. Before proposing it, brunna asked agent-ops-specs (11-28) whether its
+  reading is right: that Principal Handoff defines records and not their transport, whether a requester must have a
+  Markdown document, and where a binding would belong.
