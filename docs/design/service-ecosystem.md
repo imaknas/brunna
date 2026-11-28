@@ -531,8 +531,9 @@ required secret is a problem, an optional one isn't; the hard-link probe; a shar
 > 10 s to start without it (2 s with it); `START_S` is 20 s. The `services` tool is listed only for a project that
 > consumes a service, so every other session's tools are as before. Run for real in a throwaway instance: the review
 > service, installed from GitHub, served its 39 tools to a consumer through `brunna mcp`, and two calls answered and
-> were recorded. Not run yet: a real coding-agent session on the owner's machine (that needs the review service
-> declared as a service and a project consuming it, both registry changes of other projects).
+> were recorded. On the owner's machine (11-29): the review service declared as a project's service (kind 1), the
+> compute project consuming it, `brunna mcp` registered in Claude Code and Codex by the owner (`brunna init
+> --register-mcp`); a Claude Code session the owner opened in the compute project called the review service's tool.
 >
 > r2, 11-29, after its blind review. Its one blocking finding: a sandboxed consumer (which can grant itself `consumes`
 > by manifest.update) driving an unsandboxed project's service with the owner's rights. And `current_session()` most

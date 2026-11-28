@@ -422,7 +422,8 @@ Decided with the owner 11-28: projects can be services other projects call (a CL
 platform's MCP server as the service, never as letters between agents; Principal Handoff is how a service asks the
 owner, and the principal side is a role any assistant can fill. Design r4, five blind reviews. Built: step 1 (the manifest contract and its check, the authors' guide draft) and step 2a (`brunna service
 add/remove/list/secret/run`, a stranger's code under an allow-list read model on both adapters) and step 2b (updates by release tag,
-backup and the secrets check), and step 3a (unsandboxed projects call services' tools through `brunna mcp`). Decided
+backup and the secrets check), and step 3a (unsandboxed projects call services' tools through `brunna mcp`; used for real on 11-29 from a
+session of the owner's). Left: 3b (sandboxed consumers), 4–7. Decided
 the same day: installed services follow release tags automatically; the public review service is the only public one
 first. Left: steps 1–7 of the doc; the Principal Handoff transport binding, waiting on agent-ops-specs' answer about
 brunna's reading (m11282143-5394).
