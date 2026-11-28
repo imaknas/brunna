@@ -362,7 +362,8 @@ The environment is built by the launcher, never inherited: `PATH` (the platform'
 `BRUNNA_SERVICE_STATE`, the cache variables, `TMPDIR`, `LANG`, `BRUNNA_CALLER` (step 3; `owner` from the owner's
 terminal), and at run time each granted secret. Secrets are set in the process after the sandbox is applied, never on
 a command line (`seatbelt.entry_argv` puts an `Entry`'s variables in `/usr/bin/env`'s arguments, which `ps` shows):
-the launcher hands them over a pipe to the sandboxed side, which sets them and then execs.
+the launcher puts them in the environment it execs the sandbox with (inherited, as `pol["env"]` is today), which only
+the owner's own processes can read, never in an argument.
 
 **Launching.** `bin/sandboxed-run --installed <name> --phase run|setup --cwd <code/<commit>> -- <words>`: it reads the
 service's entry (not the registry), builds `service_policy`, refuses where the machine can't sandbox (exit 78, as
