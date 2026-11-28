@@ -143,6 +143,12 @@ class Server(unittest.TestCase):
         self.assertEqual([s for s, *_ in self.events("message")], ["other"], "only the letter sent before")
         self.assertEqual(self.events("message.done") + self.events("message.delivered"), [], "no ack, done or read")
         self.assertEqual(list((self.ws / ".agent-memory" / "memory").glob("2*.md")), [])
+        import names
+        new = names.env_names("PROJECT")[1]
+        _, res = self.session([("note", {"text": "as demo"})], cwd=self.tmp / "ws" / "other", env={new: "demo"},
+                              tools={"status", "connect_project"})
+        self.assertTrue(res[0][0], res)
+        self.assertIn(new, res[0][1], "the spelling that is set")
         outside = self.tmp / "elsewhere"
         outside.mkdir()
         _, res = self.session([("manifest_update", {"yaml": "commits: conventional\n"}), ("note", {"text": "outside"})],

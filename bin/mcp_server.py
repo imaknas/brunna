@@ -15,7 +15,9 @@ bin/hubbus (the same
 implementation); the server only decides which project: environment variable AGENTHUB_PROJECT > working directory
 (hubbus.project_of: worktrees and .agent-memory count as the main project), the variable only in a folder outside every
 project: named to one project in another's folder, the server serves none (that folder's session would otherwise send,
-note, close and change the registry entry as the named one). Project not recognised -> every tool returns an error
+note, close and change the registry entry as the named one). Outside every project (a sandboxed project's linked
+worktree outside its folder included) the variable is taken at its word: it is as trusted as whoever wrote the
+server's settings, so a project's own MCP settings are the owner's to approve. Project not recognised -> every tool returns an error
 saying how to set it. A sandboxed project's mail goes through its outbox and view, as hubbus does
 in its folder (docs/design/bus-sender.md).
 
@@ -226,7 +228,7 @@ def resolve_project() -> tuple[str | None, str]:
             return None, _("this server is named to {project} ({var}) but runs in {here}'s folder: in a project's "
                            "folder it serves only that project, so every tool is refused. Take {var} out of this "
                            "tool's MCP settings for that folder",
-                           project=named, var=next(v for v in names.env_names("PROJECT") if os.environ.get(v)), here=name)
+                           project=named, var=" / ".join(v for v in names.env_names("PROJECT") if os.environ.get(v)), here=name)
         return named, ""
     if name:
         return name, ""
