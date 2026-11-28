@@ -217,6 +217,15 @@ jobs:
   max_attempts_per_day: 2
   run: bin/py bin/check-data.py
   found_exit: true
+# installed services that follow release tags: a newer one set up beside and swapped in; one that asks for more, a moved
+# tag or a failing setup is an alert (docs/design/service-ecosystem.md, step 2b)
+- name: service-updates
+  at: "04:35"
+  cwd: hub
+  background: true
+  max_attempts_per_day: 1
+  run: bin/py bin/service-cmd.py update --all
+  found_exit: true
 # merged, clean worktrees: idle ≥ 2 days, delete rebuildable dependencies; removed only at ≥ 14 days with nobody using
 # them (branch kept)
 - name: prune-worktrees

@@ -13,7 +13,12 @@ has no workspace, memory or merge gate, and every walker of the registry would t
   interface: <the manifest's interface major at that commit>
   run: {cli: <command>, mcp: <command>, setup: [<command>…]}   copied from the manifest at add (never read back from
                                                                   code/, which setup can rewrite)
-  granted: {models: {<name>: {tier}}, secrets: [<NAME>…], principal: bool, scripts: bool, network: [<host>…]}
+  granted: {models: {<name>: {tier}}, secrets: [<NAME>…], principal: bool, network: [<host>…]}
+  data: [{path, what, backup?, why?}]     the manifest's, relative to state/ (step 2b)
+  secrets_required: [<NAME>…]             the granted secrets not marked optional
+  follow: tags | none                     tags: updated to newer release tags by brunna/service-updates
+  tags: {<tag>: <commit>}                 every release tag installed, with the commit it named then
+  previous: <40 hex> | null               the commit before, kept for processes still running in it
   added: YYYY-MM-DD
 
 Its folders, all under <services_root>/<name>/ (folders()): repo.git (the fetched commits), code/<commit>/ (read at
@@ -37,8 +42,11 @@ _ = i18n.domain(__file__)
 NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,47}\Z")
 COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 SECRET = re.compile(r"[A-Z][A-Z0-9_]{0,63}\Z")
-TOP = {"v", "name", "url", "ref", "commit", "interface", "run", "granted", "added"}
-GRANTED = {"models", "secrets", "principal", "scripts", "network"}
+TOP = {"v", "name", "url", "ref", "commit", "interface", "run", "granted", "added", "data", "secrets_required",
+       "follow", "tags", "previous"}
+GRANTED = {"models", "secrets", "principal", "network"}
+RELEASE = re.compile(r"v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\Z")
+CAP = 20 << 30   # what a service's state/ may hold before the backup skips it and check-data says so
 IDEA = re.compile(r"idea-[0-9]+\Z")
 # what the service gets as its environment names (part of the service contract, docs/service-authors.md)
 STATE_ENV = names.ENV_NEW + "SERVICE_STATE"
@@ -91,19 +99,111 @@ def entry_problems(doc, stem: str | None = None) -> list[str]:
         errs.append(_("run must be {{cli, mcp, setup}}: commands"))
     g = doc.get("granted")
     if not isinstance(g, dict) or set(g) - GRANTED:
-        errs.append(_("granted must be a mapping of models, secrets, principal, scripts, network"))
+        errs.append(_("granted must be a mapping of models, secrets, principal, network"))
     else:
         if not isinstance(g.get("models", {}), dict):
             errs.append(_("granted.models must be a mapping"))
         if not (isinstance(g.get("secrets", []), list) and all(isinstance(s, str) and SECRET.match(s)
                                                                for s in g.get("secrets", []))):
             errs.append(_("granted.secrets must be a list of environment names"))
-        for k in ("principal", "scripts"):
-            if not isinstance(g.get(k, False), bool):
-                errs.append(_("granted.{key} must be true or false", key=k))
+        if not isinstance(g.get("principal", False), bool):
+            errs.append(_("granted.{key} must be true or false", key="principal"))
         if not (isinstance(g.get("network", []), list) and all(isinstance(h, str) for h in g.get("network", []))):
             errs.append(_("granted.network must be a list of hosts"))
+    if doc.get("follow", "none") not in ("tags", "none"):
+        errs.append(_("follow must be tags or none"))
+    tags = doc.get("tags", {})
+    if not (isinstance(tags, dict) and all(isinstance(k, str) and RELEASE.match(k) and isinstance(v, str)
+                                           and COMMIT.match(v) for k, v in tags.items())):
+        errs.append(_("tags must map release tags to commits"))
+    if doc.get("previous") is not None and not (isinstance(doc["previous"], str) and COMMIT.match(doc["previous"])):
+        errs.append(_("previous must be 40 hex characters or null"))
+    req = doc.get("secrets_required", [])
+    if not (isinstance(req, list) and all(isinstance(s, str) for s in req)
+            and set(req) <= set((g or {}).get("secrets", []) if isinstance(g, dict) else [])):
+        errs.append(_("secrets_required must list granted secrets"))
+    data = doc.get("data", [])
+    if not isinstance(data, list):
+        errs.append(_("data must be a list"))
+    else:
+        import service_manifest
+        probe = {"v": 1, "name": "ab", "what": "x", "interface": 1, "cli": {"run": "a"}, "mcp": {"run": "b"},
+                 "data": data}
+        errs += service_manifest.problems(probe)
     return errs
+
+
+def release(tag: str) -> tuple[int, int, int] | None:
+    m = RELEASE.match(tag)
+    return tuple(int(x) for x in m.groups()) if m else None
+
+
+def own_folder(d: pathlib.Path, base: pathlib.Path, make: bool = True) -> str | None:
+    """d is a real folder of this user's, not a link, with no link from base down to it (made one level at a time
+    when missing and make is true); None when it is, else why not. A service can't write base/, so a link on the way
+    could only be one it made in a folder it writes: state/ swapped for a link would lead the next run's profile, the
+    owner's mkdir or the backup into a folder of the owner's."""
+    import os
+    import stat
+    d = pathlib.Path(d)
+    try:
+        st = os.lstat(d)
+    except FileNotFoundError:
+        if not make:
+            return _("{path} is missing", path=d)
+        if d != base and (why := own_folder(d.parent, base)):
+            return why
+        try:
+            os.mkdir(d, 0o700)
+        except FileExistsError:
+            pass
+        except OSError as e:
+            return _("{path} can't be made ({err})", path=d, err=e.strerror)
+        st = os.lstat(d)
+    if not stat.S_ISDIR(st.st_mode):
+        return _("{path} is not a folder (a link or a file where its folder belongs)", path=d)
+    if st.st_uid != os.getuid():
+        return _("{path} is not this user's", path=d)
+    if d != base:
+        if (why := own_folder(d.parent, base, make=False)):
+            return why
+        if os.path.realpath(d) != os.path.join(os.path.realpath(d.parent), d.name):
+            return _("{path} doesn't lead where it should", path=d)
+    return None
+
+
+class Locked(Exception):
+    pass
+
+
+def lock(name: str, shared: bool = False, wait: float = 60.0):
+    """The service's lock (<state>/services/<name>.lock, where no sandbox reads): exclusive for add, update and
+    remove, shared for run, so a swap or remove never happens under a running CLI. Retried for `wait` seconds, then
+    Locked. A context manager; the lock goes with its process."""
+    import contextlib
+    import fcntl
+    import os
+    import time
+
+    @contextlib.contextmanager
+    def held():
+        d = hubconf.STATE / "services"
+        d.mkdir(parents=True, exist_ok=True)
+        fd = os.open(d / f"{name}.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+        try:
+            end = time.monotonic() + wait
+            while True:
+                try:
+                    fcntl.flock(fd, (fcntl.LOCK_SH if shared else fcntl.LOCK_EX) | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= end:
+                        raise Locked(_("{name} is busy (another add, update, remove or run holds it)", name=name))
+                    time.sleep(0.5)
+            yield
+        finally:
+            os.close(fd)
+    return held()
 
 
 def entries() -> dict[str, dict]:

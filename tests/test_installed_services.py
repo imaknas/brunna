@@ -24,7 +24,7 @@ COMMIT = "a" * 40
 def entry(**kw) -> dict:
     e = {"v": 1, "name": "echo-svc", "url": "https://example.org/x.git", "ref": None, "commit": COMMIT,
          "interface": 1, "run": {"cli": "sh cli.sh", "mcp": "sh cli.sh mcp", "setup": []},
-         "granted": {"models": {}, "secrets": ["ECHO_KEY"], "principal": False, "scripts": False, "network": []},
+         "granted": {"models": {}, "secrets": ["ECHO_KEY"], "principal": False, "network": []},
          "added": "2026-11-28"}
     e.update(kw)
     return e
@@ -225,6 +225,91 @@ class Refused(Instance):
         self.assertNotEqual(first, "None", out.stderr)
         self.assertIn("idea", idea)
         self.assertEqual(fine, "None")
+
+
+@unittest.skipIf(isolation.can_sandbox(), "this machine can't sandbox")
+class Updates(Instance):
+    """Step 2b: following release tags."""
+
+    def tag(self, name: str, cli_word: str | None = None, manifest: str | None = None, force: bool = False):
+        if manifest is not None:
+            (self.src / "brunna-service.yaml").write_text(manifest)
+        if cli_word is not None:
+            (self.src / "cli.sh").write_text(CLI.replace('--help) echo "echo-svc help"', f'--help) echo "{cli_word}"'))
+        git("commit", "-qam", name, "--allow-empty", cwd=self.src)
+        git("tag", *(["-f"] if force else []), name, cwd=self.src)
+
+    def entry(self) -> dict:
+        import yaml
+        return yaml.safe_load((self.tmp / "config" / "services" / "echo-svc.yaml").read_text())
+
+    def test_follows_release_tags_and_stops_where_it_should(self):
+        self.tag("v1.0.0", "one")
+        self.assertEqual(self.cli("add", str(self.src), "--ref", "v1.0.0", "--yes").returncode, 0)
+        first = self.entry()
+        self.assertEqual((first["follow"], list(first["tags"])), ("tags", ["v1.0.0"]))
+        self.tag("v1.1.0-rc1", "rc")
+        self.tag("v1.1.0", "one-one")
+        self.cli("update", "--all")
+        e = self.entry()
+        self.assertEqual((e["ref"], e["previous"]), ("v1.1.0", first["commit"]))
+        self.assertIn("one-one", self.cli("run", "echo-svc", "--", "--help").stdout)
+        code = self.tmp / "services" / "echo-svc" / "code"
+        self.assertEqual({c.name for c in code.iterdir()}, {e["commit"], first["commit"]})   # the previous one kept
+
+        # asks for more (a new required secret): not taken, said
+        self.tag("v1.2.0", "more", MANIFEST.replace("secrets: [{name: ECHO_KEY, what: \"a key\", optional: true}]",
+                                  "secrets: [{name: ECHO_KEY, what: \"a key\", optional: true}, {name: NEW_KEY, what: x}]"))
+        r = self.cli("update", "--all")
+        self.assertIn("NEW_KEY", r.stderr)
+        self.assertEqual(self.entry()["ref"], "v1.1.0")
+
+        # a failing setup: not taken
+        self.tag("v1.3.0", manifest=MANIFEST.replace("echo ok > built.txt", "exit 4"))
+        self.cli("update", "--all")
+        self.assertEqual(self.entry()["ref"], "v1.1.0")
+        self.assertEqual({c.name for c in code.iterdir()}, {e["commit"], first["commit"]})
+
+        # a moved tag stops everything
+        git("tag", "-d", "v1.2.0", "v1.3.0", cwd=self.src)
+        git("tag", "-f", "v1.1.0", "HEAD~3", cwd=self.src)
+        self.tag("v1.4.0", "four", manifest=MANIFEST)
+        r = self.cli("update", "--all")
+        self.assertIn("v1.1.0", r.stderr)
+        self.assertEqual(self.entry()["ref"], "v1.1.0")
+
+    def test_two_spellings_of_one_version(self):
+        self.tag("v1.0.0", "one")
+        self.tag("1.0.0", "other")
+        r = self.cli("add", str(self.src), "--ref", "v1.0.0", "--yes")
+        self.assertEqual(r.returncode, 1)
+        self.assertFalse((self.tmp / "services" / "echo-svc").exists())
+
+    def test_backup_takes_state_and_secrets_only(self):
+        self.assertEqual(self.cli("add", str(self.src), "--yes").returncode, 0)
+        self.cli("secret", "echo-svc", "ECHO_KEY", stdin="v\n")
+        out = subprocess.run([sys.executable, "-c", "import sys; sys.path.insert(0, sys.argv[1]); import backup; "
+                              "print([str(f) for _n, f, _x in backup.services()])", str(ROOT / "bin")],
+                             env=self.env, text=True, capture_output=True)
+        base = self.tmp / "services" / "echo-svc"
+        self.assertEqual(eval(out.stdout.strip().splitlines()[-1]), [str(base / "state"), str(base / "secrets")],
+                         out.stderr)
+
+
+class Lock(Instance):
+    def test_a_shared_lock_holds_off_an_exclusive_one(self):
+        out = subprocess.run([sys.executable, "-c", """
+import sys; sys.path.insert(0, sys.argv[1]); import installed_services as s
+with s.lock("echo-svc", shared=True):
+    with s.lock("echo-svc", shared=True, wait=0.5):
+        pass
+    try:
+        with s.lock("echo-svc", wait=0.5):
+            print("TAKEN")
+    except s.Locked:
+        print("LOCKED")
+""", str(ROOT / "bin")], env=self.env, text=True, capture_output=True)
+        self.assertEqual(out.stdout.strip(), "LOCKED", out.stderr)
 
 
 class RegistryRefuses(Instance):

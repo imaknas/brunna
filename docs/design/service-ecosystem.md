@@ -3,7 +3,9 @@
 > brunna session · 2026-11-28 · r4, design. **Built 11-28: step 1** (the contract
 > `contracts/service-manifest.v1.schema.json`, `bin/service_manifest.py`, `docs/service-authors.md`) **and step 2a**
 > (`bin/installed_services.py`, `bin/service_fetch.py`, `bin/service-cmd.py` = `brunna service`, `policy.service_policy`,
-> the adapters' installed mode, `sandboxed-run --installed`); the rest not.
+> the adapters' installed mode, `sandboxed-run --installed`) **and step 2b** (`brunna service update`, the job
+> `brunna/service-updates`, the lock, `backup.services()`, the services' secrets in check-secrets, their state's size
+> in check-data); the rest not.
 > History: r2 after two blind reviews of r1 (security; fit with the
 > platform): the wiring moved into the platform's own MCP server, installed services got their own folders, outbox and
 > answer path, the manifest can't widen a grant, and egress is said plainly not to be confined yet. r3 after a third
@@ -441,6 +443,9 @@ Once by hand on macOS: the review service from its GitHub URL in a throwaway ins
 
 ## Step 2b, in detail
 
+> **Built 11-29**, as r2 says; the fixture tests (tags followed, more-asked, a failing setup, a moved tag, two
+> spellings of one version, the backup's list, the lock) pass on macOS and Linux.
+>
 > r2, 11-29, after its blind review (nothing blocking): the lock moved out of every sandbox's reach and taken shared by
 > `run`; the backup takes `state/` itself; asking for more includes a secret turned required and any interface change;
 > `scripts` dropped as a grant (nothing could enforce it); each update fetches into a fresh repo by the tag's full

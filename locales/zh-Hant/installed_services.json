@@ -12,7 +12,6 @@
  "commit must be 40 hex characters": "commit 要是 40 個十六進位字元",
  "interface must be a whole number from 1": "interface 要是從 1 起的整數",
  "run must be {{cli, mcp, setup}}: commands": "run 要是 {{cli, mcp, setup}}:指令",
- "granted must be a mapping of models, secrets, principal, scripts, network": "granted 要是 models、secrets、principal、scripts、network 的 mapping",
  "the platform's name": "平台的名稱",
  "a module's name": "模組的名稱",
  "an address of the owner or the assistant": "owner 或助理的地址",
@@ -21,5 +20,17 @@
  "granted.secrets must be a list of environment names": "granted.secrets 要是環境變數名稱的清單",
  "granted.network must be a list of hosts": "granted.network 要是主機的清單",
  "a registered project's former name": "已登錄專案以前的名稱",
- "granted.{key} must be true or false": "granted.{key} 要是 true 或 false"
+ "granted.{key} must be true or false": "granted.{key} 要是 true 或 false",
+ "{path} is not a folder (a link or a file where its folder belongs)": "{path} 不是資料夾(該是資料夾的地方是連結或檔案)",
+ "{path} is not this user's": "{path} 不是這個使用者的",
+ "granted must be a mapping of models, secrets, principal, network": "granted 要是 models、secrets、principal、network 的 mapping",
+ "follow must be tags or none": "follow 要是 tags 或 none",
+ "tags must map release tags to commits": "tags 要把 release tag 對應到 commit",
+ "previous must be 40 hex characters or null": "previous 要是 40 個十六進位字元或 null",
+ "secrets_required must list granted secrets": "secrets_required 只能列出已授權的 secret",
+ "data must be a list": "data 要是清單",
+ "{path} doesn't lead where it should": "{path} 沒有指到它該在的地方",
+ "{path} is missing": "{path} 不見了",
+ "{path} can't be made ({err})": "做不出 {path}({err})",
+ "{name} is busy (another add, update, remove or run holds it)": "{name} 正在忙(另一個 add、update、remove 或 run 拿著它)"
 }

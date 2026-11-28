@@ -157,6 +157,21 @@ def main(argv: list[str]) -> int:
         for d in [d for d in hist if d < (datetime.date.today() - datetime.timedelta(days=KEEP_DAYS)).isoformat()]:
             del hist[d]
         print(_("{project}: {path} backed up, {mb} MB", project=e.project, path=e.raw, mb=round(n / (1 << 20))))
+    # installed services (docs/design/service-ecosystem.md, step 2b): the backup takes each one's state/ unless it is
+    # over the cap or isn't its own real folder; say so here, where it is seen
+    import installed_services
+    for svc_name, se in sorted(installed_services.entries().items()):
+        f = installed_services.folders(svc_name)
+        if not f["state"].exists():
+            continue
+        if (why := installed_services.own_folder(f["state"], f["base"], make=False)):
+            problem(svc_name, f"service-folder:{svc_name}", _("service {name}: not backed up: {why}", name=svc_name, why=why))
+            continue
+        skip = [f"{f['state']}/{d['path'].rstrip('/')}" for d in se.get("data") or [] if d.get("backup") is False]
+        if project_data.size(f["state"], skip, cap=installed_services.CAP) > installed_services.CAP:
+            problem(svc_name, f"service-cap:{svc_name}",
+                    _("service {name}: its state is over {gb} GB, so the backup leaves it out", name=svc_name,
+                      gb=installed_services.CAP >> 30))
     live = {f"{e.project}:{e.path}" for e in entries if e.path}
     for k in [k for k in sizes if k not in live]:
         del sizes[k]

@@ -148,10 +148,32 @@ def declared() -> list[project_data.Entry]:
     return [e for e in project_data.entries(include=owner_included()) if e.path and e.backup]
 
 
+def services() -> list[tuple[str, pathlib.Path, list[str]]]:
+    """Each installed service's folders the backup takes (docs/design/service-ecosystem.md, step 2b): (name, folder,
+    excludes) for its state/ (minus its data entries with backup: false) and its secrets/. Never its code, cache or
+    fetched commits, which are fetched or made again. A service whose folders aren't its own real folders (a link
+    where one belongs), or whose state/ is over installed_services.CAP, is left out (check-data says so)."""
+    import installed_services as svc
+    out = []
+    for name, e in sorted(svc.entries().items()):
+        f = svc.folders(name, e["commit"])
+        if not f["base"].is_dir():
+            continue
+        state = f["state"]
+        if state.exists() and not svc.own_folder(state, f["base"], make=False):
+            skip = [f"{state}/{d['path'].rstrip('/')}" for d in e.get("data") or [] if d.get("backup") is False]
+            if project_data.size(state, skip, cap=svc.CAP) <= svc.CAP:
+                out.append((name, state, skip))
+        if f["secrets"].exists() and not svc.own_folder(f["secrets"], f["base"], make=False):
+            out.append((name, f["secrets"], []))
+    return out
+
+
 def included() -> list[pathlib.Path]:
     """What the backup takes as folders: the owner's include, then the projects' declared data (resolved: restic
-    matches excludes against the path as given, and stores a symlink argument as the link only)."""
-    return owner_included() + [e.path for e in declared()]
+    matches excludes against the path as given, and stores a symlink argument as the link only), then the installed
+    services' state and secrets."""
+    return owner_included() + [e.path for e in declared()] + [folder for _n, folder, _x in services()]
 
 
 def excludes() -> list[str]:
@@ -159,6 +181,8 @@ def excludes() -> list[str]:
     out = [str(hubconf.path(x)) if x.startswith("~") else x for x in CFG.get("exclude") or []]
     for e in declared():
         out += e.patterns()
+    for _n, _folder, skip in services():
+        out += skip
     return out
 
 

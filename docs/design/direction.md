@@ -421,7 +421,8 @@ Decided with the owner 11-28: projects can be services other projects call (a CL
 `brunna-service.yaml`); others can install them (`brunna service add`) and make their own; calls go through the
 platform's MCP server as the service, never as letters between agents; Principal Handoff is how a service asks the
 owner, and the principal side is a role any assistant can fill. Design r4, five blind reviews. Built: step 1 (the manifest contract and its check, the authors' guide draft) and step 2a (`brunna service
-add/remove/list/secret/run`, a stranger's code under an allow-list read model on both adapters). Decided
+add/remove/list/secret/run`, a stranger's code under an allow-list read model on both adapters) and step 2b (updates by release tag,
+backup and the secrets check). Decided
 the same day: installed services follow release tags automatically; the public review service is the only public one
 first. Left: steps 1–7 of the doc; the Principal Handoff transport binding, waiting on agent-ops-specs' answer about
 brunna's reading (m11282143-5394).

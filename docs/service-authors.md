@@ -1,9 +1,9 @@
 # Writing a service for brunna
 
-> **Draft.** The manifest format below is fixed (version 1) and can be checked today, and a user can install a
-> service and run its CLI (`brunna service add <url>`, `brunna service run <name>`). Updates, calling a service from
-> other projects, and asking the user are designed but not built yet
-> ([docs/design/service-ecosystem.md](design/service-ecosystem.md), steps 2b to 7). This page grows as they land.
+> **Draft.** The manifest format below is fixed (version 1) and can be checked today. A user can install a service,
+> run its CLI and get its new releases (`brunna service add <url> --ref <tag>`, `brunna service run <name>`, updates
+> by tag). Calling a service from other projects is designed but not built yet
+> ([docs/design/service-ecosystem.md](design/service-ecosystem.md), steps 3 to 7). This page grows as it lands.
 
 A brunna service is an ordinary repository with three things:
 
@@ -103,6 +103,17 @@ on a port. Its environment is built from nothing:
 - On Linux there is no `/dev/shm`, so Python's `multiprocessing` locks don't work; Linux also can't stop your code
   from writing a `.git` folder in its own folders, which macOS refuses.
 - Outbound network is open (the user is told so); list the hosts you reach in `network`.
+
+## Releases
+
+A service added at a release tag (`v1.2.3` or `1.2.3`, no suffix) follows your releases: once a day the user's
+platform looks for a newer one, sets it up beside the running version and switches only if setup passed. It waits for
+the user instead when the new version asks for more than was granted (a model call, a stronger tier, a secret, a
+secret turned required, a host, asking the user) or changes `interface`. Never move or delete a published tag: a
+moved tag stops all updates until the user looks. Pre-release tags (`-rc1`) are never taken automatically.
+
+The user's nightly backup takes your state folder (minus `data` entries with `backup: false`) and your secrets, never
+your code or cache. A state folder over 20 GB is left out, and the user is told.
 
 ## Writing the service
 

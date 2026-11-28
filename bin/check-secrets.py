@@ -256,6 +256,22 @@ def main(argv: list[str]) -> int:
             print(_("{project}: not declared, file name looks like a credential: {path} (declare it under secrets: in "
                     "the registry, or confirm it is not one)", project=project, path=path))
     if not argv:
+        # the installed services' required secrets (docs/design/service-ecosystem.md, step 2b): a real, non-empty file
+        # of the owner's in each one's secrets folder; an optional one isn't checked
+        import installed_services
+        import stat
+        for svc_name, e in sorted(installed_services.entries().items()):
+            for secret in e.get("secrets_required") or []:
+                count += 1
+                try:
+                    st = os.lstat(installed_services.folders(svc_name)["secrets"] / secret)
+                    ok = stat.S_ISREG(st.st_mode) and st.st_size > 0
+                except OSError:
+                    ok = False
+                if not ok:
+                    problems.append(_("{service}: secret {name} is not set: brunna service secret {service} {name}",
+                                      service=svc_name, name=secret))
+    if not argv:
         # the alert channel itself: if the token stops working, no alert can be sent when something goes wrong -- check
         # once a day first (without sending a message)
         if alert.probe():

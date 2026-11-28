@@ -12,5 +12,6 @@
  "git took longer than {s} seconds": "git 跑超過 {s} 秒",
  "the repository has no {file} at its root": "repository 根目錄沒有 {file}",
  "{file} is not UTF-8": "{file} 不是 UTF-8",
- "the repository has submodules, which installed services don't support": "repository 有 submodule,安裝的服務不支援"
+ "the repository has submodules, which installed services don't support": "repository 有 submodule,安裝的服務不支援",
+ "{ref} named {got}, not the {want} the remote listed a moment before": "{ref} 指到 {got},不是遠端剛剛列出的 {want}"
 }

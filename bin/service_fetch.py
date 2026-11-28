@@ -98,18 +98,43 @@ def _size(path: pathlib.Path) -> int:
     return total
 
 
-def fetch(url: str, ref: str | None, repo: pathlib.Path, allow_local: bool = False) -> str:
-    """Into a new bare repo at `repo`: the ref (or the remote's HEAD), depth 1. The commit it resolved to."""
+def tags(url: str, allow_local: bool = False) -> dict[str, str]:
+    """The remote's tags and the commits they name (an annotated tag's peeled ^{} commit), by ls-remote."""
+    if (why := url_problem(url, allow_local)):
+        raise FetchError(why)
+    out: dict[str, str] = {}
+    peeled: dict[str, str] = {}
+    for line in git(["ls-remote", "--tags", "--", url], allow_local=allow_local, timeout=120).splitlines():
+        sha, _sep, ref = line.partition("\t")
+        if not ref.startswith("refs/tags/") or not HEX.match(sha):
+            continue
+        name = ref[len("refs/tags/"):]
+        if name.endswith("^{}"):
+            peeled[name[:-3]] = sha
+        else:
+            out[name] = sha
+    return {**out, **peeled}
+
+
+def fetch(url: str, ref: str | None, repo: pathlib.Path, allow_local: bool = False,
+          expect: str | None = None, tag: bool = False) -> str:
+    """Into a new bare repo at `repo`: the ref (or the remote's HEAD), depth 1; a tag by its full name
+    (refs/tags/<ref>, never a branch of that name). expect: the commit ls-remote gave, which it must be. The commit
+    it resolved to."""
     if (why := url_problem(url, allow_local)) or (ref and (why := ref_problem(ref))):
         raise FetchError(why)
     git(["init", "--quiet", "--bare", str(repo)], timeout=30)
-    git(["--git-dir", str(repo), "fetch", "--quiet", "--depth=1", "--no-tags", "--", url, ref or "HEAD"],
+    want = f"refs/tags/{ref}" if tag and ref else ref or "HEAD"
+    git(["--git-dir", str(repo), "fetch", "--quiet", "--depth=1", "--no-tags", "--", url, want],
         allow_local=allow_local)
     if _size(repo) > PACK_MAX:
         raise FetchError(_("the repository is over {gb} GB", gb=PACK_MAX >> 30))
     commit = git(["--git-dir", str(repo), "rev-parse", "--verify", "FETCH_HEAD^{commit}"], timeout=30).strip()
     if not HEX.match(commit):
         raise FetchError(_("the fetched ref is not a commit"))
+    if expect and commit != expect:
+        raise FetchError(_("{ref} named {got}, not the {want} the remote listed a moment before", ref=ref,
+                           got=commit[:12], want=expect[:12]))
     git(["--git-dir", str(repo), "update-ref", "refs/brunna/installed", commit], timeout=30)
     return commit
 
