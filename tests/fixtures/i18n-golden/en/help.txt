@@ -135,6 +135,8 @@ owner (you; not commands for project sessions):
 for project sessions (these are what the rules files name; the permission rules allow only these, not the admin commands above):
   brunna send | inbox | show | ack | pass | done | thread | open-questions | review …   = the project mailbox (bin/hubbus
                         subcommands of the same name)
+  brunna manifest          this folder's project's registry entry, as a manifest.update is merged onto it
+                        (read-only; = bin/hubbus manifest)
   brunna merge-branch …    = bin/merge-branch (the merge gate for parallel sessions)
   brunna test [--tier T] [--when M] [--force] [--rev R | --index]
                         = bin/test-runner.py: the project's declared test tiers in an exported tree, a recorded pass
@@ -161,12 +163,13 @@ $ <HUB>/bin/hubbus --help
 [exit 0]
 --- stdout
 usage: hubbus [-h]
-              {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses} ...
+              {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,manifest,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses} ...
 
 brunna's event bus: an append-only event log plus read cursors; project mailboxes are its projection.
 
 positional arguments:
-  {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses}
+  {send,inbox,show,ack,pass,done,hook,bridge,dispatch,thread,open-handoffs,review,manifest,open-questions,reconcile-questions,records,record-publish,publish,status,wake-misses}
+    manifest            this folder's project's registry entry, as a manifest.update is merged onto it
     record-publish      stdin: one 0.4 record or a list; sent to owner (toward the assistant). Prints for each {id:
                         record id, event: event id or null, status}
 

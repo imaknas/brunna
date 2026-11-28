@@ -4667,23 +4667,30 @@ def cmd_manifest() -> None:
         refuse(_("hubbus: not in a project folder: `brunna manifest` shows the entry of the project you are in"))
     hub = here == hubconf.hub_project()
     f = hubconf.platform_registry() if hub else hubconf.registry_dir() / f"{here}.yaml"
+    class Plain(yaml.SafeDumper):
+        def ignore_aliases(self, data):   # a value the file shares by an anchor is written out each time: a letter
+            return True                   # takes no alias (registry.LetterLoader)
+
     try:
         cur = yaml.safe_load(f.read_text())
+        text = yaml.dump(tiers.upgrade(cur), Dumper=Plain, allow_unicode=True, sort_keys=False, width=200) \
+            if isinstance(cur, dict) else None
     except FileNotFoundError:
         refuse(_("hubbus: {project} has no registry entry", project=here))
-    except (OSError, UnicodeDecodeError, yaml.YAMLError) as e:
-        refuse(_("hubbus: cannot read {project}'s registry entry ({e}); write to {hub}", project=here, e=e,
-                 hub=hubconf.hub_project()))
-    if not isinstance(cur, dict):
+    except (OSError, UnicodeDecodeError, yaml.YAMLError, RecursionError) as e:
+        refuse(_("hubbus: cannot read {project}'s registry entry ({e}); write to {hub}", project=here,
+                 e=f"{type(e).__name__}: {e}"[:200], hub=hubconf.hub_project()))
+    if text is None:
         refuse(_("hubbus: {project}'s registry entry is not a mapping; write to {hub}", project=here, hub=hubconf.hub_project()))
-    print(yaml.safe_dump(tiers.upgrade(cur), allow_unicode=True, sort_keys=False, width=200), end="")
+    print(text, end="")
     if hub:
         print(_("({project}'s own entry: its file in the platform repo, changed by a commit)", project=here), file=sys.stderr)
         return
     fields = [*registry.PLATFORM_OWNED, *(f"{t}.{k}" for t, k in registry.PLATFORM_OWNED_NESTED)]
     print(_("({project}'s registry entry, as a manifest.update is merged onto it. To change it, send only the fields that "
             "change: brunna send --to {hub} --type manifest.update --text \"<YAML>\"; a list is replaced whole, "
-            "<field>: null removes a field. Security fields, which only {hub} changes ({owner} confirms): {fields})",
+            "<field>: null removes a field. Security fields, which only {hub} changes ({owner} confirms): {fields}; and in "
+            "jobs: and secrets:, a job with connectors: true or credentials:, a job's legacy_name, a secret with kind)",
             project=here, hub=hubconf.hub_project(), owner=hubconf.owner_tag(), fields=", ".join(fields)), file=sys.stderr)
 
 

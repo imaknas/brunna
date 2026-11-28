@@ -245,6 +245,16 @@ print(json.dumps(out))
                 for got in json.loads(c.stdout):
                     self.assertEqual((got["errs"], got["same"], got["printed"]), ([], True, True), got["part"])
 
+    def test_a_value_shared_by_an_anchor_is_written_out(self):
+        self.use(ENTRY)
+        self.entry_file.write_text(yaml.safe_dump(ENTRY, sort_keys=False) + (
+            "services:\n- {name: a, run: sh a.sh, keepalive: true, env: &e {A: '1'}}\n"
+            "- {name: b, run: sh b.sh, keepalive: true, env: *e}\n"))
+        r = self.manifest()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("*", r.stdout)
+        self.assertIn("changed nothing", self.update(r.stdout))
+
     def test_through_the_bus_it_changes_nothing(self):
         self.use(self.ENTRIES["sandboxed"])
         before = self.entry_file.read_text()
